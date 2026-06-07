@@ -112,6 +112,7 @@ mge init --index-kind binary_fuse_page
 mge config set --page-clusterer marker_overlap
 mge remember "..." --kind user_preference --scope global --trust user_confirmed
 mge remember --kind user_preference --subject answer_style --json-value '{"style":"concise","max_examples":2}'
+mge remember --kind project_fact --reference-value vault://references/api-key --sensitivity secret_reference
 mge recall "technical answer style"
 mge recall "api key" --include-secret-references
 mge seal
@@ -137,6 +138,13 @@ mge remember --kind user_preference --subject answer_style --json-value '{"style
 ```
 
 In PowerShell, pass escaped quotes or assign the JSON string to a variable before invoking `mge`.
+
+Use `--reference-value` for references/placeholders and `--timestamp-value` for Unix timestamp seconds. Do not pass raw credentials or secret material.
+
+```bash
+mge remember --kind project_fact --reference-value vault://references/api-key --sensitivity secret_reference
+mge remember --kind task_state --timestamp-value 1760000000
+```
 
 `mge config set` changes defaults and lightweight derived indexes only. Existing page files are not rewritten; each catalog entry keeps the codec/compression needed to read that page. Changing `--index-kind` rebuilds only the candidate page index from existing sealed pages.
 

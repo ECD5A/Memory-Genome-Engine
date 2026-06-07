@@ -49,6 +49,12 @@ enum Commands {
         #[arg(long = "json-value")]
         json_value: Option<String>,
 
+        #[arg(long = "reference-value")]
+        reference_value: Option<String>,
+
+        #[arg(long = "timestamp-value")]
+        timestamp_value: Option<String>,
+
         #[arg(long, default_value = "global")]
         scope: String,
 
@@ -162,6 +168,8 @@ fn main() -> Result<()> {
             subject,
             value,
             json_value,
+            reference_value,
+            timestamp_value,
             scope,
             trust,
             status,
@@ -173,7 +181,8 @@ fn main() -> Result<()> {
             let parsed_trust = TrustLevel::from_str(&trust)?;
             let parsed_status = MemoryStatus::from_str(&status)?;
             let parsed_sensitivity = SensitivityLevel::from_str(&sensitivity)?;
-            let memory_value = parse_memory_value(text, value, json_value)?;
+            let memory_value =
+                parse_memory_value(text, value, json_value, reference_value, timestamp_value)?;
 
             let mut request = RememberRequest::new(parsed_kind, memory_value);
             request.subject = subject;
@@ -328,21 +337,50 @@ fn parse_memory_value(
     text: Option<String>,
     value: Option<String>,
     json_value: Option<String>,
+    reference_value: Option<String>,
+    timestamp_value: Option<String>,
 ) -> Result<MemoryValue> {
-    match (text, value, json_value) {
-        (Some(_), _, Some(_)) => {
-            bail!("remember accepts a text argument or --json-value, not both")
-        }
-        (_, Some(_), Some(_)) => bail!("remember accepts --value or --json-value, not both"),
-        (_, _, Some(json_value)) => {
-            let parsed = serde_json::from_str(&json_value)
-                .with_context(|| "failed to parse --json-value as JSON")?;
-            Ok(MemoryValue::Structured(parsed))
-        }
-        (Some(text), None, None) => Ok(MemoryValue::Text(text)),
-        (_, Some(value), None) => Ok(parse_scalar_value(&value)),
-        (None, None, None) => bail!("remember requires a text argument, --value, or --json-value"),
+    let provided_count = [
+        text.is_some(),
+        value.is_some(),
+        json_value.is_some(),
+        reference_value.is_some(),
+        timestamp_value.is_some(),
+    ]
+    .into_iter()
+    .filter(|provided| *provided)
+    .count();
+
+    if provided_count > 1 {
+        bail!(
+            "remember accepts exactly one of a text argument, --value, --json-value, --reference-value, or --timestamp-value"
+        );
     }
+
+    if let Some(text) = text {
+        return Ok(MemoryValue::Text(text));
+    }
+    if let Some(value) = value {
+        return Ok(parse_scalar_value(&value));
+    }
+    if let Some(json_value) = json_value {
+        let parsed = serde_json::from_str(&json_value)
+            .with_context(|| "failed to parse --json-value as JSON")?;
+        return Ok(MemoryValue::Structured(parsed));
+    }
+    if let Some(reference_value) = reference_value {
+        return Ok(MemoryValue::Reference(reference_value));
+    }
+    if let Some(timestamp_value) = timestamp_value {
+        let parsed = timestamp_value
+            .parse::<i64>()
+            .with_context(|| "failed to parse --timestamp-value as unix timestamp seconds")?;
+        return Ok(MemoryValue::Timestamp(parsed));
+    }
+
+    bail!(
+        "remember requires a text argument, --value, --json-value, --reference-value, or --timestamp-value"
+    )
 }
 
 fn parse_scalar_value(raw: &str) -> MemoryValue {
@@ -361,14 +399,15 @@ mod tests {
 
     #[test]
     fn parse_text_memory_value() {
-        let value = parse_memory_value(Some("plain memory".to_string()), None, None).unwrap();
+        let value =
+            parse_memory_value(Some("plain memory".to_string()), None, None, None, None).unwrap();
 
         assert_eq!(value, MemoryValue::Text("plain memory".to_string()));
     }
 
     #[test]
     fn parse_scalar_memory_value() {
-        let value = parse_memory_value(None, Some("true".to_string()), None).unwrap();
+        let value = parse_memory_value(None, Some("true".to_string()), None, None, None).unwrap();
 
         assert_eq!(value, MemoryValue::Boolean(true));
     }
@@ -379,6 +418,8 @@ mod tests {
             None,
             None,
             Some(r#"{"answer_style":"concise","max_examples":2}"#.to_string()),
+            None,
+            None,
         )
         .unwrap();
 
@@ -392,14 +433,49 @@ mod tests {
     }
 
     #[test]
-    fn parse_structured_json_rejects_ambiguous_text() {
+    fn parse_reference_memory_value() {
+        let value = parse_memory_value(
+            None,
+            None,
+            None,
+            Some("vault://references/api-key".to_string()),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            value,
+            MemoryValue::Reference("vault://references/api-key".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_timestamp_memory_value() {
+        let value =
+            parse_memory_value(None, None, None, None, Some("1760000000".to_string())).unwrap();
+
+        assert_eq!(value, MemoryValue::Timestamp(1_760_000_000));
+    }
+
+    #[test]
+    fn parse_timestamp_memory_value_rejects_invalid_input() {
+        let err =
+            parse_memory_value(None, None, None, None, Some("not-a-time".to_string())).unwrap_err();
+
+        assert!(err.to_string().contains("--timestamp-value"));
+    }
+
+    #[test]
+    fn parse_memory_value_rejects_ambiguous_inputs() {
         let err = parse_memory_value(
             Some("plain memory".to_string()),
-            None,
+            Some("true".to_string()),
             Some(r#"{"answer_style":"concise"}"#.to_string()),
+            None,
+            None,
         )
         .unwrap_err();
 
-        assert!(err.to_string().contains("text argument or --json-value"));
+        assert!(err.to_string().contains("exactly one"));
     }
 }
