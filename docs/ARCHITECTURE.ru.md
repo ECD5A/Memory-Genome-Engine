@@ -34,6 +34,8 @@ Agent / CLI / SDK
 - reference
 - structured JSON
 
+Structured JSON marker extraction детерминированный и shallow: object keys и короткие scalar values превращаются в `tag:*` markers с небольшим marker budget. Core не использует LLM-based extraction.
+
 ## Marker Genome
 
 Каждая cell получает детерминированные marker strings, которые canonicalize в marker IDs через `MarkerDictionary`.

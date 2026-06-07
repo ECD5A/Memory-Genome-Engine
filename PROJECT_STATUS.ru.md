@@ -17,7 +17,8 @@
 - Реализован `mge-core`:
   - typed memory models;
   - marker canonicalization и persistent dictionary;
-  - deterministic marker extraction;
+- deterministic marker extraction;
+- deterministic shallow marker extraction для structured JSON keys и коротких scalar values;
   - append-only hot JSONL store;
   - page model и JSON page codec;
   - exact marker-to-page candidate index;
@@ -132,7 +133,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 54 tests total (9 CLI unit tests + 1 core unit test + 44 integration tests).
+- `cargo test`: passed, 56 tests total (9 CLI unit tests + 1 core unit test + 46 integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -155,6 +156,8 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Link validation smoke command: passed для valid link и failed as expected для unknown link.
 - Orphan storage validation tests: passed для orphan page files и unknown unmanaged index files.
 - Context packet dedupe test: passed для duplicate ranked cells с одинаковым `cell_id`.
+- Structured JSON marker extraction tests: passed для marker generation и hot recall.
+- Structured JSON marker extraction CLI smoke command: passed, recall matched `tag:style` и `tag:concise`.
 - Stats JSON smoke command: passed, `sealed_pages` и `current_index_kind` exported.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.

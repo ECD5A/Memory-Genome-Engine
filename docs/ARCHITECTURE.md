@@ -34,6 +34,8 @@ Values are not assumed to be raw text. v0.1 supports:
 - reference
 - structured JSON
 
+Structured JSON marker extraction is deterministic and shallow: object keys and short scalar values become `tag:*` markers, capped to a small marker budget. The core does not use LLM-based extraction.
+
 ## Marker Genome
 
 Each cell receives deterministic marker strings, canonicalized into marker IDs by `MarkerDictionary`.

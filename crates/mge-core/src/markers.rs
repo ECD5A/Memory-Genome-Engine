@@ -213,7 +213,9 @@ pub fn marker_strings_for_cell_fields(
         MemoryValue::Timestamp(value) => {
             push_marker(&mut markers, format!("value:{value}"))?;
         }
-        MemoryValue::Structured(_) => {}
+        MemoryValue::Structured(value) => {
+            push_structured_value_markers(&mut markers, value)?;
+        }
     }
 
     for marker in explicit_markers {
@@ -283,6 +285,76 @@ fn push_marker(markers: &mut Vec<String>, marker: String) -> Result<()> {
     let canonical = canonicalize_marker(&marker)?;
     if !markers.iter().any(|existing| existing == &canonical) {
         markers.push(canonical);
+    }
+    Ok(())
+}
+
+fn push_structured_value_markers(
+    markers: &mut Vec<String>,
+    value: &serde_json::Value,
+) -> Result<()> {
+    let mut budget = 16;
+    push_structured_value_markers_inner(markers, value, 0, &mut budget)
+}
+
+fn push_structured_value_markers_inner(
+    markers: &mut Vec<String>,
+    value: &serde_json::Value,
+    depth: usize,
+    budget: &mut usize,
+) -> Result<()> {
+    if *budget == 0 || depth > 1 {
+        return Ok(());
+    }
+
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut entries = map.iter().collect::<Vec<_>>();
+            entries.sort_by(|left, right| left.0.cmp(right.0));
+            for (key, child) in entries {
+                push_limited_tag_tokens(markers, key, budget)?;
+                push_structured_value_markers_inner(markers, child, depth + 1, budget)?;
+                if *budget == 0 {
+                    break;
+                }
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for child in values.iter().take(8) {
+                push_structured_value_markers_inner(markers, child, depth + 1, budget)?;
+                if *budget == 0 {
+                    break;
+                }
+            }
+        }
+        serde_json::Value::String(value) => {
+            if value.len() <= 64 {
+                push_limited_tag_tokens(markers, value, budget)?;
+            }
+        }
+        serde_json::Value::Number(value) => {
+            push_limited_tag_tokens(markers, &value.to_string(), budget)?;
+        }
+        serde_json::Value::Bool(value) => {
+            push_limited_tag_tokens(markers, &value.to_string(), budget)?;
+        }
+        serde_json::Value::Null => {}
+    }
+
+    Ok(())
+}
+
+fn push_limited_tag_tokens(
+    markers: &mut Vec<String>,
+    text: &str,
+    budget: &mut usize,
+) -> Result<()> {
+    for token in tokenize_keywords(text) {
+        if *budget == 0 {
+            break;
+        }
+        push_marker(markers, format!("tag:{token}"))?;
+        *budget -= 1;
     }
     Ok(())
 }

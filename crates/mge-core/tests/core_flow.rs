@@ -89,6 +89,35 @@ fn automatic_marker_generation() {
 }
 
 #[test]
+fn structured_marker_generation_extracts_shallow_tags() {
+    let markers = marker_strings_for_cell_fields(
+        &MemoryKind::UserPreference,
+        Some("answer style"),
+        &MemoryValue::Structured(serde_json::json!({
+            "style": "concise technical",
+            "max_examples": 2,
+            "nested": {
+                "mode": "direct"
+            }
+        })),
+        "global",
+        &MemoryStatus::Active,
+        &TrustLevel::UserConfirmed,
+        &SensitivityLevel::Private,
+        &[],
+    )
+    .unwrap();
+
+    assert!(markers.contains(&"tag:style".to_string()));
+    assert!(markers.contains(&"tag:concise".to_string()));
+    assert!(markers.contains(&"tag:technical".to_string()));
+    assert!(markers.contains(&"tag:max".to_string()));
+    assert!(markers.contains(&"tag:example".to_string()));
+    assert!(markers.contains(&"tag:nested".to_string()));
+    assert!(markers.contains(&"tag:mode".to_string()));
+}
+
+#[test]
 fn remember_into_hot_memory() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
@@ -177,6 +206,33 @@ fn recall_from_hot_memory() {
     assert_eq!(packet.debug.score_details.len(), 1);
     assert_eq!(packet.debug.score_details[0].trust_bonus, 5);
     assert_eq!(packet.debug.score_details[0].status_bonus, 5);
+}
+
+#[test]
+fn recall_from_structured_value_markers() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let mut request = RememberRequest::new(
+        MemoryKind::UserPreference,
+        MemoryValue::Structured(serde_json::json!({
+            "style": "concise technical",
+            "max_examples": 2
+        })),
+    );
+    request.subject = Some("answer style".to_string());
+    request.scope = "global".to_string();
+    request.trust = TrustLevel::UserConfirmed;
+    engine.remember(request).unwrap();
+
+    let packet = engine.recall(RecallRequest::new("concise style")).unwrap();
+
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert!(packet.relevant_memory[0]
+        .markers
+        .contains(&"tag:style".to_string()));
+    assert!(packet.relevant_memory[0]
+        .markers
+        .contains(&"tag:concise".to_string()));
 }
 
 #[test]

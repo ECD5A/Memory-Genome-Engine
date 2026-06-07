@@ -23,7 +23,8 @@ This file is the working ledger for this repository. Keep it current so we do no
 - `mge-core` implemented with:
   - typed memory models;
   - marker canonicalization and persistent dictionary;
-  - deterministic marker extraction;
+- deterministic marker extraction;
+- deterministic shallow marker extraction for structured JSON keys and short scalar values;
   - append-only hot JSONL store;
   - page model and JSON page codec;
   - exact marker-to-page candidate index;
@@ -135,7 +136,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 54 tests total (9 CLI unit tests + 1 core unit test + 44 integration tests).
+- `cargo test`: passed, 56 tests total (9 CLI unit tests + 1 core unit test + 46 integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -158,6 +159,8 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Link validation smoke command: passed for valid link and failed as expected for unknown link.
 - Orphan storage validation tests: passed for orphan page files and unknown unmanaged index files.
 - Context packet dedupe test: passed for duplicate ranked cells with the same `cell_id`.
+- Structured JSON marker extraction tests: passed for marker generation and hot recall.
+- Structured JSON marker extraction CLI smoke command: passed, recall matched `tag:style` and `tag:concise`.
 - Stats JSON smoke command: passed, `sealed_pages` and `current_index_kind` exported.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.
