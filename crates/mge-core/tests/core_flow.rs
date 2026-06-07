@@ -795,6 +795,62 @@ fn stats_output_contains_required_fields() {
     assert!(stats_text.contains("current index kind: exact_marker_page"));
 }
 
+#[test]
+fn synthetic_binary_fuse_candidates_cover_exact_candidates() {
+    let exact_dir = tempdir().unwrap();
+    let binary_dir = tempdir().unwrap();
+    let mut exact = MemoryEngine::init_with_options(
+        exact_dir.path(),
+        InitOptions {
+            page_codec: PageCodecKind::Json,
+            compression: CompressionKind::None,
+            index_kind: IndexKind::ExactMarkerPage,
+            page_clusterer: PageClustererKind::ScopeKind,
+        },
+    )
+    .unwrap();
+    let mut binary = MemoryEngine::init_with_options(
+        binary_dir.path(),
+        InitOptions {
+            page_codec: PageCodecKind::Json,
+            compression: CompressionKind::None,
+            index_kind: IndexKind::BinaryFusePage,
+            page_clusterer: PageClustererKind::ScopeKind,
+        },
+    )
+    .unwrap();
+
+    remember_synthetic_cells(&mut exact, 96, 12, 4);
+    remember_synthetic_cells(&mut binary, 96, 12, 4);
+    exact.seal().unwrap();
+    binary.seal().unwrap();
+
+    assert_eq!(exact.stats().unwrap().sealed_pages, 12);
+    assert_eq!(binary.stats().unwrap().sealed_pages, 12);
+
+    for marker in [
+        synthetic_group_marker(0),
+        synthetic_group_marker(1),
+        synthetic_group_marker(2),
+        synthetic_group_marker(3),
+        "bench_missing:noise_000".to_string(),
+    ] {
+        let exact_packet = exact
+            .recall(synthetic_recall_request(&marker, "qsubset"))
+            .unwrap();
+        let binary_packet = binary
+            .recall(synthetic_recall_request(&marker, "qsubset"))
+            .unwrap();
+
+        for page_id in exact_packet.debug.candidate_pages {
+            assert!(
+                binary_packet.debug.candidate_pages.contains(&page_id),
+                "binary_fuse_page must include exact candidate page {page_id} for marker {marker}"
+            );
+        }
+    }
+}
+
 fn remember_answer_style(engine: &mut MemoryEngine) {
     let mut request = RememberRequest::new(
         MemoryKind::UserPreference,
@@ -804,6 +860,54 @@ fn remember_answer_style(engine: &mut MemoryEngine) {
     request.trust = TrustLevel::UserConfirmed;
     request.status = MemoryStatus::Active;
     engine.remember(request).unwrap();
+}
+
+fn remember_synthetic_cells(
+    engine: &mut MemoryEngine,
+    cells: usize,
+    pages: usize,
+    marker_groups: usize,
+) {
+    let base_cells_per_page = cells / pages;
+    let extra_cells = cells % pages;
+    let mut cell_index = 0usize;
+
+    for page in 0..pages {
+        let page_cells = base_cells_per_page + usize::from(page < extra_cells);
+        let group = page % marker_groups;
+
+        for page_cell in 0..page_cells {
+            let mut request = RememberRequest::new(
+                MemoryKind::ProjectFact,
+                MemoryValue::Text(format!(
+                    "synthetic memory group g{group:03} page p{page:04} cell c{cell_index:06}"
+                )),
+            );
+            request.subject = Some(format!("synthetic page {page:04} group {group:03}"));
+            request.scope = format!("bench_page_{page:04}");
+            request.status = MemoryStatus::Active;
+            request.trust = TrustLevel::ToolObserved;
+            request.sensitivity = SensitivityLevel::Public;
+            request.markers = vec![
+                synthetic_group_marker(group),
+                format!("bench_page_marker:p{page:04}"),
+                format!("bench_bucket:b{:02}", page_cell % 16),
+            ];
+            engine.remember(request).unwrap();
+            cell_index += 1;
+        }
+    }
+}
+
+fn synthetic_recall_request(marker: &str, query: &str) -> RecallRequest {
+    let mut request = RecallRequest::new(query);
+    request.markers = vec![marker.to_string()];
+    request.max_items = 20;
+    request
+}
+
+fn synthetic_group_marker(group: usize) -> String {
+    format!("bench_group:g{group:03}")
 }
 
 fn remember_with_status(engine: &mut MemoryEngine, status: MemoryStatus, content: &str) {

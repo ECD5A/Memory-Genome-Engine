@@ -14,3 +14,7 @@ serde_json.workspace = true
 [[bin]]
 name = "mge"
 path = "src/main.rs"
+
+[[bin]]
+name = "mge-synthetic-bench"
+path = "src/bin/mge-synthetic-bench.rs"

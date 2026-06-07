@@ -71,6 +71,8 @@ This file is the working ledger for this repository. Keep it current so we do no
 - Changing `index_kind` rebuilds only the candidate index from existing sealed pages; sealed page files are not rewritten.
 - Recall debug now reports index kind, page filters scanned, candidate pages returned, loaded pages, sealed cells scanned, and post-load false-positive candidate pages.
 - Tests now assert `exact_candidates ⊆ binary_fuse_candidates` for the same sealed pages and verify index-kind switching without page rewrites.
+- Synthetic benchmark tool added as `cargo run -p mge-cli --bin mge-synthetic-bench`.
+- Synthetic benchmark compares `exact_marker_page` and opt-in `binary_fuse_page` on identical generated stores and checks `exact_candidates ⊆ binary_fuse_candidates`.
 - `RecallPolicy` added as the central recall filtering policy.
 - `AgentCapabilities` added for explicit future access grants.
 - CLI recall now has opt-in flags `--include-deprecated` and `--include-secret-references`.
@@ -108,12 +110,13 @@ cargo run -p mge-cli -- recall "How should the agent answer technical questions?
 cargo run -p mge-cli -- stats
 cargo run -p mge-cli -- init --index-kind binary_fuse_page
 cargo run -p mge-cli -- config set --index-kind binary_fuse_page
+cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --marker-groups 12 --targeted-queries 6 --noise-queries 3
 ```
 
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 32 tests.
+- `cargo test`: passed, 33 tests.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -122,6 +125,11 @@ cargo run -p mge-cli -- config set --index-kind binary_fuse_page
 - Index kind stats/config smoke command: passed.
 - Binary Fuse init/recall/stats smoke command: passed.
 - Exact-to-Binary-Fuse config switch smoke command: passed; sealed page hash unchanged.
+- Synthetic exact-vs-Binary-Fuse benchmark smoke command: passed.
+  - config: 1200 cells, 120 sealed pages, 12 marker groups, 6 targeted queries, 3 noise queries.
+  - exact: avg recall latency 11545 us, total candidate pages 60, loaded pages 60, sealed cells scanned 600, result count 120.
+  - binary_fuse_page: avg recall latency 13426 us, total candidate pages 60, loaded pages 60, sealed cells scanned 600, result count 120, post-load false-positive pages 0.
+  - subset check: `exact_candidates ⊆ binary_fuse_candidates` passed.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.
 - Smoke result after sealing:
