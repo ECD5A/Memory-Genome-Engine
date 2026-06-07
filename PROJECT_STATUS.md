@@ -80,6 +80,7 @@ This file is the working ledger for this repository. Keep it current so we do no
 - Synthetic benchmark compares `exact_marker_page` and opt-in `binary_fuse_page` on identical generated stores and checks `exact_candidates ⊆ binary_fuse_candidates`.
 - Hot log archiving now uses unique archive names when multiple seals happen within the same timestamp window.
 - `ValidationReport` and CLI `validate` added as read-only consistency checks for manifest, catalog, pages, page checksums, marker references, and candidate index coverage.
+- Store validation now checks cell links for unknown targets and self-links.
 - `RecallPolicy` added as the central recall filtering policy.
 - `AgentCapabilities` added for explicit future access grants.
 - CLI recall now has opt-in flags `--include-deprecated` and `--include-secret-references`.
@@ -128,7 +129,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 48 tests total (9 CLI unit tests + 1 core unit test + 38 integration tests).
+- `cargo test`: passed, 50 tests total (9 CLI unit tests + 1 core unit test + 40 integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -147,6 +148,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Structured JSON remember smoke command: passed, exported value type `structured`.
 - Typed reference/timestamp remember smoke command: passed, exported value types `reference` and `timestamp`.
 - Source/link remember smoke command: passed, exported source and links retained.
+- Link validation smoke command: passed for valid link and failed as expected for unknown link.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.
 - Smoke result after sealing:

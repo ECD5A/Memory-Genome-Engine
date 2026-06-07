@@ -933,6 +933,44 @@ fn validate_reports_page_checksum_mismatch() {
 }
 
 #[test]
+fn validate_accepts_existing_cell_link() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let first = remember_answer_style(&mut engine);
+    let mut second = RememberRequest::new(
+        MemoryKind::Decision,
+        MemoryValue::Text("Use concise technical answers".to_string()),
+    );
+    second.links = vec![first.id];
+    engine.remember(second).unwrap();
+
+    let report = engine.validate().unwrap();
+
+    assert!(report.ok);
+    assert!(report.errors.is_empty());
+}
+
+#[test]
+fn validate_reports_unknown_cell_link() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let mut request = RememberRequest::new(
+        MemoryKind::Decision,
+        MemoryValue::Text("Use concise technical answers".to_string()),
+    );
+    request.links = vec![999];
+    engine.remember(request).unwrap();
+
+    let report = engine.validate().unwrap();
+
+    assert!(!report.ok);
+    assert!(report
+        .errors
+        .iter()
+        .any(|error| error.contains("links to unknown cell 999")));
+}
+
+#[test]
 fn synthetic_binary_fuse_candidates_cover_exact_candidates() {
     let exact_dir = tempdir().unwrap();
     let binary_dir = tempdir().unwrap();
@@ -988,7 +1026,7 @@ fn synthetic_binary_fuse_candidates_cover_exact_candidates() {
     }
 }
 
-fn remember_answer_style(engine: &mut MemoryEngine) {
+fn remember_answer_style(engine: &mut MemoryEngine) -> mge_core::MemoryCell {
     let mut request = RememberRequest::new(
         MemoryKind::UserPreference,
         MemoryValue::Text("User prefers concise technical explanations".to_string()),
@@ -996,7 +1034,7 @@ fn remember_answer_style(engine: &mut MemoryEngine) {
     request.scope = "global".to_string();
     request.trust = TrustLevel::UserConfirmed;
     request.status = MemoryStatus::Active;
-    engine.remember(request).unwrap();
+    engine.remember(request).unwrap()
 }
 
 fn remember_synthetic_cells(

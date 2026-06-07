@@ -703,11 +703,17 @@ impl MemoryEngine {
             }
         }
 
+        let mut cell_ids = BTreeSet::new();
+        let mut cell_links = Vec::new();
         let hot_cells = HotStore::new(self.hot_cells_path()).load_cells()?;
         report.checked_hot_cells = hot_cells.len();
         let mut max_cell_id = 0;
         for cell in &hot_cells {
             max_cell_id = max_cell_id.max(cell.id);
+            if !cell_ids.insert(cell.id) {
+                report.error(format!("duplicate cell id {}", cell.id));
+            }
+            cell_links.push(("hot cell".to_string(), cell.id, cell.links.clone()));
             self.validate_cell_markers("hot cell", cell, &mut report);
         }
 
@@ -743,6 +749,12 @@ impl MemoryEngine {
                 Ok(page) => {
                     max_cell_id =
                         max_cell_id.max(page.cells.iter().map(|cell| cell.id).max().unwrap_or(0));
+                    for cell in &page.cells {
+                        if !cell_ids.insert(cell.id) {
+                            report.error(format!("duplicate cell id {}", cell.id));
+                        }
+                        cell_links.push(("sealed cell".to_string(), cell.id, cell.links.clone()));
+                    }
                     self.validate_page(entry, &page, &mut report);
                 }
                 Err(err) => {
@@ -767,6 +779,7 @@ impl MemoryEngine {
         if let Some(index) = &index {
             self.validate_candidate_index(&catalog, index, &mut report)?;
         }
+        validate_cell_links(&cell_ids, &cell_links, &mut report);
 
         if catalog.pages.is_empty() && hot_cells.is_empty() {
             report.warning("store contains no hot or sealed cells");
@@ -1119,6 +1132,27 @@ fn validate_page_id_set(
     }
     for page_id in actual.difference(expected) {
         report.error(format!("{label} contains unknown page {page_id}"));
+    }
+}
+
+fn validate_cell_links(
+    cell_ids: &BTreeSet<CellId>,
+    cell_links: &[(String, CellId, Vec<CellId>)],
+    report: &mut ValidationReport,
+) {
+    for (label, cell_id, links) in cell_links {
+        let mut seen_links = BTreeSet::new();
+        for link in links {
+            if *link == *cell_id {
+                report.error(format!("{label} {cell_id} links to itself"));
+            }
+            if !seen_links.insert(*link) {
+                report.warning(format!("{label} {cell_id} repeats link {link}"));
+            }
+            if !cell_ids.contains(link) {
+                report.error(format!("{label} {cell_id} links to unknown cell {link}"));
+            }
+        }
     }
 }
 
