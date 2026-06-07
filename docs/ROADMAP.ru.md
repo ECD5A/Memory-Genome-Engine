@@ -4,15 +4,15 @@
 
 ## v0.1
 
-- Rust core.
-- Rust CLI.
-- `MemoryCell`.
-- `MarkerDictionary`.
-- Hot memory.
-- Recall from hot memory.
-- Sealed pages.
-- Simple marker-to-page index.
-- Context packets.
+- Rust core. Сделано.
+- Rust CLI. Сделано.
+- `MemoryCell`. Сделано.
+- `MarkerDictionary`. Сделано.
+- Hot memory. Сделано.
+- Recall from hot memory. Сделано.
+- Sealed pages. Сделано.
+- Simple marker-to-page index. Сделано как `ExactMarkerPageIndex`.
+- Context packets. Сделано.
 
 ## v0.2
 
@@ -21,12 +21,16 @@
 - Store config show/set для future page defaults. Сделано.
 - Page clustering trait и logical page limits. Сделано как foundation.
 - Reranking transparency через debug score details. Сделано.
+- Exact value match и context-packet dedupe. Сделано как reranking/output hardening.
+- Structured JSON marker extraction. Сделано как deterministic shallow extraction.
 - `IndexKind` metadata и exact-index extension boundary. Сделано.
 - Recall policy, agent capabilities и audit hook foundation. Сделано.
 - Store-level clustering config и marker-overlap seal mode. Сделано.
 - Реальный Binary Fuse page candidate filter за существующим index trait. Сделано на `xorf::BinaryFuse16`.
-- Более сильный reranking.
-- Дополнительные XOR/Ribbon-style index experiments после проверки пользы Binary Fuse path.
+- Store validation hardening для checksums, links, marker dictionary consistency, orphan page files и unknown index files. Сделано.
+- CLI milestone integration test против реального binary `mge`. Сделано.
+- Более сильный reranking. Foundation сделан; дальнейший tuning лучше делать через benchmark.
+- Дополнительные XOR/Ribbon-style index experiments. Отложено до понятной пользы Binary Fuse на больших stores.
 
 ## v0.3
 

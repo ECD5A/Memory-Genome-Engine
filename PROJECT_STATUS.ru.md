@@ -6,8 +6,8 @@
 
 ## Текущий Фокус
 
-- Собрать v0.1 Rust-first core и CLI в этой папке.
-- Держать первую реализацию детерминированной, локальной, marker/page based и готовой к будущим compression, encryption, SDK и MCP.
+- Стабилизировать Rust-first v0.1/v0.2 core и CLI в этой папке.
+- Держать реализацию детерминированной, локальной, компактной, marker/page based и готовой к будущим encryption, SDK и MCP.
 
 ## Сделано
 
@@ -47,6 +47,7 @@
   - `docs/ROADMAP.ru.md`
   - `examples/basic_usage.md`
   - `examples/basic_usage.ru.md`
+- Roadmap обновлён: completed v0.1/v0.2 foundation work и deferred experiments отмечены явно.
 - Добавлены Rust tests для marker canonicalization, dictionary IDs, cell creation, marker generation, hot recall, sealing, sealed recall, index lookup, filtering, context packet text и stats output.
 - Добавлен CLI milestone integration test против реального binary `mge`.
 - Добавлена MIT license от ECD5A.

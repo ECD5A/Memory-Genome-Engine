@@ -4,15 +4,15 @@
 
 ## v0.1
 
-- Rust core.
-- Rust CLI.
-- `MemoryCell`.
-- `MarkerDictionary`.
-- Hot memory.
-- Recall from hot memory.
-- Sealed pages.
-- Simple marker-to-page index.
-- Context packets.
+- Rust core. Done.
+- Rust CLI. Done.
+- `MemoryCell`. Done.
+- `MarkerDictionary`. Done.
+- Hot memory. Done.
+- Recall from hot memory. Done.
+- Sealed pages. Done.
+- Simple marker-to-page index. Done as `ExactMarkerPageIndex`.
+- Context packets. Done.
 
 ## v0.2
 
@@ -21,12 +21,16 @@
 - Store config show/set for future page defaults. Done.
 - Page clustering trait and logical page limits. Done as foundation.
 - Reranking transparency through debug score details. Done.
+- Exact value match and context-packet dedupe. Done as reranking/output hardening.
+- Structured JSON marker extraction. Done as deterministic shallow extraction.
 - `IndexKind` metadata and exact-index extension boundary. Done.
 - Recall policy, agent capabilities, and audit hook foundation. Done.
 - Store-level clustering config and marker-overlap seal mode. Done.
 - Real Binary Fuse page candidate filter behind the existing index trait. Done with `xorf::BinaryFuse16`.
-- Better reranking.
-- Additional XOR/Ribbon-style index experiments after the Binary Fuse path proves useful.
+- Store validation hardening for checksums, links, marker dictionary consistency, orphan page files, and unknown index files. Done.
+- CLI milestone integration test against the real `mge` binary. Done.
+- Better reranking. Foundation done; future tuning should be benchmark-driven.
+- Additional XOR/Ribbon-style index experiments. Deferred until Binary Fuse shows practical benefit on larger stores.
 
 ## v0.3
 

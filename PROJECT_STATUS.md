@@ -6,8 +6,8 @@ This file is the working ledger for this repository. Keep it current so we do no
 
 ## Current Focus
 
-- Build v0.1 Rust-first core and CLI in this folder.
-- Keep the first implementation deterministic, local, marker/page based, and ready for later compression, encryption, SDKs, and MCP.
+- Stabilize the Rust-first v0.1/v0.2 core and CLI in this folder.
+- Keep the implementation deterministic, local, compact, marker/page based, and ready for later encryption, SDKs, and MCP.
 
 ## Done
 
@@ -49,6 +49,7 @@ This file is the working ledger for this repository. Keep it current so we do no
   - `docs/ARCHITECTURE.md`
   - `docs/ROADMAP.md`
   - `examples/basic_usage.md`
+- Roadmap refreshed to mark completed v0.1/v0.2 foundation work and deferred experiments clearly.
 - Rust tests added for marker canonicalization, dictionary IDs, cell creation, marker generation, hot recall, sealing, sealed recall, index lookup, filtering, context packet text, and stats output.
 - CLI milestone integration test added against the real `mge` binary.
 - MIT license added for ECD5A.
