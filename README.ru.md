@@ -113,6 +113,7 @@ mge config set --page-clusterer marker_overlap
 mge remember "..." --kind user_preference --scope global --trust user_confirmed
 mge remember --kind user_preference --subject answer_style --json-value '{"style":"concise","max_examples":2}'
 mge remember --kind project_fact --reference-value vault://references/api-key --sensitivity secret_reference
+mge remember "Decision recorded" --kind decision --source-type issue --source-ref MGE-1 --link 1
 mge recall "technical answer style"
 mge recall "api key" --include-secret-references
 mge seal
@@ -145,6 +146,8 @@ mge remember --kind user_preference --subject answer_style --json-value '{"style
 mge remember --kind project_fact --reference-value vault://references/api-key --sensitivity secret_reference
 mge remember --kind task_state --timestamp-value 1760000000
 ```
+
+Используйте `--source-type` и `--source-ref` вместе, чтобы сохранить provenance. Повторяемый `--link` связывает новую cell с существующими cell IDs.
 
 `mge config set` меняет defaults и легкие derived indexes. Существующие page files не переписываются; каждая catalog entry хранит codec/compression, нужные для чтения этой страницы. При смене `--index-kind` пересобирается только candidate page index по существующим sealed pages.
 

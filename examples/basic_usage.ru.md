@@ -22,6 +22,12 @@ cargo run -p mge-cli -- remember \
   --reference-value vault://references/api-key \
   --sensitivity secret_reference
 
+cargo run -p mge-cli -- remember "Decision recorded" \
+  --kind decision \
+  --source-type issue \
+  --source-ref MGE-1 \
+  --link 1
+
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 ```
 

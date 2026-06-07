@@ -4,9 +4,9 @@ use std::str::FromStr;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use mge_core::{
-    CompressionKind, IndexKind, InitOptions, MemoryEngine, MemoryKind, MemoryStatus, MemoryValue,
-    PageClustererKind, PageCodecKind, RecallRequest, RememberRequest, SensitivityLevel, TrustLevel,
-    DEFAULT_STORE_DIR,
+    CellId, CompressionKind, IndexKind, InitOptions, MemoryEngine, MemoryKind, MemorySource,
+    MemoryStatus, MemoryValue, PageClustererKind, PageCodecKind, RecallRequest, RememberRequest,
+    SensitivityLevel, TrustLevel, DEFAULT_STORE_DIR,
 };
 
 #[derive(Debug, Parser)]
@@ -69,6 +69,15 @@ enum Commands {
 
         #[arg(long = "marker")]
         markers: Vec<String>,
+
+        #[arg(long = "source-type")]
+        source_type: Option<String>,
+
+        #[arg(long = "source-ref")]
+        source_ref: Option<String>,
+
+        #[arg(long = "link")]
+        links: Vec<CellId>,
     },
     Recall {
         query: String,
@@ -175,6 +184,9 @@ fn main() -> Result<()> {
             status,
             sensitivity,
             markers,
+            source_type,
+            source_ref,
+            links,
         } => {
             let mut engine = open_engine(&cli.store)?;
             let parsed_kind = MemoryKind::from_str(&kind)?;
@@ -191,6 +203,8 @@ fn main() -> Result<()> {
             request.status = parsed_status;
             request.sensitivity = parsed_sensitivity;
             request.markers = markers;
+            request.source = parse_memory_source(source_type, source_ref)?;
+            request.links = links;
 
             let cell = engine.remember(request)?;
             println!("Remembered cell {}", cell.id);
@@ -393,6 +407,20 @@ fn parse_scalar_value(raw: &str) -> MemoryValue {
     }
 }
 
+fn parse_memory_source(
+    source_type: Option<String>,
+    source_ref: Option<String>,
+) -> Result<Option<MemorySource>> {
+    match (source_type, source_ref) {
+        (Some(source_type), Some(reference)) => Ok(Some(MemorySource {
+            source_type,
+            reference,
+        })),
+        (None, None) => Ok(None),
+        _ => bail!("remember source requires both --source-type and --source-ref"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,5 +505,26 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("exactly one"));
+    }
+
+    #[test]
+    fn parse_memory_source_accepts_complete_source() {
+        let source =
+            parse_memory_source(Some("issue".to_string()), Some("MGE-1".to_string())).unwrap();
+
+        assert_eq!(
+            source,
+            Some(MemorySource {
+                source_type: "issue".to_string(),
+                reference: "MGE-1".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn parse_memory_source_rejects_partial_source() {
+        let err = parse_memory_source(Some("issue".to_string()), None).unwrap_err();
+
+        assert!(err.to_string().contains("--source-type and --source-ref"));
     }
 }
