@@ -93,8 +93,9 @@
 
 ## Дальше
 
-- Benchmark `exact_marker_page` vs opt-in `binary_fuse_page` на больших stores перед любым изменением defaults.
-- Добавить durable audit log storage в следующем security package.
+- Продолжать core hardening через validation, storage и index tests без изменения defaults.
+- Durable audit log storage добавлять только в более позднем security package.
+- Conflict/poisoning detection рассматривать только после стабилизации текущего storage/index core.
 - SDK wrappers добавлять только после стабилизации Rust core API.
 
 ## Откаты / Не Повторять

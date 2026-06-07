@@ -96,8 +96,9 @@ This file is the working ledger for this repository. Keep it current so we do no
 
 ## Next
 
-- Benchmark `exact_marker_page` vs opt-in `binary_fuse_page` on larger stores before changing any defaults.
-- Add durable audit log storage in a later security package.
+- Continue core hardening through validation, storage, and index tests without changing defaults.
+- Add durable audit log storage only in a later security package.
+- Consider conflict/poisoning detection only after the current storage/index core remains stable.
 - Add SDK wrappers only after the Rust core API stabilizes.
 
 ## Rollbacks / Do Not Repeat
