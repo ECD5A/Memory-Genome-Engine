@@ -763,6 +763,8 @@ impl MemoryEngine {
             }
         }
 
+        self.validate_orphan_storage_files(&page_files, &mut report)?;
+
         if !catalog.pages.is_empty() && self.manifest.next_page_id <= max_page_id {
             report.error(format!(
                 "manifest next_page_id {} must be greater than max sealed page id {}",
@@ -786,6 +788,46 @@ impl MemoryEngine {
         }
 
         Ok(report)
+    }
+
+    fn validate_orphan_storage_files(
+        &self,
+        catalog_page_files: &BTreeSet<String>,
+        report: &mut ValidationReport,
+    ) -> Result<()> {
+        let pages_dir = self.pages_dir();
+        if pages_dir.exists() {
+            for entry in fs::read_dir(pages_dir)? {
+                let entry = entry?;
+                if !entry.file_type()?.is_file() {
+                    continue;
+                }
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if !catalog_page_files.contains(&file_name) {
+                    report.warning(format!(
+                        "orphan page file not referenced by catalog: {file_name}"
+                    ));
+                }
+            }
+        }
+
+        let indexes_dir = self.indexes_dir();
+        if indexes_dir.exists() {
+            for entry in fs::read_dir(indexes_dir)? {
+                let entry = entry?;
+                if !entry.file_type()?.is_file() {
+                    continue;
+                }
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if !is_known_index_file(&file_name) {
+                    report.warning(format!(
+                        "unknown index file not managed by store: {file_name}"
+                    ));
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn save_manifest(&self) -> Result<()> {
@@ -1063,6 +1105,10 @@ impl MemoryEngine {
         self.root.join("indexes").join("page_catalog.json")
     }
 
+    fn indexes_dir(&self) -> PathBuf {
+        self.root.join("indexes")
+    }
+
     fn marker_index_path(&self) -> PathBuf {
         self.root.join("indexes").join("marker_to_pages.json")
     }
@@ -1154,6 +1200,13 @@ fn validate_cell_links(
             }
         }
     }
+}
+
+fn is_known_index_file(file_name: &str) -> bool {
+    matches!(
+        file_name,
+        "page_catalog.json" | "marker_to_pages.json" | "binary_fuse_pages.json"
+    )
 }
 
 fn marker_summary_for_cells(cells: &[MemoryCell]) -> Vec<MarkerId> {

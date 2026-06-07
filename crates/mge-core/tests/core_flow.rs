@@ -970,6 +970,44 @@ fn validate_reports_page_checksum_mismatch() {
 }
 
 #[test]
+fn validate_warns_about_orphan_page_file() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+    fs::write(dir.path().join("pages").join("999999.mgp"), b"orphan").unwrap();
+
+    let report = engine.validate().unwrap();
+
+    assert!(report.ok);
+    assert!(report
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("orphan page file")));
+}
+
+#[test]
+fn validate_warns_about_unknown_index_file() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+    fs::write(
+        dir.path().join("indexes").join("scratch-index.json"),
+        b"not managed",
+    )
+    .unwrap();
+
+    let report = engine.validate().unwrap();
+
+    assert!(report.ok);
+    assert!(report
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("unknown index file")));
+}
+
+#[test]
 fn validate_accepts_existing_cell_link() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();

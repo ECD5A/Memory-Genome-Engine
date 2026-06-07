@@ -152,7 +152,7 @@ Use `--source-type` and `--source-ref` together to record provenance. Use repeat
 
 `mge config set` changes defaults and lightweight derived indexes only. Existing page files are not rewritten; each catalog entry keeps the codec/compression needed to read that page. Changing `--index-kind` rebuilds only the candidate page index from existing sealed pages.
 
-`mge validate` is a read-only consistency check for manifest, page catalog, page files, page checksums, marker references, cell links, and candidate index coverage.
+`mge validate` is a read-only consistency check for manifest, page catalog, page files, page checksums, marker references, cell links, candidate index coverage, and orphan storage files.
 
 `BinaryFusePageIndex` is a probabilistic candidate page filter, not an inverted `marker -> pages` map. It builds one real `xorf::BinaryFuse16` static filter per sealed page from that page's `marker_summary`, scans page filters on query, and may return extra candidate pages. `ExactMarkerPageIndex` remains the default for stable debugging.
 
