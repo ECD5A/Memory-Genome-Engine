@@ -61,8 +61,13 @@
 - Prompt text output остается компактным и не раскрывает score internals.
 - Добавлен `IndexKind` с реализованным kind `exact_marker_page`.
 - Manifest, page catalog, stats и exact index files теперь несут index kind metadata.
-- `CandidatePageIndex` теперь раскрывает `kind()` для будущих static index implementations.
-- Binary Fuse/XOR/Ribbon indexes остаются roadmap items; fake implementation не добавлялся.
+- `CandidatePageIndex` теперь раскрывает `kind()` и query statistics для static index implementations.
+- Добавлен `BinaryFusePageIndex` как opt-in `binary_fuse_page`, при этом `ExactMarkerPageIndex` остается default.
+- Binary Fuse page filters - реальные `xorf::BinaryFuse16` filters, построенные per sealed page по `marker_summary`; fake Binary Fuse implementation не добавлялся.
+- CLI `init` и `config set` теперь поддерживают `--index-kind exact_marker_page|binary_fuse_page`.
+- При смене `index_kind` пересобирается только candidate index по существующим sealed pages; sealed page files не переписываются.
+- Recall debug теперь показывает index kind, page filters scanned, candidate pages returned, loaded pages, sealed cells scanned и post-load false-positive candidate pages.
+- Tests теперь проверяют `exact_candidates ⊆ binary_fuse_candidates` на тех же sealed pages и проверяют смену index kind без rewrite page files.
 - Добавлен `RecallPolicy` как центральная recall filtering policy.
 - Добавлен `AgentCapabilities` для explicit future access grants.
 - CLI recall теперь имеет opt-in flags `--include-deprecated` и `--include-secret-references`.
@@ -77,7 +82,7 @@
 
 ## Дальше
 
-- Добавить реальный static filter index за `CandidatePageIndex`.
+- Benchmark `exact_marker_page` vs opt-in `binary_fuse_page` на больших stores перед любым изменением defaults.
 - Добавить durable audit log storage в следующем security package.
 - SDK wrappers добавлять только после стабилизации Rust core API.
 
@@ -98,25 +103,29 @@ cargo run -p mge-cli -- recall "How should the agent answer technical questions?
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 cargo run -p mge-cli -- stats
+cargo run -p mge-cli -- init --index-kind binary_fuse_page
+cargo run -p mge-cli -- config set --index-kind binary_fuse_page
 ```
 
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 28 tests.
+- `cargo test`: passed, 32 tests.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
 - Default clustering smoke commands: passed.
 - Recall JSON score debug smoke command: passed.
 - Index kind stats/config smoke command: passed.
+- Binary Fuse init/recall/stats smoke command: passed.
+- Exact-to-Binary-Fuse config switch smoke command: passed; sealed page hash unchanged.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.
 - Smoke result после sealing:
   - hot cells: 0
   - sealed pages: 1-2 depending on smoke scenario
   - sealed cells: 1-2 depending on smoke scenario
-  - index type: `exact_marker_page`
-  - current index kind: `exact_marker_page`
-  - current page codec: `messagepack`
-  - current compression: `zstd`
+  - index type: `exact_marker_page` или `binary_fuse_page` depending on smoke scenario
+  - current index kind: `exact_marker_page` или `binary_fuse_page` depending on smoke scenario
+  - current page codec: `json` или `messagepack` depending on smoke scenario
+  - current compression: `none` или `zstd` depending on smoke scenario

@@ -1,12 +1,12 @@
 use mge_core::{
     build_context_packet, build_pages_from_cells, build_pages_with_clusterer, canonicalize_marker,
     marker_strings_for_cell_fields, score_cell_debug, AgentCapabilities, AgentCapability,
-    AuditEvent, AuditLogger, CandidatePageIndex, CompressionKind, Compressor, ContextDebugInfo,
-    ExactMarkerPageIndex, IndexKind, InitOptions, MarkerOverlapClusterer, MemoryEngine, MemoryKind,
-    MemoryStatus, MemoryValue, MessagePackPageCodec, NoopAuditLogger, PageBuildOptions,
-    PageCatalogEntry, PageClustererKind, PageCodec, PageCodecKind, RecallPolicy, RecallRequest,
-    RememberRequest, ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate, TrustLevel,
-    ZstdCompression,
+    AuditEvent, AuditLogger, BinaryFusePageIndex, CandidateIndexData, CandidatePageIndex,
+    CompressionKind, Compressor, ContextDebugInfo, ExactMarkerPageIndex, IndexKind, InitOptions,
+    MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemoryStatus, MemoryValue,
+    MessagePackPageCodec, NoopAuditLogger, PageBuildOptions, PageCatalogEntry, PageClustererKind,
+    PageCodec, PageCodecKind, RecallPolicy, RecallRequest, RememberRequest, ScopeKindClusterer,
+    SensitivityLevel, StorageConfigUpdate, TrustLevel, ZstdCompression,
 };
 use tempfile::tempdir;
 
@@ -131,6 +131,7 @@ fn storage_config_update_changes_future_defaults() {
         .update_storage_config(StorageConfigUpdate {
             page_codec: Some(PageCodecKind::MessagePack),
             compression: Some(CompressionKind::Zstd),
+            index_kind: None,
             page_clusterer: Some(PageClustererKind::MarkerOverlap),
         })
         .unwrap();
@@ -252,6 +253,7 @@ fn storage_config_update_keeps_existing_pages_readable() {
         .update_storage_config(StorageConfigUpdate {
             page_codec: Some(PageCodecKind::MessagePack),
             compression: Some(CompressionKind::Zstd),
+            index_kind: None,
             page_clusterer: None,
         })
         .unwrap();
@@ -298,6 +300,7 @@ fn seal_uses_marker_overlap_clusterer_when_configured() {
         .update_storage_config(StorageConfigUpdate {
             page_codec: None,
             compression: None,
+            index_kind: None,
             page_clusterer: Some(PageClustererKind::MarkerOverlap),
         })
         .unwrap();
@@ -370,6 +373,138 @@ fn marker_to_page_index_queries_candidates() {
     assert_eq!(index.index_kind, IndexKind::ExactMarkerPage);
     assert_eq!(index.query(&[10]).unwrap(), vec![1]);
     assert_eq!(index.query(&[999]).unwrap(), Vec::<u64>::new());
+}
+
+#[test]
+fn binary_fuse_page_index_queries_candidates() {
+    let first = page_test_cell(1, vec![10, 20, 30, 40]);
+    let second = page_test_cell(2, vec![50, 60, 70, 80]);
+    let pages = build_pages_with_clusterer(
+        &[first, second],
+        1,
+        &ScopeKindClusterer,
+        PageBuildOptions {
+            target_page_bytes: 64 * 1024,
+            max_cells_per_page: 1,
+        },
+    );
+    let index = BinaryFusePageIndex::build(&pages).unwrap();
+
+    assert_eq!(index.kind(), IndexKind::BinaryFusePage);
+    assert_eq!(index.query(&[10]).unwrap(), vec![1]);
+    assert_eq!(index.query(&[50]).unwrap(), vec![2]);
+    assert_eq!(index.query(&[10, 20]).unwrap(), vec![1]);
+    let stats = index.query_with_stats(&[10]).unwrap();
+    assert_eq!(stats.page_filters_scanned, 2);
+    assert!(stats.candidate_pages_returned >= 1);
+}
+
+#[test]
+fn binary_fuse_candidates_cover_exact_candidates_for_same_pages() {
+    let pages = build_pages_with_clusterer(
+        &[
+            page_test_cell(1, vec![10, 20, 30, 40]),
+            page_test_cell(2, vec![50, 60, 70, 80]),
+            page_test_cell(3, vec![10, 90, 91, 92]),
+        ],
+        1,
+        &ScopeKindClusterer,
+        PageBuildOptions {
+            target_page_bytes: 64 * 1024,
+            max_cells_per_page: 1,
+        },
+    );
+    let exact = ExactMarkerPageIndex::build(&pages).unwrap();
+    let binary = BinaryFusePageIndex::build(&pages).unwrap();
+
+    let exact_candidates = exact.query(&[10, 50]).unwrap();
+    let binary_candidates = binary.query(&[10, 50]).unwrap();
+
+    assert_eq!(exact_candidates, vec![1, 2, 3]);
+
+    for page_id in exact_candidates {
+        assert!(
+            binary_candidates.contains(&page_id),
+            "binary fuse candidates must include exact page {page_id}"
+        );
+    }
+}
+
+#[test]
+fn recall_from_binary_fuse_page_index() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_with_options(
+        dir.path(),
+        InitOptions {
+            page_codec: PageCodecKind::Json,
+            compression: CompressionKind::None,
+            index_kind: IndexKind::BinaryFusePage,
+            page_clusterer: PageClustererKind::ScopeKind,
+        },
+    )
+    .unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let inspect = engine.inspect().unwrap();
+    assert_eq!(inspect.manifest.index_kind, IndexKind::BinaryFusePage);
+    assert!(matches!(
+        inspect.index,
+        CandidateIndexData::BinaryFusePage(_)
+    ));
+
+    let packet = engine
+        .recall(RecallRequest::new(
+            "How should the agent answer technical questions?",
+        ))
+        .unwrap();
+
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert_eq!(packet.debug.index_kind, IndexKind::BinaryFusePage);
+    assert_eq!(packet.debug.candidate_pages, vec![1]);
+    assert_eq!(packet.debug.page_filters_scanned, 1);
+    assert_eq!(packet.debug.candidate_pages_returned, 1);
+    assert_eq!(packet.debug.loaded_pages, 1);
+    assert_eq!(packet.debug.sealed_cells_scanned, 1);
+}
+
+#[test]
+fn changing_index_kind_rebuilds_candidate_index_without_rewriting_pages() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let before = engine.inspect().unwrap();
+    assert!(matches!(
+        before.index,
+        CandidateIndexData::ExactMarkerPage(_)
+    ));
+    let first_page_file = before.page_catalog.pages[0].file.clone();
+
+    let report = engine
+        .update_storage_config(StorageConfigUpdate {
+            page_codec: None,
+            compression: None,
+            index_kind: Some(IndexKind::BinaryFusePage),
+            page_clusterer: None,
+        })
+        .unwrap();
+
+    assert_eq!(report.existing_pages_unchanged, 1);
+    assert_eq!(report.current.index_kind, IndexKind::BinaryFusePage);
+
+    let after = engine.inspect().unwrap();
+    assert!(matches!(after.index, CandidateIndexData::BinaryFusePage(_)));
+    assert_eq!(after.page_catalog.index_kind, IndexKind::BinaryFusePage);
+    assert_eq!(after.page_catalog.pages[0].file, first_page_file);
+
+    let packet = engine
+        .recall(RecallRequest::new(
+            "How should the agent answer technical questions?",
+        ))
+        .unwrap();
+    assert_eq!(packet.relevant_memory.len(), 1);
 }
 
 #[test]

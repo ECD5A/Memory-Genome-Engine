@@ -24,8 +24,9 @@
 - `IndexKind` metadata и exact-index extension boundary. Сделано.
 - Recall policy, agent capabilities и audit hook foundation. Сделано.
 - Store-level clustering config и marker-overlap seal mode. Сделано.
+- Реальный Binary Fuse page candidate filter за существующим index trait. Сделано на `xorf::BinaryFuse16`.
 - Более сильный reranking.
-- Реальная XOR/Binary Fuse index implementation за существующим index trait.
+- Дополнительные XOR/Ribbon-style index experiments после проверки пользы Binary Fuse path.
 
 ## v0.3
 

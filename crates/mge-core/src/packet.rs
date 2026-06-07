@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::indexes::IndexKind;
 use crate::models::{CellId, MemoryKind, MemoryStatus, PageId, SensitivityLevel, TrustLevel};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -57,9 +58,15 @@ pub struct ContextMemoryItem {
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ContextDebugInfo {
+    #[serde(default)]
+    pub index_kind: IndexKind,
     pub hot_cells_scanned: usize,
     pub candidate_pages: Vec<PageId>,
+    pub page_filters_scanned: usize,
+    pub candidate_pages_returned: usize,
+    pub loaded_pages: usize,
     pub sealed_cells_scanned: usize,
+    pub false_positive_candidate_pages: usize,
     pub total_candidates: usize,
     #[serde(default)]
     pub score_details: Vec<ContextScoreDebugItem>,

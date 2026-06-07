@@ -30,6 +30,9 @@ enum Commands {
 
         #[arg(long, default_value = "scope_kind")]
         page_clusterer: String,
+
+        #[arg(long, default_value = "exact_marker_page")]
+        index_kind: String,
     },
     Remember {
         text: Option<String>,
@@ -112,6 +115,9 @@ enum ConfigCommands {
         page_clusterer: Option<String>,
 
         #[arg(long)]
+        index_kind: Option<String>,
+
+        #[arg(long)]
         json: bool,
     },
 }
@@ -124,21 +130,23 @@ fn main() -> Result<()> {
             page_codec,
             compression,
             page_clusterer,
+            index_kind,
         } => {
             let options = InitOptions {
                 page_codec: PageCodecKind::from_str(&page_codec)?,
                 compression: CompressionKind::from_str(&compression)?,
-                index_kind: IndexKind::ExactMarkerPage,
+                index_kind: IndexKind::from_str(&index_kind)?,
                 page_clusterer: PageClustererKind::from_str(&page_clusterer)?,
             };
             let engine = MemoryEngine::init_with_options(&cli.store, options)
                 .with_context(|| format!("failed to initialize {}", cli.store.display()))?;
             println!(
-                "Initialized Memory Genome store at {} (page_codec={}, compression={}, page_clusterer={})",
+                "Initialized Memory Genome store at {} (page_codec={}, compression={}, page_clusterer={}, index_kind={})",
                 engine.root().display(),
                 options.page_codec,
                 options.compression,
-                options.page_clusterer
+                options.page_clusterer,
+                options.index_kind
             );
         }
         Commands::Remember {
@@ -218,10 +226,15 @@ fn main() -> Result<()> {
                 page_codec,
                 compression,
                 page_clusterer,
+                index_kind,
                 json,
             } => {
-                if page_codec.is_none() && compression.is_none() && page_clusterer.is_none() {
-                    bail!("config set requires --page-codec, --compression, or --page-clusterer");
+                if page_codec.is_none()
+                    && compression.is_none()
+                    && page_clusterer.is_none()
+                    && index_kind.is_none()
+                {
+                    bail!("config set requires --page-codec, --compression, --page-clusterer, or --index-kind");
                 }
 
                 let mut engine = open_engine(&cli.store)?;
@@ -234,6 +247,7 @@ fn main() -> Result<()> {
                         .as_deref()
                         .map(CompressionKind::from_str)
                         .transpose()?,
+                    index_kind: index_kind.as_deref().map(IndexKind::from_str).transpose()?,
                     page_clusterer: page_clusterer
                         .as_deref()
                         .map(PageClustererKind::from_str)
@@ -244,11 +258,12 @@ fn main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&report)?);
                 } else {
                     println!(
-                        "storage config: page_codec {} -> {}, compression {} -> {}, index_kind {}, page_clusterer {} -> {}",
+                        "storage config: page_codec {} -> {}, compression {} -> {}, index_kind {} -> {}, page_clusterer {} -> {}",
                         report.previous.page_codec,
                         report.current.page_codec,
                         report.previous.compression,
                         report.current.compression,
+                        report.previous.index_kind,
                         report.current.index_kind,
                         report.previous.page_clusterer,
                         report.current.page_clusterer

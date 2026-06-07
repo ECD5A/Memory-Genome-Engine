@@ -12,7 +12,10 @@ pub mod store;
 
 pub use compression::{CompressionKind, Compressor, NoCompression, ZstdCompression};
 pub use errors::{MgeError, Result};
-pub use indexes::{CandidatePageIndex, ExactMarkerPageIndex, IndexKind, QueryMode};
+pub use indexes::{
+    BinaryFusePageFilter, BinaryFusePageIndex, CandidateIndexData, CandidatePageIndex,
+    CandidatePageQueryResult, ExactMarkerPageIndex, IndexKind, QueryMode,
+};
 pub use markers::{
     canonicalize_marker, canonicalize_marker_value, extract_query_marker_strings,
     marker_strings_for_cell_fields, tokenize_keywords, MarkerDebugEntry, MarkerDictionary,

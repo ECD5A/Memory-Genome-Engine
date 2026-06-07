@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::compression::{compress_with, decompress_with, CompressionKind};
 use crate::errors::{MgeError, Result};
 use crate::hot::HotStore;
-use crate::indexes::{CandidatePageIndex, ExactMarkerPageIndex, IndexKind};
+use crate::indexes::{
+    BinaryFusePageIndex, CandidateIndexData, CandidatePageIndex, ExactMarkerPageIndex, IndexKind,
+};
 use crate::markers::{
     canonicalize_marker, extract_query_marker_strings, marker_strings_for_cell_fields,
     tokenize_keywords, MarkerDebugEntry, MarkerDictionary,
@@ -80,6 +82,7 @@ pub struct StorageConfig {
 pub struct StorageConfigUpdate {
     pub page_codec: Option<PageCodecKind>,
     pub compression: Option<CompressionKind>,
+    pub index_kind: Option<IndexKind>,
     pub page_clusterer: Option<PageClustererKind>,
 }
 
@@ -180,12 +183,12 @@ store size bytes: {}
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct InspectReport {
     pub manifest: Manifest,
     pub markers: Vec<MarkerDebugEntry>,
     pub page_catalog: PageCatalog,
-    pub index: ExactMarkerPageIndex,
+    pub index: CandidateIndexData,
 }
 
 impl MemoryEngine {
@@ -228,9 +231,19 @@ impl MemoryEngine {
                 &PageCatalog::default(),
             )?;
         }
-        if !root.join("indexes").join("marker_to_pages.json").exists() {
-            ExactMarkerPageIndex::default()
-                .save_to_path(root.join("indexes").join("marker_to_pages.json"))?;
+        match options.index_kind {
+            IndexKind::ExactMarkerPage => {
+                if !root.join("indexes").join("marker_to_pages.json").exists() {
+                    ExactMarkerPageIndex::default()
+                        .save_to_path(root.join("indexes").join("marker_to_pages.json"))?;
+                }
+            }
+            IndexKind::BinaryFusePage => {
+                if !root.join("indexes").join("binary_fuse_pages.json").exists() {
+                    BinaryFusePageIndex::default()
+                        .save_to_path(root.join("indexes").join("binary_fuse_pages.json"))?;
+                }
+            }
         }
 
         Self::open_at(root)
@@ -276,10 +289,11 @@ impl MemoryEngine {
     ) -> Result<StorageConfigUpdateReport> {
         if update.page_codec.is_none()
             && update.compression.is_none()
+            && update.index_kind.is_none()
             && update.page_clusterer.is_none()
         {
             return Err(MgeError::InvalidInput(
-                "storage config update requires page_codec, compression, or page_clusterer"
+                "storage config update requires page_codec, compression, index_kind, or page_clusterer"
                     .to_string(),
             ));
         }
@@ -291,6 +305,9 @@ impl MemoryEngine {
         if let Some(compression) = update.compression {
             self.manifest.compression = compression;
         }
+        if let Some(index_kind) = update.index_kind {
+            self.manifest.index_kind = index_kind;
+        }
         if let Some(page_clusterer) = update.page_clusterer {
             self.manifest.page_clusterer = page_clusterer;
         }
@@ -300,6 +317,14 @@ impl MemoryEngine {
         if changed {
             self.manifest.updated_at = current_timestamp();
             self.save_manifest()?;
+        }
+
+        if previous.index_kind != current.index_kind {
+            let pages = self.load_all_pages()?;
+            let index = self.build_candidate_index(&pages)?;
+            self.save_candidate_index(&index)?;
+            let catalog = self.load_page_catalog()?;
+            self.save_page_catalog(&catalog)?;
         }
 
         Ok(StorageConfigUpdateReport {
@@ -390,12 +415,13 @@ impl MemoryEngine {
             }
         }
 
-        let index = ExactMarkerPageIndex::load_from_path(self.marker_index_path())?;
-        let candidate_pages = if query_marker_ids.is_empty() {
-            Vec::new()
+        let index = self.load_candidate_index()?;
+        let candidate_query = if query_marker_ids.is_empty() {
+            Default::default()
         } else {
-            index.query(&query_marker_ids)?
+            index.query_with_stats(&query_marker_ids)?
         };
+        let candidate_pages = candidate_query.page_ids;
 
         let catalog = self.load_page_catalog()?;
         let entries_by_id = catalog
@@ -405,12 +431,16 @@ impl MemoryEngine {
             .collect::<BTreeMap<_, _>>();
 
         let mut sealed_cells_scanned = 0;
+        let mut loaded_pages = 0;
+        let mut false_positive_candidate_pages = 0;
         for page_id in &candidate_pages {
             let Some(entry) = entries_by_id.get(page_id) else {
                 continue;
             };
             let page = self.read_page(entry)?;
+            loaded_pages += 1;
             sealed_cells_scanned += page.cells.len();
+            let before_page_candidates = ranked.len();
             for cell in &page.cells {
                 if let Some(score_detail) =
                     score_cell_debug(cell, &request, &query_marker_ids, &query_tokens)
@@ -421,6 +451,9 @@ impl MemoryEngine {
                         score_detail,
                     });
                 }
+            }
+            if ranked.len() == before_page_candidates {
+                false_positive_candidate_pages += 1;
             }
         }
 
@@ -433,9 +466,14 @@ impl MemoryEngine {
         });
 
         let debug = ContextDebugInfo {
+            index_kind: self.manifest.index_kind,
             hot_cells_scanned: hot_cells.len(),
             candidate_pages,
+            page_filters_scanned: candidate_query.page_filters_scanned,
+            candidate_pages_returned: candidate_query.candidate_pages_returned,
+            loaded_pages,
             sealed_cells_scanned,
+            false_positive_candidate_pages,
             total_candidates: ranked.len(),
             score_details: Vec::new(),
         };
@@ -505,7 +543,7 @@ impl MemoryEngine {
 
         let all_pages = self.load_all_pages()?;
         let index = self.build_candidate_index(&all_pages)?;
-        index.save_to_path(self.marker_index_path())?;
+        self.save_candidate_index(&index)?;
 
         let archived_hot_log = hot_store.archive_and_clear()?;
         self.manifest.last_seal_time = Some(current_timestamp());
@@ -545,7 +583,7 @@ impl MemoryEngine {
             manifest: self.manifest.clone(),
             markers: self.dictionary.debug_view(),
             page_catalog: self.load_page_catalog()?,
-            index: ExactMarkerPageIndex::load_from_path(self.marker_index_path())?,
+            index: self.load_candidate_index()?,
         })
     }
 
@@ -553,7 +591,7 @@ impl MemoryEngine {
         let hot_cells = HotStore::new(self.hot_cells_path()).load_cells()?;
         let page_catalog = self.load_page_catalog()?;
         let pages = self.load_all_pages()?;
-        let index = ExactMarkerPageIndex::load_from_path(self.marker_index_path())?;
+        let index = self.load_candidate_index()?;
 
         Ok(serde_json::json!({
             "manifest": self.manifest,
@@ -611,9 +649,36 @@ impl MemoryEngine {
         Ok(())
     }
 
-    fn build_candidate_index(&self, pages: &[MemoryPage]) -> Result<ExactMarkerPageIndex> {
+    fn build_candidate_index(&self, pages: &[MemoryPage]) -> Result<CandidateIndexData> {
         match self.manifest.index_kind {
-            IndexKind::ExactMarkerPage => ExactMarkerPageIndex::build(pages),
+            IndexKind::ExactMarkerPage => Ok(CandidateIndexData::ExactMarkerPage(
+                ExactMarkerPageIndex::build(pages)?,
+            )),
+            IndexKind::BinaryFusePage => Ok(CandidateIndexData::BinaryFusePage(
+                BinaryFusePageIndex::build(pages)?,
+            )),
+        }
+    }
+
+    fn load_candidate_index(&self) -> Result<CandidateIndexData> {
+        match self.manifest.index_kind {
+            IndexKind::ExactMarkerPage => Ok(CandidateIndexData::ExactMarkerPage(
+                ExactMarkerPageIndex::load_from_path(self.marker_index_path())?,
+            )),
+            IndexKind::BinaryFusePage => Ok(CandidateIndexData::BinaryFusePage(
+                BinaryFusePageIndex::load_from_path(self.binary_fuse_index_path())?,
+            )),
+        }
+    }
+
+    fn save_candidate_index(&self, index: &CandidateIndexData) -> Result<()> {
+        match index {
+            CandidateIndexData::ExactMarkerPage(index) => {
+                index.save_to_path(self.marker_index_path())
+            }
+            CandidateIndexData::BinaryFusePage(index) => {
+                index.save_to_path(self.binary_fuse_index_path())
+            }
         }
     }
 
@@ -639,6 +704,10 @@ impl MemoryEngine {
 
     fn marker_index_path(&self) -> PathBuf {
         self.root.join("indexes").join("marker_to_pages.json")
+    }
+
+    fn binary_fuse_index_path(&self) -> PathBuf {
+        self.root.join("indexes").join("binary_fuse_pages.json")
     }
 }
 

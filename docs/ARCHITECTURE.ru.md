@@ -65,6 +65,7 @@ Sealed memory полустатическая и page based:
 .memory-genome/pages/000001.mgp
 .memory-genome/indexes/page_catalog.json
 .memory-genome/indexes/marker_to_pages.json
+.memory-genome/indexes/binary_fuse_pages.json
 ```
 
 Page files используют codecs, скрытые за trait `PageCodec`:
@@ -79,7 +80,7 @@ Compression скрыт за trait `Compressor`:
 
 Manifest хранит default codec/compression для новых sealed pages. Каждая `PageCatalogEntry` хранит фактический codec/compression конкретной страницы, поэтому движок может читать mixed stores и старые JSON/no-compression pages.
 
-`mge config set` обновляет только manifest defaults для будущих seals. Он не переписывает существующие page files и не мутирует существующие page catalog entries.
+`mge config set` обновляет manifest defaults и легкие derived indexes. Он не переписывает существующие page files и не мутирует существующие page catalog entries. При смене `--index-kind` пересобирается только candidate index по существующим sealed pages.
 
 ## Page Clustering
 
@@ -106,17 +107,28 @@ mge config set --page-clusterer marker_overlap
 
 ## Candidate Page Index
 
-v0.1 реализует `ExactMarkerPageIndex`:
+Default index - `ExactMarkerPageIndex`:
 
 ```text
 MarkerId -> Vec<PageId>
 ```
 
-Публичная абстракция индекса - `CandidatePageIndex`. В следующих версиях exact map можно заменить на XOR/Binary Fuse/Ribbon-style static filters без изменения retrieval API.
+Он остается default, потому что стабилен и удобен для дебага.
+
+`BinaryFusePageIndex` доступен как opt-in index kind:
+
+```bash
+mge init --index-kind binary_fuse_page
+mge config set --index-kind binary_fuse_page
+```
+
+Это реальная per-page static filter implementation на crate `xorf` и типе `xorf::BinaryFuse16`. Для каждой sealed page движок строит один Binary Fuse filter по `marker_summary` этой страницы. Query сканирует page filters и возвращает candidate page IDs.
+
+`BinaryFusePageIndex` - probabilistic candidate page filter, а не inverted `marker -> pages` index. False positives допустимы и просто приводят к загрузке extra pages. False negatives не ожидаются, если filter корректно построен. Default Binary Fuse query использует union candidate semantics, поэтому не возвращает меньше candidates, чем exact index на тех же sealed pages; тесты проверяют `exact_candidates ⊆ binary_fuse_candidates`.
 
 Hot memory использует mutable scanning/indexing. Sealed pages используют static candidate indexes.
 
-`IndexKind` фиксирует текущую index implementation в manifest/catalog/index metadata. Единственный реализованный kind - `exact_marker_page`. Binary Fuse/XOR/Ribbon намеренно не подделаны.
+`IndexKind` фиксирует текущую index implementation в manifest/catalog/index metadata. Реализованные kinds: `exact_marker_page` и `binary_fuse_page`. Смена kind не переписывает sealed page files; пересобирается только candidate index по существующим sealed pages.
 
 ## Retrieval
 
@@ -141,6 +153,15 @@ Reranking прозрачен в JSON/debug output. `ContextDebugInfo.score_detai
 - sensitivity penalty.
 
 Prompt text output намеренно остается компактным и не включает scores.
+
+Recall debug/statistics output также показывает candidate-index path:
+
+- index kind;
+- page filters scanned;
+- candidate pages returned;
+- loaded pages;
+- sealed cells scanned;
+- false-positive candidate pages after page load.
 
 ## Extension Traits
 

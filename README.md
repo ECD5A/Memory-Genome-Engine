@@ -34,6 +34,7 @@ The v0.1 implementation is Rust-first:
 - `mge-cli`: first command-line interface, binary name `mge`.
 - `.memory-genome/`: local store with manifest, marker dictionary, hot JSONL log, page files, and JSON indexes.
 - Page storage supports JSON or MessagePack codecs and none/zstd compression through stable traits.
+- Candidate page search uses `ExactMarkerPageIndex` by default; `BinaryFusePageIndex` is available as an opt-in probabilistic page filter backed by `xorf::BinaryFuse16`.
 
 More detail:
 
@@ -95,11 +96,19 @@ For compact sealed pages, initialize a new store with MessagePack and zstd:
 cargo run -p mge-cli -- init --page-codec messagepack --compression zstd
 ```
 
+For opt-in Binary Fuse candidate filtering:
+
+```bash
+cargo run -p mge-cli -- init --index-kind binary_fuse_page
+cargo run -p mge-cli -- config set --index-kind binary_fuse_page
+```
+
 ## CLI
 
 ```bash
 mge init
 mge init --page-codec messagepack --compression zstd
+mge init --index-kind binary_fuse_page
 mge config set --page-clusterer marker_overlap
 mge remember "..." --kind user_preference --scope global --trust user_confirmed
 mge recall "technical answer style"
@@ -107,6 +116,7 @@ mge recall "api key" --include-secret-references
 mge seal
 mge config show
 mge config set --page-codec messagepack --compression zstd
+mge config set --index-kind binary_fuse_page
 mge inspect
 mge stats
 mge export --format json
@@ -118,7 +128,9 @@ Use `--marker` on recall for explicit marker search:
 mge recall "technical answer style" --marker kind:user_preference --marker scope:global
 ```
 
-`mge config set` changes only the defaults for future sealed pages. Existing page files are not rewritten; each catalog entry keeps the codec/compression needed to read that page.
+`mge config set` changes defaults and lightweight derived indexes only. Existing page files are not rewritten; each catalog entry keeps the codec/compression needed to read that page. Changing `--index-kind` rebuilds only the candidate page index from existing sealed pages.
+
+`BinaryFusePageIndex` is a probabilistic candidate page filter, not an inverted `marker -> pages` map. It builds one real `xorf::BinaryFuse16` static filter per sealed page from that page's `marker_summary`, scans page filters on query, and may return extra candidate pages. `ExactMarkerPageIndex` remains the default for stable debugging.
 
 Deprecated/rejected memories and `SecretReference` cells are filtered by default. Use recall opt-in flags only when the caller has an explicit reason and capability.
 
@@ -138,7 +150,7 @@ tests/
 - No GUI.
 - No chatbot.
 - No vector database.
-- No fake Binary Fuse implementation.
+- No fake Binary Fuse implementation; the opt-in Binary Fuse path uses the real `xorf` crate.
 - No fake encryption.
 - No credential storage.
 

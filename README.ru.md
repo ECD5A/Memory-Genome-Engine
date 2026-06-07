@@ -34,6 +34,7 @@ Cells -> Marker Genome -> Hot Memory -> Sealed Pages -> Candidate Page Index -> 
 - `mge-cli`: первый CLI-интерфейс, бинарник `mge`.
 - `.memory-genome/`: локальное хранилище с manifest, marker dictionary, hot JSONL log, page files и JSON indexes.
 - Page storage поддерживает JSON или MessagePack codecs и none/zstd compression через стабильные traits.
+- Candidate page search по умолчанию использует `ExactMarkerPageIndex`; `BinaryFusePageIndex` доступен как opt-in probabilistic page filter на реальном `xorf::BinaryFuse16`.
 
 Подробнее:
 
@@ -95,11 +96,19 @@ cargo run -p mge-cli -- stats
 cargo run -p mge-cli -- init --page-codec messagepack --compression zstd
 ```
 
+Для opt-in Binary Fuse candidate filtering:
+
+```bash
+cargo run -p mge-cli -- init --index-kind binary_fuse_page
+cargo run -p mge-cli -- config set --index-kind binary_fuse_page
+```
+
 ## CLI
 
 ```bash
 mge init
 mge init --page-codec messagepack --compression zstd
+mge init --index-kind binary_fuse_page
 mge config set --page-clusterer marker_overlap
 mge remember "..." --kind user_preference --scope global --trust user_confirmed
 mge recall "technical answer style"
@@ -107,6 +116,7 @@ mge recall "api key" --include-secret-references
 mge seal
 mge config show
 mge config set --page-codec messagepack --compression zstd
+mge config set --index-kind binary_fuse_page
 mge inspect
 mge stats
 mge export --format json
@@ -118,7 +128,9 @@ mge export --format json
 mge recall "technical answer style" --marker kind:user_preference --marker scope:global
 ```
 
-`mge config set` меняет только defaults для будущих sealed pages. Существующие page files не переписываются; каждая catalog entry хранит codec/compression, нужные для чтения этой страницы.
+`mge config set` меняет defaults и легкие derived indexes. Существующие page files не переписываются; каждая catalog entry хранит codec/compression, нужные для чтения этой страницы. При смене `--index-kind` пересобирается только candidate page index по существующим sealed pages.
+
+`BinaryFusePageIndex` - probabilistic candidate page filter, а не inverted `marker -> pages` map. Он строит один реальный `xorf::BinaryFuse16` static filter на каждую sealed page по ее `marker_summary`, сканирует page filters при query и может вернуть extra candidate pages. `ExactMarkerPageIndex` остается default для стабильного дебага.
 
 Deprecated/rejected memories и `SecretReference` cells фильтруются по умолчанию. Recall opt-in flags стоит использовать только если у caller есть явная причина и capability.
 
@@ -138,7 +150,7 @@ tests/
 - Нет GUI.
 - Нет chatbot.
 - Нет vector database.
-- Нет fake Binary Fuse implementation.
+- Нет fake Binary Fuse implementation; opt-in Binary Fuse path использует реальный crate `xorf`.
 - Нет fake encryption.
 - Нет credential storage.
 

@@ -64,8 +64,13 @@ This file is the working ledger for this repository. Keep it current so we do no
 - Prompt text output remains compact and does not expose score internals.
 - `IndexKind` added with the implemented `exact_marker_page` kind.
 - Manifest, page catalog, stats, and exact index files now carry index kind metadata.
-- `CandidatePageIndex` now exposes `kind()` for future static index implementations.
-- Binary Fuse/XOR/Ribbon indexes remain roadmap items; no fake implementation was added.
+- `CandidatePageIndex` now exposes `kind()` and query statistics for static index implementations.
+- `BinaryFusePageIndex` added as opt-in `binary_fuse_page` while `ExactMarkerPageIndex` remains the default.
+- Binary Fuse page filters are real `xorf::BinaryFuse16` filters built per sealed page from `marker_summary`; no fake Binary Fuse implementation was added.
+- CLI `init` and `config set` now support `--index-kind exact_marker_page|binary_fuse_page`.
+- Changing `index_kind` rebuilds only the candidate index from existing sealed pages; sealed page files are not rewritten.
+- Recall debug now reports index kind, page filters scanned, candidate pages returned, loaded pages, sealed cells scanned, and post-load false-positive candidate pages.
+- Tests now assert `exact_candidates ⊆ binary_fuse_candidates` for the same sealed pages and verify index-kind switching without page rewrites.
 - `RecallPolicy` added as the central recall filtering policy.
 - `AgentCapabilities` added for explicit future access grants.
 - CLI recall now has opt-in flags `--include-deprecated` and `--include-secret-references`.
@@ -80,7 +85,7 @@ This file is the working ledger for this repository. Keep it current so we do no
 
 ## Next
 
-- Add a real static filter index implementation behind `CandidatePageIndex`.
+- Benchmark `exact_marker_page` vs opt-in `binary_fuse_page` on larger stores before changing any defaults.
 - Add durable audit log storage in a later security package.
 - Add SDK wrappers only after the Rust core API stabilizes.
 
@@ -101,25 +106,29 @@ cargo run -p mge-cli -- recall "How should the agent answer technical questions?
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 cargo run -p mge-cli -- stats
+cargo run -p mge-cli -- init --index-kind binary_fuse_page
+cargo run -p mge-cli -- config set --index-kind binary_fuse_page
 ```
 
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 28 tests.
+- `cargo test`: passed, 32 tests.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
 - Default clustering smoke commands: passed.
 - Recall JSON score debug smoke command: passed.
 - Index kind stats/config smoke command: passed.
+- Binary Fuse init/recall/stats smoke command: passed.
+- Exact-to-Binary-Fuse config switch smoke command: passed; sealed page hash unchanged.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.
 - Smoke result after sealing:
   - hot cells: 0
   - sealed pages: 1-2 depending on smoke scenario
   - sealed cells: 1-2 depending on smoke scenario
-  - index type: `exact_marker_page`
-  - current index kind: `exact_marker_page`
-  - current page codec: `messagepack`
-  - current compression: `zstd`
+  - index type: `exact_marker_page` or `binary_fuse_page` depending on smoke scenario
+  - current index kind: `exact_marker_page` or `binary_fuse_page` depending on smoke scenario
+  - current page codec: `json` or `messagepack` depending on smoke scenario
+  - current compression: `none` or `zstd` depending on smoke scenario

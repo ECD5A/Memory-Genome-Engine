@@ -40,10 +40,17 @@ Compact page storage for a new store:
 cargo run -p mge-cli -- init --page-codec messagepack --compression zstd
 ```
 
+Opt-in Binary Fuse candidate page filtering:
+
+```bash
+cargo run -p mge-cli -- init --index-kind binary_fuse_page
+```
+
 Change defaults for future sealed pages in an existing store:
 
 ```bash
 cargo run -p mge-cli -- config show
 cargo run -p mge-cli -- config set --page-codec messagepack --compression zstd
 cargo run -p mge-cli -- config set --page-clusterer marker_overlap
+cargo run -p mge-cli -- config set --index-kind binary_fuse_page
 ```
