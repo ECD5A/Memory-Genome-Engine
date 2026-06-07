@@ -68,6 +68,7 @@ This file is the working ledger for this repository. Keep it current so we do no
 - Page builder now enforces logical page limits.
 - `ContextDebugInfo.score_details` added for transparent reranking in JSON/debug output.
 - Reranking now records marker, subject, value overlap, exact value match, trust, status, and sensitivity score components.
+- Context packet building now deduplicates ranked cells by `cell_id` before returning memory to agents.
 - Prompt text output remains compact and does not expose score internals.
 - `IndexKind` added with the implemented `exact_marker_page` kind.
 - Manifest, page catalog, stats, and exact index files now carry index kind metadata.
@@ -134,7 +135,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 53 tests total (9 CLI unit tests + 1 core unit test + 43 integration tests).
+- `cargo test`: passed, 54 tests total (9 CLI unit tests + 1 core unit test + 44 integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -156,6 +157,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Source/link seal persistence test: passed.
 - Link validation smoke command: passed for valid link and failed as expected for unknown link.
 - Orphan storage validation tests: passed for orphan page files and unknown unmanaged index files.
+- Context packet dedupe test: passed for duplicate ranked cells with the same `cell_id`.
 - Stats JSON smoke command: passed, `sealed_pages` and `current_index_kind` exported.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.

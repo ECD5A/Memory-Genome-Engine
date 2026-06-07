@@ -145,7 +145,8 @@ Recall делает следующее:
 5. Загружает только candidate pages.
 6. Rerank cells по marker overlap, subject/value matches, trust, status и sensitivity.
 7. По умолчанию фильтрует deprecated/rejected и `SecretReference` cells.
-8. Возвращает `ContextPacket`.
+8. Deduplicate ranked cells по `cell_id`.
+9. Возвращает `ContextPacket`.
 
 Reranking прозрачен в JSON/debug output. `ContextDebugInfo.score_details` показывает score components для возвращенных items:
 

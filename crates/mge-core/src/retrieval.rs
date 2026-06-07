@@ -160,7 +160,13 @@ pub fn build_context_packet(
     debug: ContextDebugInfo,
     max_items: usize,
 ) -> ContextPacket {
-    let relevant_memory = ranked
+    let mut seen_cell_ids = HashSet::new();
+    let unique_ranked = ranked
+        .iter()
+        .filter(|ranked| seen_cell_ids.insert(ranked.cell.id))
+        .collect::<Vec<_>>();
+
+    let relevant_memory = unique_ranked
         .iter()
         .take(max_items)
         .map(|ranked| {
@@ -183,7 +189,7 @@ pub fn build_context_packet(
         })
         .collect::<Vec<_>>();
 
-    let score_details = ranked
+    let score_details = unique_ranked
         .iter()
         .take(max_items)
         .map(|ranked| ranked.score_detail.clone())
@@ -222,6 +228,7 @@ pub fn build_context_packet(
         constraints,
         warnings,
         debug: ContextDebugInfo {
+            total_candidates: unique_ranked.len(),
             score_details,
             ..debug
         },

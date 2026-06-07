@@ -791,6 +791,60 @@ fn context_packet_prompt_text() {
 }
 
 #[test]
+fn context_packet_deduplicates_ranked_cells_by_id() {
+    let cell = mge_core::MemoryCell::new(
+        1,
+        MemoryKind::UserPreference,
+        None,
+        MemoryValue::Text("User prefers concise technical explanations".to_string()),
+        "global".to_string(),
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        SensitivityLevel::Private,
+        vec![],
+        None,
+        Vec::new(),
+    );
+    let ranked = vec![
+        mge_core::retrieval::RankedCell {
+            cell: cell.clone(),
+            score: 20,
+            score_detail: mge_core::packet::ContextScoreDebugItem {
+                cell_id: 1,
+                score: 20,
+                ..Default::default()
+            },
+        },
+        mge_core::retrieval::RankedCell {
+            cell,
+            score: 10,
+            score_detail: mge_core::packet::ContextScoreDebugItem {
+                cell_id: 1,
+                score: 10,
+                ..Default::default()
+            },
+        },
+    ];
+    let dictionary = mge_core::MarkerDictionary::new();
+
+    let packet = build_context_packet(
+        "technical answer".to_string(),
+        &ranked,
+        &dictionary,
+        ContextDebugInfo {
+            total_candidates: 2,
+            ..Default::default()
+        },
+        5,
+    );
+
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert_eq!(packet.debug.score_details.len(), 1);
+    assert_eq!(packet.debug.score_details[0].score, 20);
+    assert_eq!(packet.debug.total_candidates, 1);
+}
+
+#[test]
 fn score_debug_explains_status_trust_and_sensitivity() {
     let cell = mge_core::MemoryCell::new(
         1,
