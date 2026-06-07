@@ -32,6 +32,7 @@ Seal hot memory into pages:
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 cargo run -p mge-cli -- stats
+cargo run -p mge-cli -- validate
 ```
 
 Compact page storage for a new store:

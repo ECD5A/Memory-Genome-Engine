@@ -118,6 +118,7 @@ mge config show
 mge config set --page-codec messagepack --compression zstd
 mge config set --index-kind binary_fuse_page
 mge inspect
+mge validate
 mge stats
 mge export --format json
 ```
@@ -129,6 +130,8 @@ mge recall "technical answer style" --marker kind:user_preference --marker scope
 ```
 
 `mge config set` changes defaults and lightweight derived indexes only. Existing page files are not rewritten; each catalog entry keeps the codec/compression needed to read that page. Changing `--index-kind` rebuilds only the candidate page index from existing sealed pages.
+
+`mge validate` is a read-only consistency check for manifest, page catalog, page files, marker references, and candidate index coverage.
 
 `BinaryFusePageIndex` is a probabilistic candidate page filter, not an inverted `marker -> pages` map. It builds one real `xorf::BinaryFuse16` static filter per sealed page from that page's `marker_summary`, scans page filters on query, and may return extra candidate pages. `ExactMarkerPageIndex` remains the default for stable debugging.
 

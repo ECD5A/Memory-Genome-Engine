@@ -29,6 +29,7 @@
   - `recall`
   - `seal`
   - `inspect`
+  - `validate`
   - `stats`
   - `export --format json`
 - Добавлена документация:
@@ -71,6 +72,7 @@
 - Добавлен synthetic benchmark tool: `cargo run -p mge-cli --bin mge-synthetic-bench`.
 - Synthetic benchmark сравнивает `exact_marker_page` и opt-in `binary_fuse_page` на одинаковых generated stores и проверяет `exact_candidates ⊆ binary_fuse_candidates`.
 - Hot log archiving теперь использует уникальные archive names, если несколько seals попадают в одно timestamp window.
+- Добавлены `ValidationReport` и CLI `validate` как read-only consistency checks для manifest, catalog, pages, marker references и candidate index coverage.
 - Добавлен `RecallPolicy` как центральная recall filtering policy.
 - Добавлен `AgentCapabilities` для explicit future access grants.
 - CLI recall теперь имеет opt-in flags `--include-deprecated` и `--include-secret-references`.
@@ -106,6 +108,7 @@ cargo run -p mge-cli -- recall "How should the agent answer technical questions?
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 cargo run -p mge-cli -- stats
+cargo run -p mge-cli -- validate
 cargo run -p mge-cli -- init --index-kind binary_fuse_page
 cargo run -p mge-cli -- config set --index-kind binary_fuse_page
 cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --marker-groups 12 --targeted-queries 6 --noise-queries 3
@@ -114,7 +117,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 34 tests total (1 core unit test + 33 integration tests).
+- `cargo test`: passed, 37 tests total (1 core unit test + 36 integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -128,6 +131,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
   - exact: avg recall latency 11545 us, total candidate pages 60, loaded pages 60, sealed cells scanned 600, result count 120.
   - binary_fuse_page: avg recall latency 13426 us, total candidate pages 60, loaded pages 60, sealed cells scanned 600, result count 120, post-load false-positive pages 0.
   - subset check: `exact_candidates ⊆ binary_fuse_candidates` passed.
+- Validate CLI smoke commands: passed для `exact_marker_page` и `binary_fuse_page`.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.
 - Smoke result после sealing:

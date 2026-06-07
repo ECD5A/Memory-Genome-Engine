@@ -1,3 +1,5 @@
+use std::fs;
+
 use mge_core::{
     build_context_packet, build_pages_from_cells, build_pages_with_clusterer, canonicalize_marker,
     marker_strings_for_cell_fields, score_cell_debug, AgentCapabilities, AgentCapability,
@@ -793,6 +795,66 @@ fn stats_output_contains_required_fields() {
     assert!(stats_text.contains("marker count:"));
     assert!(stats_text.contains("index type: exact_marker_page"));
     assert!(stats_text.contains("current index kind: exact_marker_page"));
+}
+
+#[test]
+fn validate_clean_exact_store_passes() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let report = engine.validate().unwrap();
+
+    assert!(report.ok);
+    assert!(report.errors.is_empty());
+    assert_eq!(report.index_kind, IndexKind::ExactMarkerPage);
+    assert_eq!(report.checked_sealed_pages, 1);
+    assert_eq!(report.checked_sealed_cells, 1);
+}
+
+#[test]
+fn validate_clean_binary_fuse_store_passes() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_with_options(
+        dir.path(),
+        InitOptions {
+            page_codec: PageCodecKind::Json,
+            compression: CompressionKind::None,
+            index_kind: IndexKind::BinaryFusePage,
+            page_clusterer: PageClustererKind::ScopeKind,
+        },
+    )
+    .unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let report = engine.validate().unwrap();
+
+    assert!(report.ok);
+    assert!(report.errors.is_empty());
+    assert_eq!(report.index_kind, IndexKind::BinaryFusePage);
+    assert_eq!(report.checked_sealed_pages, 1);
+    assert_eq!(report.checked_sealed_cells, 1);
+}
+
+#[test]
+fn validate_reports_missing_page_file() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let page_file = engine.inspect().unwrap().page_catalog.pages[0].file.clone();
+    fs::remove_file(dir.path().join("pages").join(page_file)).unwrap();
+
+    let report = engine.validate().unwrap();
+
+    assert!(!report.ok);
+    assert!(report
+        .errors
+        .iter()
+        .any(|error| error.contains("missing page file")));
 }
 
 #[test]

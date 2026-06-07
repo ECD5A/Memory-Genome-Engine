@@ -38,5 +38,6 @@ pub use security::{
 };
 pub use store::{
     InitOptions, InspectReport, MemoryEngine, RememberRequest, SealReport, StorageConfig,
-    StorageConfigUpdate, StorageConfigUpdateReport, Store, StoreStats, DEFAULT_STORE_DIR,
+    StorageConfigUpdate, StorageConfigUpdateReport, Store, StoreStats, ValidationReport,
+    DEFAULT_STORE_DIR,
 };

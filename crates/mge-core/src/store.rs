@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -15,8 +15,8 @@ use crate::markers::{
     tokenize_keywords, MarkerDebugEntry, MarkerDictionary,
 };
 use crate::models::{
-    current_timestamp, CellId, MemoryCell, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
-    PageId, SensitivityLevel, TrustLevel,
+    current_timestamp, CellId, MarkerId, MemoryCell, MemoryKind, MemorySource, MemoryStatus,
+    MemoryValue, PageId, SensitivityLevel, TrustLevel,
 };
 use crate::packet::{ContextDebugInfo, ContextPacket};
 use crate::pages::{
@@ -189,6 +189,74 @@ pub struct InspectReport {
     pub markers: Vec<MarkerDebugEntry>,
     pub page_catalog: PageCatalog,
     pub index: CandidateIndexData,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ValidationReport {
+    pub ok: bool,
+    pub index_kind: IndexKind,
+    pub checked_hot_cells: usize,
+    pub checked_sealed_pages: usize,
+    pub checked_sealed_cells: usize,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+impl ValidationReport {
+    fn new(index_kind: IndexKind) -> Self {
+        Self {
+            ok: true,
+            index_kind,
+            checked_hot_cells: 0,
+            checked_sealed_pages: 0,
+            checked_sealed_cells: 0,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+
+    fn error(&mut self, message: impl Into<String>) {
+        self.ok = false;
+        self.errors.push(message.into());
+    }
+
+    fn warning(&mut self, message: impl Into<String>) {
+        self.warnings.push(message.into());
+    }
+
+    pub fn to_human_text(&self) -> String {
+        let mut output = format!(
+            "\
+store valid: {}
+index kind: {}
+checked hot cells: {}
+checked sealed pages: {}
+checked sealed cells: {}
+errors: {}
+warnings: {}
+",
+            self.ok,
+            self.index_kind,
+            self.checked_hot_cells,
+            self.checked_sealed_pages,
+            self.checked_sealed_cells,
+            self.errors.len(),
+            self.warnings.len()
+        );
+
+        for error in &self.errors {
+            output.push_str("- error: ");
+            output.push_str(error);
+            output.push('\n');
+        }
+        for warning in &self.warnings {
+            output.push_str("- warning: ");
+            output.push_str(warning);
+            output.push('\n');
+        }
+
+        output
+    }
 }
 
 impl MemoryEngine {
@@ -603,6 +671,106 @@ impl MemoryEngine {
         }))
     }
 
+    pub fn validate(&self) -> Result<ValidationReport> {
+        let mut report = ValidationReport::new(self.manifest.index_kind);
+        let catalog = self.load_page_catalog()?;
+
+        if catalog.index_kind != self.manifest.index_kind {
+            report.error(format!(
+                "page catalog index kind {} does not match manifest index kind {}",
+                catalog.index_kind, self.manifest.index_kind
+            ));
+        }
+
+        let index = match self.load_candidate_index() {
+            Ok(index) => Some(index),
+            Err(err) => {
+                report.error(format!("candidate index load failed: {err}"));
+                None
+            }
+        };
+        if let Some(index) = &index {
+            if index.kind() != self.manifest.index_kind {
+                report.error(format!(
+                    "candidate index kind {} does not match manifest index kind {}",
+                    index.kind(),
+                    self.manifest.index_kind
+                ));
+            }
+        }
+
+        let hot_cells = HotStore::new(self.hot_cells_path()).load_cells()?;
+        report.checked_hot_cells = hot_cells.len();
+        let mut max_cell_id = 0;
+        for cell in &hot_cells {
+            max_cell_id = max_cell_id.max(cell.id);
+            self.validate_cell_markers("hot cell", cell, &mut report);
+        }
+
+        let mut page_ids = BTreeSet::new();
+        let mut page_files = BTreeSet::new();
+        let mut max_page_id = 0;
+        for entry in &catalog.pages {
+            if !page_ids.insert(entry.page_id) {
+                report.error(format!(
+                    "duplicate page id {} in page catalog",
+                    entry.page_id
+                ));
+            }
+            if !page_files.insert(entry.file.clone()) {
+                report.error(format!(
+                    "duplicate page file {} in page catalog",
+                    entry.file
+                ));
+            }
+            max_page_id = max_page_id.max(entry.page_id);
+
+            let page_path = self.pages_dir().join(&entry.file);
+            if !page_path.exists() {
+                report.error(format!(
+                    "missing page file for page {}: {}",
+                    entry.page_id,
+                    page_path.display()
+                ));
+                continue;
+            }
+
+            match self.read_page(entry) {
+                Ok(page) => {
+                    max_cell_id =
+                        max_cell_id.max(page.cells.iter().map(|cell| cell.id).max().unwrap_or(0));
+                    self.validate_page(entry, &page, &mut report);
+                }
+                Err(err) => {
+                    report.error(format!("failed to read page {}: {err}", entry.page_id));
+                }
+            }
+        }
+
+        if !catalog.pages.is_empty() && self.manifest.next_page_id <= max_page_id {
+            report.error(format!(
+                "manifest next_page_id {} must be greater than max sealed page id {}",
+                self.manifest.next_page_id, max_page_id
+            ));
+        }
+        if max_cell_id > 0 && self.manifest.next_cell_id <= max_cell_id {
+            report.error(format!(
+                "manifest next_cell_id {} must be greater than max cell id {}",
+                self.manifest.next_cell_id, max_cell_id
+            ));
+        }
+
+        if let Some(index) = &index {
+            self.validate_candidate_index(&catalog, index, &mut report)?;
+        }
+
+        if catalog.pages.is_empty() && hot_cells.is_empty() {
+            report.warning("store contains no hot or sealed cells");
+        }
+
+        Ok(report)
+    }
+
     fn save_manifest(&self) -> Result<()> {
         save_json(self.manifest_path(), &self.manifest)
     }
@@ -682,6 +850,171 @@ impl MemoryEngine {
         }
     }
 
+    fn validate_page(
+        &self,
+        entry: &PageCatalogEntry,
+        page: &MemoryPage,
+        report: &mut ValidationReport,
+    ) {
+        report.checked_sealed_pages += 1;
+        report.checked_sealed_cells += page.cells.len();
+
+        if page.page_id != entry.page_id {
+            report.error(format!(
+                "page file {} contains page id {}, catalog expects {}",
+                entry.file, page.page_id, entry.page_id
+            ));
+        }
+        if page.cell_count != page.cells.len() {
+            report.error(format!(
+                "page {} cell_count {} does not match actual cells {}",
+                entry.page_id,
+                page.cell_count,
+                page.cells.len()
+            ));
+        }
+        if entry.cell_count != page.cells.len() {
+            report.error(format!(
+                "catalog page {} cell_count {} does not match actual cells {}",
+                entry.page_id,
+                entry.cell_count,
+                page.cells.len()
+            ));
+        }
+        if entry.marker_summary != page.marker_summary {
+            report.error(format!(
+                "catalog marker_summary differs from page marker_summary for page {}",
+                entry.page_id
+            ));
+        }
+
+        let computed_marker_summary = marker_summary_for_cells(&page.cells);
+        if computed_marker_summary != page.marker_summary {
+            report.error(format!(
+                "page {} marker_summary does not match page cells",
+                entry.page_id
+            ));
+        }
+
+        for cell in &page.cells {
+            self.validate_cell_markers("sealed cell", cell, report);
+        }
+    }
+
+    fn validate_cell_markers(&self, label: &str, cell: &MemoryCell, report: &mut ValidationReport) {
+        for marker in &cell.markers {
+            if self.dictionary.marker(*marker).is_none() {
+                report.error(format!(
+                    "{label} {} references unknown marker {}",
+                    cell.id, marker
+                ));
+            }
+        }
+    }
+
+    fn validate_candidate_index(
+        &self,
+        catalog: &PageCatalog,
+        index: &CandidateIndexData,
+        report: &mut ValidationReport,
+    ) -> Result<()> {
+        let catalog_page_ids = catalog
+            .pages
+            .iter()
+            .map(|entry| entry.page_id)
+            .collect::<BTreeSet<_>>();
+        let entries_by_id = catalog
+            .pages
+            .iter()
+            .map(|entry| (entry.page_id, entry))
+            .collect::<BTreeMap<_, _>>();
+
+        match index {
+            CandidateIndexData::ExactMarkerPage(index) => {
+                validate_page_id_set(
+                    "exact index all_pages",
+                    index.all_pages.iter().copied().collect(),
+                    &catalog_page_ids,
+                    report,
+                );
+                for (marker, page_ids) in &index.marker_to_pages {
+                    if self.dictionary.marker(*marker).is_none() {
+                        report.error(format!("exact index references unknown marker {marker}"));
+                    }
+                    for page_id in page_ids {
+                        if !catalog_page_ids.contains(page_id) {
+                            report.error(format!(
+                                "exact index marker {} references unknown page {}",
+                                marker, page_id
+                            ));
+                        }
+                    }
+                }
+            }
+            CandidateIndexData::BinaryFusePage(index) => {
+                validate_page_id_set(
+                    "binary fuse index all_pages",
+                    index.all_pages.iter().copied().collect(),
+                    &catalog_page_ids,
+                    report,
+                );
+                validate_page_id_set(
+                    "binary fuse page filters",
+                    index
+                        .page_filters
+                        .iter()
+                        .map(|filter| filter.page_id)
+                        .collect(),
+                    &catalog_page_ids,
+                    report,
+                );
+                for filter in &index.page_filters {
+                    let Some(entry) = entries_by_id.get(&filter.page_id) else {
+                        continue;
+                    };
+                    let marker_count = entry
+                        .marker_summary
+                        .iter()
+                        .copied()
+                        .collect::<BTreeSet<_>>()
+                        .len();
+                    if filter.marker_count != marker_count {
+                        report.error(format!(
+                            "binary fuse page {} marker_count {} does not match catalog marker count {}",
+                            filter.page_id, filter.marker_count, marker_count
+                        ));
+                    }
+                    if marker_count == 0 && filter.filter.is_some() {
+                        report.error(format!(
+                            "binary fuse page {} has a filter for an empty marker_summary",
+                            filter.page_id
+                        ));
+                    }
+                    if marker_count > 0 && filter.filter.is_none() {
+                        report.error(format!(
+                            "binary fuse page {} is missing filter for non-empty marker_summary",
+                            filter.page_id
+                        ));
+                    }
+                }
+            }
+        }
+
+        for entry in &catalog.pages {
+            for marker in &entry.marker_summary {
+                let candidate_pages = index.query(&[*marker])?;
+                if !candidate_pages.contains(&entry.page_id) {
+                    report.error(format!(
+                        "candidate index misses page {} for marker {}",
+                        entry.page_id, marker
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn manifest_path(&self) -> PathBuf {
         self.root.join("manifest.json")
     }
@@ -758,4 +1091,26 @@ fn store_size_bytes(path: &Path) -> Result<u64> {
         total += store_size_bytes(&entry?.path())?;
     }
     Ok(total)
+}
+
+fn validate_page_id_set(
+    label: &str,
+    actual: BTreeSet<PageId>,
+    expected: &BTreeSet<PageId>,
+    report: &mut ValidationReport,
+) {
+    for page_id in expected.difference(&actual) {
+        report.error(format!("{label} is missing page {page_id}"));
+    }
+    for page_id in actual.difference(expected) {
+        report.error(format!("{label} contains unknown page {page_id}"));
+    }
+}
+
+fn marker_summary_for_cells(cells: &[MemoryCell]) -> Vec<MarkerId> {
+    let mut summary = BTreeSet::new();
+    for cell in cells {
+        summary.extend(cell.markers.iter().copied());
+    }
+    summary.into_iter().collect()
 }

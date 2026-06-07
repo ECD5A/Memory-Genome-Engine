@@ -91,6 +91,10 @@ enum Commands {
         command: ConfigCommands,
     },
     Inspect,
+    Validate {
+        #[arg(long)]
+        json: bool,
+    },
     Stats,
     Export {
         #[arg(long, default_value = "json")]
@@ -278,6 +282,18 @@ fn main() -> Result<()> {
         Commands::Inspect => {
             let engine = open_engine(&cli.store)?;
             println!("{}", serde_json::to_string_pretty(&engine.inspect()?)?);
+        }
+        Commands::Validate { json } => {
+            let engine = open_engine(&cli.store)?;
+            let report = engine.validate()?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", report.to_human_text());
+            }
+            if !report.ok {
+                bail!("store validation failed");
+            }
         }
         Commands::Stats => {
             let engine = open_engine(&cli.store)?;
