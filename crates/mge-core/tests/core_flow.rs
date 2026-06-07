@@ -5,7 +5,7 @@ use mge_core::{
     marker_strings_for_cell_fields, score_cell_debug, AgentCapabilities, AgentCapability,
     AuditEvent, AuditLogger, BinaryFusePageIndex, CandidateIndexData, CandidatePageIndex,
     CompressionKind, Compressor, ContextDebugInfo, ExactMarkerPageIndex, IndexKind, InitOptions,
-    MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemoryStatus, MemoryValue,
+    MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
     MessagePackPageCodec, NoopAuditLogger, PageBuildOptions, PageCatalogEntry, PageClustererKind,
     PageCodec, PageCodecKind, RecallPolicy, RecallRequest, RememberRequest, ScopeKindClusterer,
     SensitivityLevel, StorageConfigUpdate, TrustLevel, ZstdCompression,
@@ -198,6 +198,43 @@ fn seal_hot_cells_into_pages() {
         .remove(0);
     assert!(page.checksum.is_some());
     assert!(mge_core::page_checksum_matches(&page).unwrap());
+}
+
+#[test]
+fn seal_preserves_source_and_links() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let first = remember_answer_style(&mut engine);
+    let mut second = RememberRequest::new(
+        MemoryKind::Decision,
+        MemoryValue::Text("Use concise technical answers".to_string()),
+    );
+    second.source = Some(MemorySource {
+        source_type: "issue".to_string(),
+        reference: "MGE-1".to_string(),
+    });
+    second.links = vec![first.id];
+    let second = engine.remember(second).unwrap();
+
+    engine.seal().unwrap();
+
+    let exported = engine.export_json().unwrap();
+    let pages =
+        serde_json::from_value::<Vec<mge_core::MemoryPage>>(exported["pages"].clone()).unwrap();
+    let sealed_cell = pages
+        .iter()
+        .flat_map(|page| &page.cells)
+        .find(|cell| cell.id == second.id)
+        .unwrap();
+
+    assert_eq!(
+        sealed_cell.source,
+        Some(MemorySource {
+            source_type: "issue".to_string(),
+            reference: "MGE-1".to_string(),
+        })
+    );
+    assert_eq!(sealed_cell.links, vec![first.id]);
 }
 
 #[test]

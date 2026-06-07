@@ -41,6 +41,7 @@ This file is the working ledger for this repository. Keep it current so we do no
 - CLI `remember` supports structured values through `--json-value`, stored as `MemoryValue::Structured`.
 - CLI `remember` supports typed reference and timestamp values through `--reference-value` and `--timestamp-value`.
 - CLI `remember` supports provenance and graph hints through `--source-type`, `--source-ref`, and repeated `--link`.
+- Sealing preserves cell `source` metadata and `links` in sealed pages.
 - CLI `stats` supports `--json` while keeping the human output as the default.
 - Documentation added:
   - `README.md`
@@ -132,7 +133,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 50 tests total (9 CLI unit tests + 1 core unit test + 40 integration tests).
+- `cargo test`: passed, 51 tests total (9 CLI unit tests + 1 core unit test + 41 integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -151,6 +152,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Structured JSON remember smoke command: passed, exported value type `structured`.
 - Typed reference/timestamp remember smoke command: passed, exported value types `reference` and `timestamp`.
 - Source/link remember smoke command: passed, exported source and links retained.
+- Source/link seal persistence test: passed.
 - Link validation smoke command: passed for valid link and failed as expected for unknown link.
 - Stats JSON smoke command: passed, `sealed_pages` and `current_index_kind` exported.
 - Recall policy secret-reference opt-in smoke command: passed.

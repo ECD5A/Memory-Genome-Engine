@@ -35,6 +35,7 @@
 - CLI `remember` поддерживает structured values через `--json-value`, сохраняемые как `MemoryValue::Structured`.
 - CLI `remember` поддерживает typed reference и timestamp values через `--reference-value` и `--timestamp-value`.
 - CLI `remember` поддерживает provenance и graph hints через `--source-type`, `--source-ref` и повторяемый `--link`.
+- Sealing сохраняет cell `source` metadata и `links` в sealed pages.
 - CLI `stats` поддерживает `--json`, сохраняя human output default.
 - Добавлена документация:
   - `README.md`
@@ -129,7 +130,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 50 tests total (9 CLI unit tests + 1 core unit test + 40 integration tests).
+- `cargo test`: passed, 51 tests total (9 CLI unit tests + 1 core unit test + 41 integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -148,6 +149,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Structured JSON remember smoke command: passed, exported value type `structured`.
 - Typed reference/timestamp remember smoke command: passed, exported value types `reference` и `timestamp`.
 - Source/link remember smoke command: passed, exported source и links retained.
+- Source/link seal persistence test: passed.
 - Link validation smoke command: passed для valid link и failed as expected для unknown link.
 - Stats JSON smoke command: passed, `sealed_pages` и `current_index_kind` exported.
 - Recall policy secret-reference opt-in smoke command: passed.
