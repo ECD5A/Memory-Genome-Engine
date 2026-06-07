@@ -78,6 +78,7 @@ Current direction:
 
 - sealed pages: prefer MessagePack now, custom binary page codec later;
 - compression: zstd is available now;
+- fast profile: `mge init --profile fast` uses MessagePack + zstd while keeping `ExactMarkerPageIndex` as the default index;
 - hot memory: JSONL is temporary and should move to an append-only binary log;
 - indexes/catalogs: JSON is debuggable foundation, not the long-term hot path;
 - export/debug: JSON remains useful and supported.

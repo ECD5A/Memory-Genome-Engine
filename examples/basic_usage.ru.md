@@ -55,6 +55,7 @@ cargo run -p mge-cli -- validate
 Compact page storage для нового хранилища:
 
 ```bash
+cargo run -p mge-cli -- init --profile fast
 cargo run -p mge-cli -- init --page-codec messagepack --compression zstd
 ```
 

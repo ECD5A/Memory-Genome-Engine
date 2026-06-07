@@ -93,6 +93,7 @@ cargo run -p mge-cli -- stats
 Для компактных sealed pages можно инициализировать новое хранилище с MessagePack и zstd:
 
 ```bash
+cargo run -p mge-cli -- init --profile fast
 cargo run -p mge-cli -- init --page-codec messagepack --compression zstd
 ```
 
@@ -107,6 +108,7 @@ cargo run -p mge-cli -- config set --index-kind binary_fuse_page
 
 ```bash
 mge init
+mge init --profile fast
 mge init --page-codec messagepack --compression zstd
 mge init --index-kind binary_fuse_page
 mge config set --page-clusterer marker_overlap

@@ -51,6 +51,20 @@ fn cli_milestone_flow_outputs_context_stats_and_validation_json() {
     assert_eq!(validation["errors"].as_array().unwrap().len(), 0);
 }
 
+#[test]
+fn cli_fast_profile_initializes_compact_storage_defaults() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+
+    run_mge(&store, &["init", "--profile", "fast"]);
+
+    let stats = run_mge_json(&store, &["stats", "--json"]);
+    assert_eq!(stats["current_page_codec"], "message_pack");
+    assert_eq!(stats["current_compression"], "zstd");
+    assert_eq!(stats["current_index_kind"], "exact_marker_page");
+    assert_eq!(stats["current_page_clusterer"], "scope_kind");
+}
+
 fn run_mge(store: &Path, args: &[&str]) -> Output {
     let output = Command::new(env!("CARGO_BIN_EXE_mge"))
         .arg("--store")

@@ -20,7 +20,7 @@
 - zstd compression. Done as foundation.
 - Store config show/set for future page defaults. Done.
 - JSON runtime path reduction. In progress: JSON remains for debug/export/config compatibility, runtime storage moves toward MessagePack/binary.
-- Fast storage profile. Next opt-in step.
+- Fast storage profile. Done as opt-in `mge init --profile fast`.
 - Page clustering trait and logical page limits. Done as foundation.
 - Reranking transparency through debug score details. Done.
 - Exact value match and context-packet dedupe. Done as reranking/output hardening.

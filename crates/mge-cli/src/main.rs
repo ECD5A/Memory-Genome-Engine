@@ -22,17 +22,20 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     Init {
-        #[arg(long, default_value = "json")]
-        page_codec: String,
+        #[arg(long, default_value = "debug")]
+        profile: String,
 
-        #[arg(long, default_value = "none")]
-        compression: String,
+        #[arg(long)]
+        page_codec: Option<String>,
 
-        #[arg(long, default_value = "scope_kind")]
-        page_clusterer: String,
+        #[arg(long)]
+        compression: Option<String>,
 
-        #[arg(long, default_value = "exact_marker_page")]
-        index_kind: String,
+        #[arg(long)]
+        page_clusterer: Option<String>,
+
+        #[arg(long)]
+        index_kind: Option<String>,
     },
     Remember {
         text: Option<String>,
@@ -152,22 +155,25 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Init {
+            profile,
             page_codec,
             compression,
             page_clusterer,
             index_kind,
         } => {
-            let options = InitOptions {
-                page_codec: PageCodecKind::from_str(&page_codec)?,
-                compression: CompressionKind::from_str(&compression)?,
-                index_kind: IndexKind::from_str(&index_kind)?,
-                page_clusterer: PageClustererKind::from_str(&page_clusterer)?,
-            };
+            let options = init_options_from_args(
+                &profile,
+                page_codec.as_deref(),
+                compression.as_deref(),
+                page_clusterer.as_deref(),
+                index_kind.as_deref(),
+            )?;
             let engine = MemoryEngine::init_with_options(&cli.store, options)
                 .with_context(|| format!("failed to initialize {}", cli.store.display()))?;
             println!(
-                "Initialized Memory Genome store at {} (page_codec={}, compression={}, page_clusterer={}, index_kind={})",
+                "Initialized Memory Genome store at {} (profile={}, page_codec={}, compression={}, page_clusterer={}, index_kind={})",
                 engine.root().display(),
+                profile,
                 options.page_codec,
                 options.compression,
                 options.page_clusterer,
@@ -355,6 +361,47 @@ fn open_engine(store: &PathBuf) -> Result<MemoryEngine> {
     })
 }
 
+fn init_options_from_args(
+    profile: &str,
+    page_codec: Option<&str>,
+    compression: Option<&str>,
+    page_clusterer: Option<&str>,
+    index_kind: Option<&str>,
+) -> Result<InitOptions> {
+    let mut options = init_options_for_profile(profile)?;
+    if let Some(page_codec) = page_codec {
+        options.page_codec = PageCodecKind::from_str(page_codec)?;
+    }
+    if let Some(compression) = compression {
+        options.compression = CompressionKind::from_str(compression)?;
+    }
+    if let Some(page_clusterer) = page_clusterer {
+        options.page_clusterer = PageClustererKind::from_str(page_clusterer)?;
+    }
+    if let Some(index_kind) = index_kind {
+        options.index_kind = IndexKind::from_str(index_kind)?;
+    }
+    Ok(options)
+}
+
+fn init_options_for_profile(profile: &str) -> Result<InitOptions> {
+    match profile {
+        "debug" | "default" | "compat" => Ok(InitOptions {
+            page_codec: PageCodecKind::Json,
+            compression: CompressionKind::None,
+            index_kind: IndexKind::ExactMarkerPage,
+            page_clusterer: PageClustererKind::ScopeKind,
+        }),
+        "fast" | "compact" => Ok(InitOptions {
+            page_codec: PageCodecKind::MessagePack,
+            compression: CompressionKind::Zstd,
+            index_kind: IndexKind::ExactMarkerPage,
+            page_clusterer: PageClustererKind::ScopeKind,
+        }),
+        other => bail!("unknown init profile: {other}; supported: debug, fast"),
+    }
+}
+
 fn parse_memory_value(
     text: Option<String>,
     value: Option<String>,
@@ -432,6 +479,40 @@ fn parse_memory_source(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn init_fast_profile_uses_compact_storage_defaults() {
+        let options = init_options_from_args("fast", None, None, None, None).unwrap();
+
+        assert_eq!(options.page_codec, PageCodecKind::MessagePack);
+        assert_eq!(options.compression, CompressionKind::Zstd);
+        assert_eq!(options.index_kind, IndexKind::ExactMarkerPage);
+        assert_eq!(options.page_clusterer, PageClustererKind::ScopeKind);
+    }
+
+    #[test]
+    fn init_profile_allows_explicit_overrides() {
+        let options = init_options_from_args(
+            "fast",
+            Some("json"),
+            Some("none"),
+            Some("marker_overlap"),
+            Some("binary_fuse_page"),
+        )
+        .unwrap();
+
+        assert_eq!(options.page_codec, PageCodecKind::Json);
+        assert_eq!(options.compression, CompressionKind::None);
+        assert_eq!(options.index_kind, IndexKind::BinaryFusePage);
+        assert_eq!(options.page_clusterer, PageClustererKind::MarkerOverlap);
+    }
+
+    #[test]
+    fn init_profile_rejects_unknown_profile() {
+        let err = init_options_from_args("unknown", None, None, None, None).unwrap_err();
+
+        assert!(err.to_string().contains("unknown init profile"));
+    }
 
     #[test]
     fn parse_text_memory_value() {

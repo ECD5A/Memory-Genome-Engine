@@ -100,6 +100,7 @@ JSON policy:
 - Page catalog entries теперь хранят per-page codec/compression для mixed-store и backward-compatible reads.
 - Новые sealed pages теперь хранят codec-independent SHA-256 content checksums.
 - CLI `init` теперь поддерживает `--page-codec json|messagepack` и `--compression none|zstd`.
+- CLI `init --profile fast` добавлен как opt-in compact storage profile: MessagePack + zstd + exact index.
 - Добавлены CLI `config show` и `config set` для существующих stores.
 - Storage config updates меняют только defaults для будущих seals; существующие pages остаются нетронутыми и читаются через catalog metadata.
 - Добавлены tests для zstd roundtrip, init options, MessagePack+zstd sealed recall и legacy catalog defaults.
@@ -159,6 +160,7 @@ JSON policy:
 cargo build
 cargo test
 cargo run -p mge-cli -- init
+cargo run -p mge-cli -- init --profile fast
 cargo run -p mge-cli -- remember "User prefers concise technical explanations" --kind user_preference --scope global --trust user_confirmed
 cargo run -p mge-cli -- remember --kind user_preference --subject answer_style --json-value '{"style":"concise","max_examples":2}'
 cargo run -p mge-cli -- remember --kind project_fact --reference-value vault://references/api-key --sensitivity secret_reference
@@ -178,7 +180,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 58 tests total (9 CLI unit tests + 1 CLI integration test + 1 core unit test + 47 core integration tests).
+- `cargo test`: passed, 62 tests total (12 CLI unit tests + 2 CLI integration tests + 1 core unit test + 47 core integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -204,6 +206,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Structured JSON marker extraction tests: passed для marker generation и hot recall.
 - Structured JSON marker extraction CLI smoke command: passed, recall matched `tag:style` и `tag:concise`.
 - CLI milestone integration test: passed для init, remember, recall JSON, seal, stats JSON и validate JSON.
+- Fast profile CLI integration test: passed для `mge init --profile fast`.
 - Marker dictionary consistency validation test: passed.
 - Stats JSON smoke command: passed, `sealed_pages` и `current_index_kind` exported.
 - Recall policy secret-reference opt-in smoke command: passed.
