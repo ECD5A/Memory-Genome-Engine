@@ -4,9 +4,51 @@
 
 This file is the working ledger for this repository. Keep it current so we do not repeat completed work or reopen decisions without a reason.
 
+## Source Of Truth
+
+The project goal is defined by the original prompt and user corrections: build a compact, fast, local Rust-first memory engine for LLM agents, where memory is stored as typed cells + marker genomes + sealed pages + candidate filters, and the agent receives only a `ContextPacket`.
+
+Core logic:
+
+```text
+Memory = Cells + Markers + Pages + Filters + Context Packets
+Hot memory = mutable
+Sealed memory = static indexed pages
+ExactMarkerPageIndex = default
+BinaryFusePageIndex = opt-in probabilistic candidate page filter
+Agent receives ContextPacket, not raw memory store
+```
+
+Non-negotiable rules:
+
+- Do not turn the project into a chatbot, UI, cloud service, Markdown memory, or vector DB.
+- Do not store raw credentials/secrets; use only `SecretReference` placeholders.
+- Do not add fake encryption or fake Binary Fuse.
+- Do not break defaults for experiments; new fast/experimental modes start opt-in.
+- Do not bloat the project: small modules, clear traits, tests, separate commits.
+
+JSON policy:
+
+- JSON is currently allowed as a bootstrap/debug/export/config compatibility layer.
+- JSON is not the final runtime storage direction.
+- Runtime storage should move toward MessagePack, zstd, custom binary page codec, and compact binary/index formats.
+- `MemoryValue::Structured(serde_json::Value)` is currently an API-level structured value, not a promise to store memory as JSON forever.
+
+## Roadmap Snapshot
+
+| Stage | Status | Notes |
+| --- | --- | --- |
+| v0.1 core/CLI | Done / hardening | Rust core, CLI, cells, markers, hot memory, sealed pages, exact index, recall, and context packets work. |
+| v0.2 storage/index foundation | Mostly done / hardening | MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in, and validation hardening are done. |
+| v0.2 remaining | In progress | Move away from JSON runtime path, benchmark-driven reranking, compact storage/index hardening. |
+| v0.3 SDK/MCP | Not started | Python/TypeScript/MCP only after Rust core API stabilizes. |
+| v0.4 security | Foundation only | Interfaces/policy exist; real encryption/session unlock/blind markers are not started. |
+| v0.5 safety/search | Partial foundation | Policy/capabilities exist; poisoning/conflict/vector reranking are not started. |
+
 ## Current Focus
 
-- Stabilize the Rust-first v0.1/v0.2 core and CLI in this folder.
+- Push the v0.1/v0.2 core/storage/index foundation toward a fast compact runtime path.
+- Gradually push JSON out of runtime storage while keeping JSON for debug/export/config compatibility.
 - Keep the implementation deterministic, local, compact, marker/page based, and ready for later encryption, SDKs, and MCP.
 
 ## Done
@@ -23,8 +65,8 @@ This file is the working ledger for this repository. Keep it current so we do no
 - `mge-core` implemented with:
   - typed memory models;
   - marker canonicalization and persistent dictionary;
-- deterministic marker extraction;
-- deterministic shallow marker extraction for structured JSON keys and short scalar values;
+  - deterministic marker extraction;
+  - deterministic shallow marker extraction for structured JSON keys and short scalar values;
   - append-only hot JSONL store;
   - page model and JSON page codec;
   - exact marker-to-page candidate index;

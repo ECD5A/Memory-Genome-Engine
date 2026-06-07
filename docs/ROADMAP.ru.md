@@ -19,6 +19,8 @@
 - MessagePack page codec. Сделано как foundation.
 - zstd compression. Сделано как foundation.
 - Store config show/set для future page defaults. Сделано.
+- JSON runtime path reduction. В работе: JSON остаётся для debug/export/config compatibility, runtime storage уходит в MessagePack/binary.
+- Fast storage profile. Следующий opt-in шаг.
 - Page clustering trait и logical page limits. Сделано как foundation.
 - Reranking transparency через debug score details. Сделано.
 - Exact value match и context-packet dedupe. Сделано как reranking/output hardening.
@@ -34,6 +36,7 @@
 
 ## v0.3
 
+- Rust API freeze для SDK boundary.
 - Python SDK через PyO3/maturin.
 - TypeScript SDK или REST wrapper.
 - MCP server.

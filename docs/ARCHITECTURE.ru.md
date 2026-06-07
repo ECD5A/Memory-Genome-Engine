@@ -70,6 +70,18 @@ Sealed memory полустатическая и page based:
 .memory-genome/indexes/binary_fuse_pages.json
 ```
 
+## Storage Format Direction
+
+JSON не является финальной целью runtime storage. Он остаётся только как bootstrap/debug/export/config compatibility layer, пока engine движется к compact binary-oriented runtime formats.
+
+Текущее направление:
+
+- sealed pages: сейчас предпочитать MessagePack, позже custom binary page codec;
+- compression: zstd уже доступен;
+- hot memory: JSONL временный и должен уйти в append-only binary log;
+- indexes/catalogs: JSON удобен как debuggable foundation, но не long-term hot path;
+- export/debug: JSON остаётся полезным и поддерживаемым.
+
 Page files используют codecs, скрытые за trait `PageCodec`:
 
 - `JsonPageCodec`

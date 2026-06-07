@@ -4,9 +4,51 @@
 
 Этот файл - рабочий журнал репозитория. Его нужно держать актуальным, чтобы не повторять уже сделанную работу и не возвращаться к закрытым решениям без причины.
 
+## Source Of Truth
+
+Цель проекта задаётся исходным промптом и твоими уточнениями: сделать компактный, быстрый, локальный Rust-first memory engine для LLM agents, где память хранится как typed cells + marker genomes + sealed pages + candidate filters, а агент получает только `ContextPacket`.
+
+Главная логика:
+
+```text
+Memory = Cells + Markers + Pages + Filters + Context Packets
+Hot memory = mutable
+Sealed memory = static indexed pages
+ExactMarkerPageIndex = default
+BinaryFusePageIndex = opt-in probabilistic candidate page filter
+Agent receives ContextPacket, not raw memory store
+```
+
+Непереговорные правила:
+
+- Не превращать проект в chatbot, UI, cloud service, Markdown memory или vector DB.
+- Не хранить raw credentials/secrets; только `SecretReference` placeholders.
+- Не делать fake encryption или fake Binary Fuse.
+- Не ломать defaults ради экспериментов; быстрые/новые режимы сначала идут как opt-in.
+- Не раздувать проект: маленькие модули, понятные traits, тесты, отдельные коммиты.
+
+JSON policy:
+
+- JSON сейчас разрешён как bootstrap/debug/export/config compatibility layer.
+- JSON не является финальным runtime storage направлением.
+- Runtime storage должен постепенно уходить в MessagePack, zstd, custom binary page codec и compact binary/index formats.
+- `MemoryValue::Structured(serde_json::Value)` сейчас является API-level structured value, а не обязательством хранить память как JSON forever.
+
+## Roadmap Snapshot
+
+| Stage | Status | Notes |
+| --- | --- | --- |
+| v0.1 core/CLI | Done / hardening | Rust core, CLI, cells, markers, hot memory, sealed pages, exact index, recall, context packets работают. |
+| v0.2 storage/index foundation | Mostly done / hardening | MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in, validation hardening сделаны. |
+| v0.2 remaining | In progress | Уход от JSON runtime path, stronger benchmark-driven reranking, compact storage/index hardening. |
+| v0.3 SDK/MCP | Not started | Python/TypeScript/MCP только после стабилизации Rust core API. |
+| v0.4 security | Foundation only | Interfaces/policy есть; real encryption/session unlock/blind markers ещё не начаты. |
+| v0.5 safety/search | Partial foundation | Policy/capabilities есть; poisoning/conflict/vector reranking ещё не начаты. |
+
 ## Текущий Фокус
 
-- Стабилизировать Rust-first v0.1/v0.2 core и CLI в этой папке.
+- Довести v0.1/v0.2 core/storage/index foundation до состояния, где runtime path быстрый и компактный.
+- Постепенно выдавливать JSON из runtime storage, оставляя JSON для debug/export/config compatibility.
 - Держать реализацию детерминированной, локальной, компактной, marker/page based и готовой к будущим encryption, SDK и MCP.
 
 ## Сделано
@@ -17,8 +59,8 @@
 - Реализован `mge-core`:
   - typed memory models;
   - marker canonicalization и persistent dictionary;
-- deterministic marker extraction;
-- deterministic shallow marker extraction для structured JSON keys и коротких scalar values;
+  - deterministic marker extraction;
+  - deterministic shallow marker extraction для structured JSON keys и коротких scalar values;
   - append-only hot JSONL store;
   - page model и JSON page codec;
   - exact marker-to-page candidate index;
