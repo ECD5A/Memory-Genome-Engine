@@ -123,6 +123,7 @@ mge config set --index-kind binary_fuse_page
 mge inspect
 mge validate
 mge stats
+mge stats --json
 mge export --format json
 ```
 

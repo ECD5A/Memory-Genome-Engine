@@ -41,6 +41,7 @@ This file is the working ledger for this repository. Keep it current so we do no
 - CLI `remember` supports structured values through `--json-value`, stored as `MemoryValue::Structured`.
 - CLI `remember` supports typed reference and timestamp values through `--reference-value` and `--timestamp-value`.
 - CLI `remember` supports provenance and graph hints through `--source-type`, `--source-ref`, and repeated `--link`.
+- CLI `stats` supports `--json` while keeping the human output as the default.
 - Documentation added:
   - `README.md`
   - `docs/ARCHITECTURE.md`
@@ -120,6 +121,7 @@ cargo run -p mge-cli -- recall "How should the agent answer technical questions?
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 cargo run -p mge-cli -- stats
+cargo run -p mge-cli -- stats --json
 cargo run -p mge-cli -- validate
 cargo run -p mge-cli -- init --index-kind binary_fuse_page
 cargo run -p mge-cli -- config set --index-kind binary_fuse_page
@@ -149,6 +151,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Typed reference/timestamp remember smoke command: passed, exported value types `reference` and `timestamp`.
 - Source/link remember smoke command: passed, exported source and links retained.
 - Link validation smoke command: passed for valid link and failed as expected for unknown link.
+- Stats JSON smoke command: passed, `sealed_pages` and `current_index_kind` exported.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.
 - Smoke result after sealing:

@@ -113,7 +113,10 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    Stats,
+    Stats {
+        #[arg(long)]
+        json: bool,
+    },
     Export {
         #[arg(long, default_value = "json")]
         format: String,
@@ -322,9 +325,14 @@ fn main() -> Result<()> {
                 bail!("store validation failed");
             }
         }
-        Commands::Stats => {
+        Commands::Stats { json } => {
             let engine = open_engine(&cli.store)?;
-            print!("{}", engine.stats()?.to_human_text());
+            let stats = engine.stats()?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&stats)?);
+            } else {
+                print!("{}", stats.to_human_text());
+            }
         }
         Commands::Export { format } => {
             if format != "json" {

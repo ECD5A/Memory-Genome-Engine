@@ -35,6 +35,7 @@
 - CLI `remember` поддерживает structured values через `--json-value`, сохраняемые как `MemoryValue::Structured`.
 - CLI `remember` поддерживает typed reference и timestamp values через `--reference-value` и `--timestamp-value`.
 - CLI `remember` поддерживает provenance и graph hints через `--source-type`, `--source-ref` и повторяемый `--link`.
+- CLI `stats` поддерживает `--json`, сохраняя human output default.
 - Добавлена документация:
   - `README.md`
   - `README.ru.md`
@@ -117,6 +118,7 @@ cargo run -p mge-cli -- recall "How should the agent answer technical questions?
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 cargo run -p mge-cli -- stats
+cargo run -p mge-cli -- stats --json
 cargo run -p mge-cli -- validate
 cargo run -p mge-cli -- init --index-kind binary_fuse_page
 cargo run -p mge-cli -- config set --index-kind binary_fuse_page
@@ -146,6 +148,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Typed reference/timestamp remember smoke command: passed, exported value types `reference` и `timestamp`.
 - Source/link remember smoke command: passed, exported source и links retained.
 - Link validation smoke command: passed для valid link и failed as expected для unknown link.
+- Stats JSON smoke command: passed, `sealed_pages` и `current_index_kind` exported.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.
 - Smoke result после sealing:
