@@ -67,6 +67,9 @@
 - Добавлен `AgentCapabilities` для explicit future access grants.
 - CLI recall теперь имеет opt-in flags `--include-deprecated` и `--include-secret-references`.
 - Добавлены `AuditLogger` interface и `NoopAuditLogger` recall hook.
+- Добавлен `PageClustererKind` в manifest/config.
+- CLI `init` и `config set` теперь поддерживают `--page-clusterer scope_kind|marker_overlap`.
+- Seal path теперь использует configured page clusterer, default остается `scope_kind`.
 
 ## В Работе
 
@@ -74,7 +77,6 @@
 
 ## Дальше
 
-- Добавить store-level clustering config и optional marker-overlap seal mode.
 - Добавить реальный static filter index за `CandidatePageIndex`.
 - Добавить durable audit log storage в следующем security package.
 - SDK wrappers добавлять только после стабилизации Rust core API.
@@ -101,7 +103,7 @@ cargo run -p mge-cli -- stats
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 27 tests.
+- `cargo test`: passed, 28 tests.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -109,6 +111,7 @@ cargo run -p mge-cli -- stats
 - Recall JSON score debug smoke command: passed.
 - Index kind stats/config smoke command: passed.
 - Recall policy secret-reference opt-in smoke command: passed.
+- Marker-overlap clusterer seal smoke command: passed.
 - Smoke result после sealing:
   - hot cells: 0
   - sealed pages: 1-2 depending on smoke scenario

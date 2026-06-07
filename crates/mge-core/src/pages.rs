@@ -38,6 +38,8 @@ pub struct PageCatalogEntry {
     pub page_codec: PageCodecKind,
     #[serde(default)]
     pub compression: CompressionKind,
+    #[serde(default)]
+    pub page_clusterer: PageClustererKind,
     pub created_at: i64,
     pub cell_count: usize,
     pub marker_summary: Vec<MarkerId>,
@@ -145,6 +147,52 @@ impl Default for PageBuildOptions {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PageClustererKind {
+    ScopeKind,
+    MarkerOverlap,
+}
+
+impl PageClustererKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ScopeKind => "scope_kind",
+            Self::MarkerOverlap => "marker_overlap",
+        }
+    }
+}
+
+impl Default for PageClustererKind {
+    fn default() -> Self {
+        Self::ScopeKind
+    }
+}
+
+impl fmt::Display for PageClustererKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for PageClustererKind {
+    type Err = MgeError;
+
+    fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
+        match input.trim().to_ascii_lowercase().as_str() {
+            "scope_kind" | "scope-kind" | "scope+kind" | "scope_kind_clusterer" => {
+                Ok(Self::ScopeKind)
+            }
+            "marker_overlap" | "marker-overlap" | "marker_overlap_clusterer" => {
+                Ok(Self::MarkerOverlap)
+            }
+            other => Err(MgeError::InvalidInput(format!(
+                "unknown page clusterer kind: {other}"
+            ))),
+        }
+    }
+}
+
 pub trait PageClusterer {
     fn cluster_cells(&self, cells: &[MemoryCell]) -> Vec<Vec<MemoryCell>>;
 }
@@ -222,6 +270,37 @@ impl PageClusterer for MarkerOverlapClusterer {
 }
 
 pub fn build_pages_from_cells(cells: &[MemoryCell], start_page_id: PageId) -> Vec<MemoryPage> {
+    build_pages_with_kind(
+        cells,
+        start_page_id,
+        PageClustererKind::ScopeKind,
+        PageBuildOptions::default(),
+    )
+}
+
+pub fn build_pages_with_kind(
+    cells: &[MemoryCell],
+    start_page_id: PageId,
+    kind: PageClustererKind,
+    options: PageBuildOptions,
+) -> Vec<MemoryPage> {
+    match kind {
+        PageClustererKind::ScopeKind => {
+            build_pages_with_clusterer(cells, start_page_id, &ScopeKindClusterer, options)
+        }
+        PageClustererKind::MarkerOverlap => build_pages_with_clusterer(
+            cells,
+            start_page_id,
+            &MarkerOverlapClusterer::default(),
+            options,
+        ),
+    }
+}
+
+pub fn build_pages_with_default_clusterer(
+    cells: &[MemoryCell],
+    start_page_id: PageId,
+) -> Vec<MemoryPage> {
     build_pages_with_clusterer(
         cells,
         start_page_id,

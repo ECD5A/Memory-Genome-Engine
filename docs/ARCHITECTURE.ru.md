@@ -98,7 +98,11 @@ Page building скрыт за trait `PageClusterer`.
 - target page bytes, default 64 KiB;
 - max cells per page, default 512.
 
-Default seal path пока использует `ScopeKindClusterer`; marker-overlap clustering является extension point до добавления store-level clustering config.
+Default seal path пока использует `ScopeKindClusterer`. `MarkerOverlapClusterer` доступен как explicit opt-in store config:
+
+```bash
+mge config set --page-clusterer marker_overlap
+```
 
 ## Candidate Page Index
 

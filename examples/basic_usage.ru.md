@@ -45,4 +45,5 @@ cargo run -p mge-cli -- init --page-codec messagepack --compression zstd
 ```bash
 cargo run -p mge-cli -- config show
 cargo run -p mge-cli -- config set --page-codec messagepack --compression zstd
+cargo run -p mge-cli -- config set --page-clusterer marker_overlap
 ```

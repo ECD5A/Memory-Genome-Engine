@@ -100,6 +100,7 @@ cargo run -p mge-cli -- init --page-codec messagepack --compression zstd
 ```bash
 mge init
 mge init --page-codec messagepack --compression zstd
+mge config set --page-clusterer marker_overlap
 mge remember "..." --kind user_preference --scope global --trust user_confirmed
 mge recall "technical answer style"
 mge recall "api key" --include-secret-references

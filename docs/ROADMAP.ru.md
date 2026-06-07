@@ -23,7 +23,7 @@
 - Reranking transparency через debug score details. Сделано.
 - `IndexKind` metadata и exact-index extension boundary. Сделано.
 - Recall policy, agent capabilities и audit hook foundation. Сделано.
-- Store-level clustering config и marker-overlap seal mode.
+- Store-level clustering config и marker-overlap seal mode. Сделано.
 - Более сильный reranking.
 - Реальная XOR/Binary Fuse index implementation за существующим index trait.
 

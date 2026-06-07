@@ -23,10 +23,10 @@ pub use models::{
 };
 pub use packet::{ContextDebugInfo, ContextMemoryItem, ContextPacket};
 pub use pages::{
-    build_pages_from_cells, build_pages_with_clusterer, JsonPageCodec, MarkerOverlapClusterer,
-    MemoryPage, MessagePackPageCodec, PageBuildOptions, PageCatalog, PageCatalogEntry,
-    PageClusterer, PageCodec, PageCodecKind, ScopeKindClusterer, DEFAULT_MAX_CELLS_PER_PAGE,
-    DEFAULT_TARGET_PAGE_BYTES,
+    build_pages_from_cells, build_pages_with_clusterer, build_pages_with_kind, JsonPageCodec,
+    MarkerOverlapClusterer, MemoryPage, MessagePackPageCodec, PageBuildOptions, PageCatalog,
+    PageCatalogEntry, PageClusterer, PageClustererKind, PageCodec, PageCodecKind,
+    ScopeKindClusterer, DEFAULT_MAX_CELLS_PER_PAGE, DEFAULT_TARGET_PAGE_BYTES,
 };
 pub use retrieval::{build_context_packet, score_cell, score_cell_debug, RecallRequest, Retriever};
 pub use security::{

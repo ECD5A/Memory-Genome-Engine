@@ -18,8 +18,8 @@ use crate::models::{
 };
 use crate::packet::{ContextDebugInfo, ContextPacket};
 use crate::pages::{
-    build_pages_from_cells, decode_page_with, encode_page_with, page_file_name, MemoryPage,
-    PageCatalog, PageCatalogEntry, PageCodecKind,
+    build_pages_with_kind, decode_page_with, encode_page_with, page_file_name, MemoryPage,
+    PageBuildOptions, PageCatalog, PageCatalogEntry, PageClustererKind, PageCodecKind,
 };
 use crate::retrieval::{
     build_context_packet, score_cell_debug, RankedCell, RecallRequest, Retriever,
@@ -56,6 +56,8 @@ pub struct Manifest {
     pub compression: CompressionKind,
     #[serde(default)]
     pub index_kind: IndexKind,
+    #[serde(default)]
+    pub page_clusterer: PageClustererKind,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -63,6 +65,7 @@ pub struct InitOptions {
     pub page_codec: PageCodecKind,
     pub compression: CompressionKind,
     pub index_kind: IndexKind,
+    pub page_clusterer: PageClustererKind,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -70,12 +73,14 @@ pub struct StorageConfig {
     pub page_codec: PageCodecKind,
     pub compression: CompressionKind,
     pub index_kind: IndexKind,
+    pub page_clusterer: PageClustererKind,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct StorageConfigUpdate {
     pub page_codec: Option<PageCodecKind>,
     pub compression: Option<CompressionKind>,
+    pub page_clusterer: Option<PageClustererKind>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -134,6 +139,7 @@ pub struct StoreStats {
     pub current_page_codec: PageCodecKind,
     pub current_compression: CompressionKind,
     pub current_index_kind: IndexKind,
+    pub current_page_clusterer: PageClustererKind,
     pub index_type: String,
     pub last_seal_time: Option<i64>,
     pub store_size_bytes: u64,
@@ -151,6 +157,7 @@ page count: {}
 current page codec: {}
 current compression: {}
 current index kind: {}
+current page clusterer: {}
 index type: {}
 last seal time: {}
 store size bytes: {}
@@ -163,6 +170,7 @@ store size bytes: {}
             self.current_page_codec,
             self.current_compression,
             self.current_index_kind,
+            self.current_page_clusterer,
             self.index_type,
             self.last_seal_time
                 .map(|value| value.to_string())
@@ -205,6 +213,7 @@ impl MemoryEngine {
                 page_codec: options.page_codec,
                 compression: options.compression,
                 index_kind: options.index_kind,
+                page_clusterer: options.page_clusterer,
             };
             fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
         }
@@ -257,6 +266,7 @@ impl MemoryEngine {
             page_codec: self.manifest.page_codec,
             compression: self.manifest.compression,
             index_kind: self.manifest.index_kind,
+            page_clusterer: self.manifest.page_clusterer,
         }
     }
 
@@ -264,9 +274,13 @@ impl MemoryEngine {
         &mut self,
         update: StorageConfigUpdate,
     ) -> Result<StorageConfigUpdateReport> {
-        if update.page_codec.is_none() && update.compression.is_none() {
+        if update.page_codec.is_none()
+            && update.compression.is_none()
+            && update.page_clusterer.is_none()
+        {
             return Err(MgeError::InvalidInput(
-                "storage config update requires page_codec or compression".to_string(),
+                "storage config update requires page_codec, compression, or page_clusterer"
+                    .to_string(),
             ));
         }
 
@@ -276,6 +290,9 @@ impl MemoryEngine {
         }
         if let Some(compression) = update.compression {
             self.manifest.compression = compression;
+        }
+        if let Some(page_clusterer) = update.page_clusterer {
+            self.manifest.page_clusterer = page_clusterer;
         }
 
         let current = self.storage_config();
@@ -463,7 +480,12 @@ impl MemoryEngine {
             }
         }
 
-        let pages = build_pages_from_cells(&hot_cells, self.manifest.next_page_id);
+        let pages = build_pages_with_kind(
+            &hot_cells,
+            self.manifest.next_page_id,
+            self.manifest.page_clusterer,
+            PageBuildOptions::default(),
+        );
         let mut catalog = self.load_page_catalog()?;
         for page in &pages {
             self.write_page(page)?;
@@ -472,6 +494,7 @@ impl MemoryEngine {
                 file: page_file_name(page.page_id),
                 page_codec: self.manifest.page_codec,
                 compression: self.manifest.compression,
+                page_clusterer: self.manifest.page_clusterer,
                 created_at: page.created_at,
                 cell_count: page.cell_count,
                 marker_summary: page.marker_summary.clone(),
@@ -510,6 +533,7 @@ impl MemoryEngine {
             current_page_codec: self.manifest.page_codec,
             current_compression: self.manifest.compression,
             current_index_kind: self.manifest.index_kind,
+            current_page_clusterer: self.manifest.page_clusterer,
             index_type: self.manifest.index_kind.to_string(),
             last_seal_time: self.manifest.last_seal_time,
             store_size_bytes: store_size_bytes(&self.root)?,

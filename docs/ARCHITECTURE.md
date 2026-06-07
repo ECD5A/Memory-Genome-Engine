@@ -98,7 +98,11 @@ Available deterministic extension:
 - target page bytes, default 64 KiB;
 - max cells per page, default 512.
 
-The default seal path still uses `ScopeKindClusterer`; marker-overlap clustering is an extension point until store-level clustering config is added.
+The default seal path still uses `ScopeKindClusterer`. `MarkerOverlapClusterer` is available as explicit opt-in store config:
+
+```bash
+mge config set --page-clusterer marker_overlap
+```
 
 ## Candidate Page Index
 

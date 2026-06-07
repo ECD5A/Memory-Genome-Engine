@@ -5,7 +5,8 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use mge_core::{
     CompressionKind, IndexKind, InitOptions, MemoryEngine, MemoryKind, MemoryStatus, MemoryValue,
-    PageCodecKind, RecallRequest, RememberRequest, SensitivityLevel, TrustLevel, DEFAULT_STORE_DIR,
+    PageClustererKind, PageCodecKind, RecallRequest, RememberRequest, SensitivityLevel, TrustLevel,
+    DEFAULT_STORE_DIR,
 };
 
 #[derive(Debug, Parser)]
@@ -26,6 +27,9 @@ enum Commands {
 
         #[arg(long, default_value = "none")]
         compression: String,
+
+        #[arg(long, default_value = "scope_kind")]
+        page_clusterer: String,
     },
     Remember {
         text: Option<String>,
@@ -105,6 +109,9 @@ enum ConfigCommands {
         compression: Option<String>,
 
         #[arg(long)]
+        page_clusterer: Option<String>,
+
+        #[arg(long)]
         json: bool,
     },
 }
@@ -116,19 +123,22 @@ fn main() -> Result<()> {
         Commands::Init {
             page_codec,
             compression,
+            page_clusterer,
         } => {
             let options = InitOptions {
                 page_codec: PageCodecKind::from_str(&page_codec)?,
                 compression: CompressionKind::from_str(&compression)?,
                 index_kind: IndexKind::ExactMarkerPage,
+                page_clusterer: PageClustererKind::from_str(&page_clusterer)?,
             };
             let engine = MemoryEngine::init_with_options(&cli.store, options)
                 .with_context(|| format!("failed to initialize {}", cli.store.display()))?;
             println!(
-                "Initialized Memory Genome store at {} (page_codec={}, compression={})",
+                "Initialized Memory Genome store at {} (page_codec={}, compression={}, page_clusterer={})",
                 engine.root().display(),
                 options.page_codec,
-                options.compression
+                options.compression,
+                options.page_clusterer
             );
         }
         Commands::Remember {
@@ -201,15 +211,17 @@ fn main() -> Result<()> {
                     println!("page codec: {}", config.page_codec);
                     println!("compression: {}", config.compression);
                     println!("index kind: {}", config.index_kind);
+                    println!("page clusterer: {}", config.page_clusterer);
                 }
             }
             ConfigCommands::Set {
                 page_codec,
                 compression,
+                page_clusterer,
                 json,
             } => {
-                if page_codec.is_none() && compression.is_none() {
-                    bail!("config set requires --page-codec or --compression");
+                if page_codec.is_none() && compression.is_none() && page_clusterer.is_none() {
+                    bail!("config set requires --page-codec, --compression, or --page-clusterer");
                 }
 
                 let mut engine = open_engine(&cli.store)?;
@@ -222,18 +234,24 @@ fn main() -> Result<()> {
                         .as_deref()
                         .map(CompressionKind::from_str)
                         .transpose()?,
+                    page_clusterer: page_clusterer
+                        .as_deref()
+                        .map(PageClustererKind::from_str)
+                        .transpose()?,
                 })?;
 
                 if json {
                     println!("{}", serde_json::to_string_pretty(&report)?);
                 } else {
                     println!(
-                        "storage config: page_codec {} -> {}, compression {} -> {}, index_kind {}",
+                        "storage config: page_codec {} -> {}, compression {} -> {}, index_kind {}, page_clusterer {} -> {}",
                         report.previous.page_codec,
                         report.current.page_codec,
                         report.previous.compression,
                         report.current.compression,
-                        report.current.index_kind
+                        report.current.index_kind,
+                        report.previous.page_clusterer,
+                        report.current.page_clusterer
                     );
                     println!(
                         "existing sealed pages unchanged: {}",

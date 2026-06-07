@@ -45,4 +45,5 @@ Change defaults for future sealed pages in an existing store:
 ```bash
 cargo run -p mge-cli -- config show
 cargo run -p mge-cli -- config set --page-codec messagepack --compression zstd
+cargo run -p mge-cli -- config set --page-clusterer marker_overlap
 ```

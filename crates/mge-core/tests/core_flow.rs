@@ -4,8 +4,9 @@ use mge_core::{
     AuditEvent, AuditLogger, CandidatePageIndex, CompressionKind, Compressor, ContextDebugInfo,
     ExactMarkerPageIndex, IndexKind, InitOptions, MarkerOverlapClusterer, MemoryEngine, MemoryKind,
     MemoryStatus, MemoryValue, MessagePackPageCodec, NoopAuditLogger, PageBuildOptions,
-    PageCatalogEntry, PageCodec, PageCodecKind, RecallPolicy, RecallRequest, RememberRequest,
-    ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate, TrustLevel, ZstdCompression,
+    PageCatalogEntry, PageClustererKind, PageCodec, PageCodecKind, RecallPolicy, RecallRequest,
+    RememberRequest, ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate, TrustLevel,
+    ZstdCompression,
 };
 use tempfile::tempdir;
 
@@ -105,6 +106,7 @@ fn init_options_are_saved_in_manifest() {
             page_codec: PageCodecKind::MessagePack,
             compression: CompressionKind::Zstd,
             index_kind: IndexKind::ExactMarkerPage,
+            page_clusterer: PageClustererKind::ScopeKind,
         },
     )
     .unwrap();
@@ -114,6 +116,10 @@ fn init_options_are_saved_in_manifest() {
     assert_eq!(inspect.manifest.page_codec, PageCodecKind::MessagePack);
     assert_eq!(inspect.manifest.compression, CompressionKind::Zstd);
     assert_eq!(inspect.manifest.index_kind, IndexKind::ExactMarkerPage);
+    assert_eq!(
+        inspect.manifest.page_clusterer,
+        PageClustererKind::ScopeKind
+    );
 }
 
 #[test]
@@ -125,6 +131,7 @@ fn storage_config_update_changes_future_defaults() {
         .update_storage_config(StorageConfigUpdate {
             page_codec: Some(PageCodecKind::MessagePack),
             compression: Some(CompressionKind::Zstd),
+            page_clusterer: Some(PageClustererKind::MarkerOverlap),
         })
         .unwrap();
 
@@ -132,11 +139,19 @@ fn storage_config_update_changes_future_defaults() {
     assert_eq!(report.previous.compression, CompressionKind::None);
     assert_eq!(report.current.page_codec, PageCodecKind::MessagePack);
     assert_eq!(report.current.compression, CompressionKind::Zstd);
+    assert_eq!(
+        report.current.page_clusterer,
+        PageClustererKind::MarkerOverlap
+    );
     assert!(report.changed);
 
     let inspect = engine.inspect().unwrap();
     assert_eq!(inspect.manifest.page_codec, PageCodecKind::MessagePack);
     assert_eq!(inspect.manifest.compression, CompressionKind::Zstd);
+    assert_eq!(
+        inspect.manifest.page_clusterer,
+        PageClustererKind::MarkerOverlap
+    );
 }
 
 #[test]
@@ -204,6 +219,7 @@ fn recall_from_messagepack_zstd_sealed_pages() {
             page_codec: PageCodecKind::MessagePack,
             compression: CompressionKind::Zstd,
             index_kind: IndexKind::ExactMarkerPage,
+            page_clusterer: PageClustererKind::ScopeKind,
         },
     )
     .unwrap();
@@ -236,6 +252,7 @@ fn storage_config_update_keeps_existing_pages_readable() {
         .update_storage_config(StorageConfigUpdate {
             page_codec: Some(PageCodecKind::MessagePack),
             compression: Some(CompressionKind::Zstd),
+            page_clusterer: None,
         })
         .unwrap();
     assert_eq!(report.existing_pages_unchanged, 1);
@@ -271,6 +288,64 @@ fn storage_config_update_keeps_existing_pages_readable() {
     let packet = engine.recall(RecallRequest::new("technical")).unwrap();
     assert_eq!(packet.relevant_memory.len(), 2);
     assert_eq!(packet.debug.candidate_pages.len(), 2);
+}
+
+#[test]
+fn seal_uses_marker_overlap_clusterer_when_configured() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    engine
+        .update_storage_config(StorageConfigUpdate {
+            page_codec: None,
+            compression: None,
+            page_clusterer: Some(PageClustererKind::MarkerOverlap),
+        })
+        .unwrap();
+
+    let mut first = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text("alpha technical memory".to_string()),
+    );
+    first.scope = "project".to_string();
+    first.status = MemoryStatus::Active;
+    first.trust = TrustLevel::UserConfirmed;
+    first.sensitivity = SensitivityLevel::Private;
+    first.markers = vec!["tag:alpha".to_string(), "tag:technical".to_string()];
+    engine.remember(first).unwrap();
+
+    let mut second = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text("alpha technical followup".to_string()),
+    );
+    second.scope = "project".to_string();
+    second.status = MemoryStatus::Active;
+    second.trust = TrustLevel::UserConfirmed;
+    second.sensitivity = SensitivityLevel::Private;
+    second.markers = vec!["tag:alpha".to_string(), "tag:technical".to_string()];
+    engine.remember(second).unwrap();
+
+    let mut third = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text("unrelated archival note".to_string()),
+    );
+    third.scope = "project".to_string();
+    third.status = MemoryStatus::Temporary;
+    third.trust = TrustLevel::ExternalUntrusted;
+    third.sensitivity = SensitivityLevel::Confidential;
+    third.markers = vec!["tag:unrelated".to_string(), "tag:archive".to_string()];
+    engine.remember(third).unwrap();
+
+    engine.seal().unwrap();
+    let inspect = engine.inspect().unwrap();
+
+    assert_eq!(inspect.page_catalog.pages.len(), 2);
+    assert!(inspect
+        .page_catalog
+        .pages
+        .iter()
+        .all(|entry| entry.page_clusterer == PageClustererKind::MarkerOverlap));
+    assert_eq!(inspect.page_catalog.pages[0].cell_count, 2);
+    assert_eq!(inspect.page_catalog.pages[1].cell_count, 1);
 }
 
 #[test]
@@ -379,6 +454,7 @@ fn legacy_page_catalog_entries_default_to_json_without_compression() {
 
     assert_eq!(entry.page_codec, PageCodecKind::Json);
     assert_eq!(entry.compression, CompressionKind::None);
+    assert_eq!(entry.page_clusterer, PageClustererKind::ScopeKind);
 }
 
 #[test]
