@@ -50,6 +50,7 @@ This file is the working ledger for this repository. Keep it current so we do no
   - `docs/ROADMAP.md`
   - `examples/basic_usage.md`
 - Rust tests added for marker canonicalization, dictionary IDs, cell creation, marker generation, hot recall, sealing, sealed recall, index lookup, filtering, context packet text, and stats output.
+- CLI milestone integration test added against the real `mge` binary.
 - MIT license added for ECD5A.
 - README polished with badges, navigation, Donate block, and license section.
 - Russian mirrors added for important Markdown files.
@@ -136,7 +137,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 56 tests total (9 CLI unit tests + 1 core unit test + 46 integration tests).
+- `cargo test`: passed, 57 tests total (9 CLI unit tests + 1 CLI integration test + 1 core unit test + 46 core integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -161,6 +162,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Context packet dedupe test: passed for duplicate ranked cells with the same `cell_id`.
 - Structured JSON marker extraction tests: passed for marker generation and hot recall.
 - Structured JSON marker extraction CLI smoke command: passed, recall matched `tag:style` and `tag:concise`.
+- CLI milestone integration test: passed for init, remember, recall JSON, seal, stats JSON, and validate JSON.
 - Stats JSON smoke command: passed, `sealed_pages` and `current_index_kind` exported.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.

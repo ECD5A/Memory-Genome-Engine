@@ -450,6 +450,7 @@ dependencies = [
  "clap",
  "mge-core",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

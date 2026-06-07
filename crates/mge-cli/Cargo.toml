@@ -12,6 +12,9 @@ clap.workspace = true
 mge-core = { path = "../mge-core" }
 serde_json.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [[bin]]
 name = "mge"
 path = "src/main.rs"

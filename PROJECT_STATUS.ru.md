@@ -48,6 +48,7 @@
   - `examples/basic_usage.md`
   - `examples/basic_usage.ru.md`
 - Добавлены Rust tests для marker canonicalization, dictionary IDs, cell creation, marker generation, hot recall, sealing, sealed recall, index lookup, filtering, context packet text и stats output.
+- Добавлен CLI milestone integration test против реального binary `mge`.
 - Добавлена MIT license от ECD5A.
 - README оформлен бейджами, EN/RU навигацией, Donate-блоком и license section.
 - Добавлен `MessagePackPageCodec` за существующим trait `PageCodec` как первый v0.2 codec step.
@@ -133,7 +134,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 56 tests total (9 CLI unit tests + 1 core unit test + 46 integration tests).
+- `cargo test`: passed, 57 tests total (9 CLI unit tests + 1 CLI integration test + 1 core unit test + 46 core integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -158,6 +159,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Context packet dedupe test: passed для duplicate ranked cells с одинаковым `cell_id`.
 - Structured JSON marker extraction tests: passed для marker generation и hot recall.
 - Structured JSON marker extraction CLI smoke command: passed, recall matched `tag:style` и `tag:concise`.
+- CLI milestone integration test: passed для init, remember, recall JSON, seal, stats JSON и validate JSON.
 - Stats JSON smoke command: passed, `sealed_pages` и `current_index_kind` exported.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.
