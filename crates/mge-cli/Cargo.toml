@@ -1,0 +1,16 @@
+[package]
+name = "mge-cli"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+mge-core = { path = "../mge-core" }
+serde_json.workspace = true
+
+[[bin]]
+name = "mge"
+path = "src/main.rs"

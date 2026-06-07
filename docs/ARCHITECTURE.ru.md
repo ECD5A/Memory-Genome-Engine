@@ -1,0 +1,165 @@
+# Архитектура
+
+[English version](ARCHITECTURE.md)
+
+Memory Genome Engine - Rust-first слой структурированной памяти для LLM-агентов.
+
+## Pipeline
+
+```text
+Agent / CLI / SDK
+    -> Memory Engine API
+    -> Marker Extractor
+    -> Genome Encoder
+    -> Hot Memory Layer
+    -> Sealed Page Store
+    -> Candidate Page Index
+    -> Page Reader
+    -> Reranker
+    -> Context Packet Builder
+    -> Agent receives minimal relevant memory
+```
+
+## Модель Данных
+
+Атомарная единица - `MemoryCell`. Cell хранит типизированное значение, metadata, trust/status/sensitivity, marker IDs, optional source metadata и links на другие cells.
+
+Значения не считаются просто сырым текстом. v0.1 поддерживает:
+
+- text
+- symbol
+- number
+- boolean
+- timestamp
+- reference
+- structured JSON
+
+## Marker Genome
+
+Каждая cell получает детерминированные marker strings, которые canonicalize в marker IDs через `MarkerDictionary`.
+
+Примеры:
+
+```text
+kind:user_preference
+scope:global
+status:active
+trust:user_confirmed
+sensitivity:private
+tag:technical
+```
+
+Dictionary сохраняет стабильные integer IDs в `.memory-genome/markers.json`.
+
+## Storage Layers
+
+Hot memory изменяемая и append-only:
+
+```text
+.memory-genome/hot/hot_cells.jsonl
+```
+
+Sealed memory полустатическая и page based:
+
+```text
+.memory-genome/pages/000001.mgp
+.memory-genome/indexes/page_catalog.json
+.memory-genome/indexes/marker_to_pages.json
+```
+
+Page files используют codecs, скрытые за trait `PageCodec`:
+
+- `JsonPageCodec`
+- `MessagePackPageCodec`
+
+Compression скрыт за trait `Compressor`:
+
+- `NoCompression`
+- `ZstdCompression`
+
+Manifest хранит default codec/compression для новых sealed pages. Каждая `PageCatalogEntry` хранит фактический codec/compression конкретной страницы, поэтому движок может читать mixed stores и старые JSON/no-compression pages.
+
+`mge config set` обновляет только manifest defaults для будущих seals. Он не переписывает существующие page files и не мутирует существующие page catalog entries.
+
+## Page Clustering
+
+Page building скрыт за trait `PageClusterer`.
+
+Текущий default:
+
+- `ScopeKindClusterer`: группирует cells по `scope + kind`.
+
+Доступное deterministic extension:
+
+- `MarkerOverlapClusterer`: группирует cells внутри базовой группы `scope + kind` по marker overlap. Он не использует ML или embeddings.
+
+`PageBuildOptions` добавляет logical page limits:
+
+- target page bytes, default 64 KiB;
+- max cells per page, default 512.
+
+Default seal path пока использует `ScopeKindClusterer`; marker-overlap clustering является extension point до добавления store-level clustering config.
+
+## Candidate Page Index
+
+v0.1 реализует `ExactMarkerPageIndex`:
+
+```text
+MarkerId -> Vec<PageId>
+```
+
+Публичная абстракция индекса - `CandidatePageIndex`. В следующих версиях exact map можно заменить на XOR/Binary Fuse/Ribbon-style static filters без изменения retrieval API.
+
+Hot memory использует mutable scanning/indexing. Sealed pages используют static candidate indexes.
+
+## Retrieval
+
+Recall делает следующее:
+
+1. Извлекает детерминированные query markers.
+2. Мапит известные markers в marker IDs.
+3. Сканирует hot memory.
+4. Запрашивает candidate sealed pages.
+5. Загружает только candidate pages.
+6. Rerank cells по marker overlap, subject/value matches, trust, status и sensitivity.
+7. По умолчанию фильтрует deprecated/rejected и `SecretReference` cells.
+8. Возвращает `ContextPacket`.
+
+## Extension Traits
+
+В коде есть явные interfaces для будущих изменений:
+
+- `Store`
+- `PageCodec`
+- `Compressor`
+- `CandidatePageIndex`
+- `Retriever`
+- `SecurityProvider`
+
+## Future Security
+
+Page pipeline подготовлен под:
+
+```text
+encode page -> compress page -> encrypt page -> write page
+```
+
+Текущее storage использует честную pass-through реализацию `NoSecurity`. Он не делает вид, что шифрует данные.
+
+Future security layers:
+
+- page-level encryption
+- session-bound unlock
+- page keys
+- encrypted indexes
+- blind marker tokens
+- HMAC marker indexes
+- policy-gated retrieval
+- agent capabilities
+- audit log
+
+Future blind marker direction:
+
+```text
+blind_marker = HMAC(index_key, canonical_marker)
+```

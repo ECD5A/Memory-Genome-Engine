@@ -1,0 +1,4 @@
+/target/
+/.memory-genome/
+**/*.rs.bk
+desktop.ini
