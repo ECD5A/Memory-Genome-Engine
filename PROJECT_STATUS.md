@@ -59,6 +59,9 @@ This file is the working ledger for this repository. Keep it current so we do no
 - `MarkerOverlapClusterer` added as a deterministic no-ML extension strategy.
 - `PageBuildOptions` added with 64 KiB target page bytes and 512 max cells defaults.
 - Page builder now enforces logical page limits.
+- `ContextDebugInfo.score_details` added for transparent reranking in JSON/debug output.
+- Reranking now records marker, subject, value, trust, status, and sensitivity score components.
+- Prompt text output remains compact and does not expose score internals.
 
 ## In Progress
 
@@ -92,11 +95,12 @@ cargo run -p mge-cli -- stats
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 22 tests.
+- `cargo test`: passed, 23 tests.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
 - Default clustering smoke commands: passed.
+- Recall JSON score debug smoke command: passed.
 - Smoke result after sealing:
   - hot cells: 0
   - sealed pages: 1-2 depending on smoke scenario

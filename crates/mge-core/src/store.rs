@@ -21,7 +21,9 @@ use crate::pages::{
     build_pages_from_cells, decode_page_with, encode_page_with, page_file_name, MemoryPage,
     PageCatalog, PageCatalogEntry, PageCodecKind,
 };
-use crate::retrieval::{build_context_packet, score_cell, RankedCell, RecallRequest, Retriever};
+use crate::retrieval::{
+    build_context_packet, score_cell_debug, RankedCell, RecallRequest, Retriever,
+};
 use crate::security::{NoSecurity, SecurityProvider};
 
 pub const DEFAULT_STORE_DIR: &str = ".memory-genome";
@@ -351,10 +353,13 @@ impl MemoryEngine {
         let hot_cells = HotStore::new(self.hot_cells_path()).load_cells()?;
         let mut ranked = Vec::new();
         for cell in &hot_cells {
-            if let Some(score) = score_cell(cell, &request, &query_marker_ids, &query_tokens) {
+            if let Some(score_detail) =
+                score_cell_debug(cell, &request, &query_marker_ids, &query_tokens)
+            {
                 ranked.push(RankedCell {
                     cell: cell.clone(),
-                    score,
+                    score: score_detail.score,
+                    score_detail,
                 });
             }
         }
@@ -381,10 +386,13 @@ impl MemoryEngine {
             let page = self.read_page(entry)?;
             sealed_cells_scanned += page.cells.len();
             for cell in &page.cells {
-                if let Some(score) = score_cell(cell, &request, &query_marker_ids, &query_tokens) {
+                if let Some(score_detail) =
+                    score_cell_debug(cell, &request, &query_marker_ids, &query_tokens)
+                {
                     ranked.push(RankedCell {
                         cell: cell.clone(),
-                        score,
+                        score: score_detail.score,
+                        score_detail,
                     });
                 }
             }
@@ -403,6 +411,7 @@ impl MemoryEngine {
             candidate_pages,
             sealed_cells_scanned,
             total_candidates: ranked.len(),
+            score_details: Vec::new(),
         };
 
         Ok(build_context_packet(

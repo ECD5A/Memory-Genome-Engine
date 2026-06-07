@@ -1,8 +1,8 @@
 use mge_core::{
     build_context_packet, build_pages_from_cells, build_pages_with_clusterer, canonicalize_marker,
-    marker_strings_for_cell_fields, CandidatePageIndex, CompressionKind, Compressor,
-    ContextDebugInfo, ExactMarkerPageIndex, InitOptions, MarkerOverlapClusterer, MemoryEngine,
-    MemoryKind, MemoryStatus, MemoryValue, MessagePackPageCodec, PageBuildOptions,
+    marker_strings_for_cell_fields, score_cell_debug, CandidatePageIndex, CompressionKind,
+    Compressor, ContextDebugInfo, ExactMarkerPageIndex, InitOptions, MarkerOverlapClusterer,
+    MemoryEngine, MemoryKind, MemoryStatus, MemoryValue, MessagePackPageCodec, PageBuildOptions,
     PageCatalogEntry, PageCodec, PageCodecKind, RecallRequest, RememberRequest, ScopeKindClusterer,
     SensitivityLevel, StorageConfigUpdate, TrustLevel, ZstdCompression,
 };
@@ -153,6 +153,9 @@ fn recall_from_hot_memory() {
         .content
         .contains("concise technical"));
     assert_eq!(packet.debug.hot_cells_scanned, 1);
+    assert_eq!(packet.debug.score_details.len(), 1);
+    assert_eq!(packet.debug.score_details[0].trust_bonus, 5);
+    assert_eq!(packet.debug.score_details[0].status_bonus, 5);
 }
 
 #[test]
@@ -441,7 +444,11 @@ fn context_packet_prompt_text() {
         None,
         Vec::new(),
     );
-    let ranked = vec![mge_core::retrieval::RankedCell { cell, score: 10 }];
+    let ranked = vec![mge_core::retrieval::RankedCell {
+        cell,
+        score: 10,
+        score_detail: Default::default(),
+    }];
     let dictionary = mge_core::MarkerDictionary::new();
     let packet = build_context_packet(
         "technical answer".to_string(),
@@ -454,6 +461,49 @@ fn context_packet_prompt_text() {
 
     assert!(text.contains("Relevant memory:"));
     assert!(text.contains("Do not use deprecated or rejected memories."));
+    assert!(!text.contains("score"));
+}
+
+#[test]
+fn score_debug_explains_status_trust_and_sensitivity() {
+    let cell = mge_core::MemoryCell::new(
+        1,
+        MemoryKind::ProjectFact,
+        Some("security posture".to_string()),
+        MemoryValue::Text("Security posture is confidential".to_string()),
+        "project".to_string(),
+        MemoryStatus::Unverified,
+        TrustLevel::ExternalUntrusted,
+        SensitivityLevel::Confidential,
+        vec![10],
+        None,
+        Vec::new(),
+    );
+
+    let detail = score_cell_debug(
+        &cell,
+        &RecallRequest::new("security posture"),
+        &[10],
+        &["security".to_string(), "posture".to_string()],
+    )
+    .unwrap();
+
+    assert_eq!(detail.marker_overlap, 1);
+    assert_eq!(detail.marker_overlap_score, 10);
+    assert!(detail.exact_subject_match);
+    assert_eq!(detail.exact_subject_score, 5);
+    assert_eq!(detail.trust_bonus, -3);
+    assert_eq!(detail.status_bonus, -1);
+    assert_eq!(detail.sensitivity_penalty, 2);
+    assert_eq!(
+        detail.score,
+        detail.marker_overlap_score
+            + detail.exact_subject_score
+            + detail.value_overlap_score
+            + detail.trust_bonus
+            + detail.status_bonus
+            - detail.sensitivity_penalty
+    );
 }
 
 #[test]

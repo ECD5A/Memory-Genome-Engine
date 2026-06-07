@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::models::{MemoryKind, MemoryStatus, PageId, SensitivityLevel, TrustLevel};
+use crate::models::{CellId, MemoryKind, MemoryStatus, PageId, SensitivityLevel, TrustLevel};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ContextPacket {
@@ -61,4 +61,21 @@ pub struct ContextDebugInfo {
     pub candidate_pages: Vec<PageId>,
     pub sealed_cells_scanned: usize,
     pub total_candidates: usize,
+    #[serde(default)]
+    pub score_details: Vec<ContextScoreDebugItem>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ContextScoreDebugItem {
+    pub cell_id: CellId,
+    pub score: i64,
+    pub marker_overlap: i64,
+    pub marker_overlap_score: i64,
+    pub exact_subject_match: bool,
+    pub exact_subject_score: i64,
+    pub value_overlap: i64,
+    pub value_overlap_score: i64,
+    pub trust_bonus: i64,
+    pub status_bonus: i64,
+    pub sensitivity_penalty: i64,
 }

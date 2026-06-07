@@ -125,6 +125,17 @@ Recall делает следующее:
 7. По умолчанию фильтрует deprecated/rejected и `SecretReference` cells.
 8. Возвращает `ContextPacket`.
 
+Reranking прозрачен в JSON/debug output. `ContextDebugInfo.score_details` показывает score components для возвращенных items:
+
+- marker overlap score;
+- exact subject match score;
+- value overlap score;
+- trust bonus;
+- status bonus;
+- sensitivity penalty.
+
+Prompt text output намеренно остается компактным и не включает scores.
+
 ## Extension Traits
 
 В коде есть явные interfaces для будущих изменений:

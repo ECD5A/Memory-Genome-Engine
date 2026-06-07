@@ -28,7 +28,7 @@ pub use pages::{
     PageClusterer, PageCodec, PageCodecKind, ScopeKindClusterer, DEFAULT_MAX_CELLS_PER_PAGE,
     DEFAULT_TARGET_PAGE_BYTES,
 };
-pub use retrieval::{build_context_packet, RecallRequest, Retriever};
+pub use retrieval::{build_context_packet, score_cell, score_cell_debug, RecallRequest, Retriever};
 pub use security::{NoSecurity, SecurityProvider};
 pub use store::{
     InitOptions, InspectReport, MemoryEngine, RememberRequest, SealReport, StorageConfig,

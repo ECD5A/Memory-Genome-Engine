@@ -20,6 +20,7 @@
 - zstd compression. Сделано как foundation.
 - Store config show/set для future page defaults. Сделано.
 - Page clustering trait и logical page limits. Сделано как foundation.
+- Reranking transparency через debug score details. Сделано.
 - Store-level clustering config и marker-overlap seal mode.
 - Более сильный reranking.
 - Реальная XOR/Binary Fuse index implementation за существующим index trait.

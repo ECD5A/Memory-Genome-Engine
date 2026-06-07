@@ -125,6 +125,17 @@ Recall does the following:
 7. Filter deprecated/rejected and `SecretReference` cells by default.
 8. Emit a `ContextPacket`.
 
+Reranking is transparent in JSON/debug output. `ContextDebugInfo.score_details` reports the score components for returned items:
+
+- marker overlap score;
+- exact subject match score;
+- value overlap score;
+- trust bonus;
+- status bonus;
+- sensitivity penalty.
+
+The prompt text output intentionally stays compact and does not include scores.
+
 ## Extension Traits
 
 The code has explicit interfaces for future changes:

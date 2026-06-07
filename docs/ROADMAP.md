@@ -20,6 +20,7 @@
 - zstd compression. Done as foundation.
 - Store config show/set for future page defaults. Done.
 - Page clustering trait and logical page limits. Done as foundation.
+- Reranking transparency through debug score details. Done.
 - Store-level clustering config and marker-overlap seal mode.
 - Better reranking.
 - Real XOR/Binary Fuse index implementation behind the existing index trait.

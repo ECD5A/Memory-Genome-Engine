@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::errors::Result;
 use crate::markers::{canonicalize_marker_value, tokenize_keywords, MarkerDictionary};
 use crate::models::{MemoryCell, MemoryKind, MemoryStatus, SensitivityLevel, TrustLevel};
-use crate::packet::{ContextDebugInfo, ContextMemoryItem, ContextPacket};
+use crate::packet::{ContextDebugInfo, ContextMemoryItem, ContextPacket, ContextScoreDebugItem};
 
 pub trait Retriever {
     fn recall(&self, request: RecallRequest) -> Result<ContextPacket>;
@@ -38,6 +38,7 @@ impl RecallRequest {
 pub struct RankedCell {
     pub cell: MemoryCell,
     pub score: i64,
+    pub score_detail: ContextScoreDebugItem,
 }
 
 pub fn score_cell(
@@ -46,6 +47,15 @@ pub fn score_cell(
     query_marker_ids: &[u32],
     query_tokens: &[String],
 ) -> Option<i64> {
+    score_cell_debug(cell, request, query_marker_ids, query_tokens).map(|detail| detail.score)
+}
+
+pub fn score_cell_debug(
+    cell: &MemoryCell,
+    request: &RecallRequest,
+    query_marker_ids: &[u32],
+    query_tokens: &[String],
+) -> Option<ContextScoreDebugItem> {
     if let Some(kind) = request.kind {
         if cell.kind != kind {
             return None;
@@ -93,22 +103,38 @@ pub fn score_cell(
                 .all(|token| query_token_set.contains(token.as_str()))
     });
 
-    let mut relevance = marker_overlap * 10;
-    if exact_subject_match {
-        relevance += 5;
-    }
-    if value_overlap > 0 {
-        relevance += value_overlap.min(3) * 3;
-    }
+    let marker_overlap_score = marker_overlap * 10;
+    let exact_subject_score = if exact_subject_match { 5 } else { 0 };
+    let value_overlap_score = if value_overlap > 0 {
+        value_overlap.min(3) * 3
+    } else {
+        0
+    };
+
+    let relevance = marker_overlap_score + exact_subject_score + value_overlap_score;
 
     if relevance <= 0 {
         return None;
     }
 
-    let score = relevance + trust_bonus(cell.trust) + status_bonus(cell.status)
-        - sensitivity_penalty(cell.sensitivity);
+    let trust_bonus = trust_bonus(cell.trust);
+    let status_bonus = status_bonus(cell.status);
+    let sensitivity_penalty = sensitivity_penalty(cell.sensitivity);
+    let score = relevance + trust_bonus + status_bonus - sensitivity_penalty;
 
-    Some(score)
+    Some(ContextScoreDebugItem {
+        cell_id: cell.id,
+        score,
+        marker_overlap,
+        marker_overlap_score,
+        exact_subject_match,
+        exact_subject_score,
+        value_overlap,
+        value_overlap_score,
+        trust_bonus,
+        status_bonus,
+        sensitivity_penalty,
+    })
 }
 
 pub fn build_context_packet(
@@ -141,6 +167,12 @@ pub fn build_context_packet(
         })
         .collect::<Vec<_>>();
 
+    let score_details = ranked
+        .iter()
+        .take(max_items)
+        .map(|ranked| ranked.score_detail.clone())
+        .collect::<Vec<_>>();
+
     let mut warnings = Vec::new();
     if relevant_memory.is_empty() {
         warnings.push("No relevant memory matched the query.".to_string());
@@ -154,7 +186,10 @@ pub fn build_context_packet(
             "Do not expose secret_reference cells.".to_string(),
         ],
         warnings,
-        debug,
+        debug: ContextDebugInfo {
+            score_details,
+            ..debug
+        },
     }
 }
 
