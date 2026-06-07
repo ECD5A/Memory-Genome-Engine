@@ -102,6 +102,7 @@ mge init
 mge init --page-codec messagepack --compression zstd
 mge remember "..." --kind user_preference --scope global --trust user_confirmed
 mge recall "technical answer style"
+mge recall "api key" --include-secret-references
 mge seal
 mge config show
 mge config set --page-codec messagepack --compression zstd
@@ -117,6 +118,8 @@ mge recall "technical answer style" --marker kind:user_preference --marker scope
 ```
 
 `mge config set` changes only the defaults for future sealed pages. Existing page files are not rewritten; each catalog entry keeps the codec/compression needed to read that page.
+
+Deprecated/rejected memories and `SecretReference` cells are filtered by default. Use recall opt-in flags only when the caller has an explicit reason and capability.
 
 ## Repository Layout
 

@@ -4,6 +4,7 @@ use crate::errors::Result;
 use crate::markers::{canonicalize_marker_value, tokenize_keywords, MarkerDictionary};
 use crate::models::{MemoryCell, MemoryKind, MemoryStatus, SensitivityLevel, TrustLevel};
 use crate::packet::{ContextDebugInfo, ContextMemoryItem, ContextPacket, ContextScoreDebugItem};
+use crate::security::{AgentCapabilities, RecallPolicy};
 
 pub trait Retriever {
     fn recall(&self, request: RecallRequest) -> Result<ContextPacket>;
@@ -18,6 +19,8 @@ pub struct RecallRequest {
     pub max_items: usize,
     pub include_deprecated: bool,
     pub include_secret_references: bool,
+    pub policy: RecallPolicy,
+    pub capabilities: AgentCapabilities,
 }
 
 impl RecallRequest {
@@ -30,6 +33,23 @@ impl RecallRequest {
             max_items: 5,
             include_deprecated: false,
             include_secret_references: false,
+            policy: RecallPolicy::default(),
+            capabilities: AgentCapabilities::default(),
+        }
+    }
+
+    pub fn effective_policy(&self) -> RecallPolicy {
+        let capability_policy = RecallPolicy::from_capabilities(&self.capabilities);
+        RecallPolicy {
+            include_deprecated: self.policy.include_deprecated
+                || capability_policy.include_deprecated
+                || self.include_deprecated,
+            include_rejected: self.policy.include_rejected
+                || capability_policy.include_rejected
+                || self.include_deprecated,
+            allow_secret_references: self.policy.allow_secret_references
+                || capability_policy.allow_secret_references
+                || self.include_secret_references,
         }
     }
 }
@@ -68,16 +88,7 @@ pub fn score_cell_debug(
         }
     }
 
-    if !request.include_deprecated
-        && matches!(
-            cell.status,
-            MemoryStatus::Deprecated | MemoryStatus::Rejected
-        )
-    {
-        return None;
-    }
-
-    if !request.include_secret_references && cell.sensitivity == SensitivityLevel::SecretReference {
+    if !request.effective_policy().permits_cell(cell) {
         return None;
     }
 
@@ -173,18 +184,37 @@ pub fn build_context_packet(
         .map(|ranked| ranked.score_detail.clone())
         .collect::<Vec<_>>();
 
+    let includes_deprecated_or_rejected = relevant_memory.iter().any(|item| {
+        matches!(
+            item.status,
+            MemoryStatus::Deprecated | MemoryStatus::Rejected
+        )
+    });
+    let includes_secret_references = relevant_memory
+        .iter()
+        .any(|item| item.sensitivity == SensitivityLevel::SecretReference);
+
+    let mut constraints = Vec::new();
     let mut warnings = Vec::new();
     if relevant_memory.is_empty() {
         warnings.push("No relevant memory matched the query.".to_string());
+    }
+    if includes_deprecated_or_rejected {
+        warnings
+            .push("Deprecated or rejected memories were included by explicit policy.".to_string());
+    } else {
+        constraints.push("Do not use deprecated or rejected memories.".to_string());
+    }
+    if includes_secret_references {
+        warnings.push("SecretReference cells were included by explicit policy.".to_string());
+    } else {
+        constraints.push("Do not expose secret_reference cells.".to_string());
     }
 
     ContextPacket {
         query,
         relevant_memory,
-        constraints: vec![
-            "Do not use deprecated or rejected memories.".to_string(),
-            "Do not expose secret_reference cells.".to_string(),
-        ],
+        constraints,
         warnings,
         debug: ContextDebugInfo {
             score_details,

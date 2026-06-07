@@ -63,6 +63,10 @@
 - Manifest, page catalog, stats и exact index files теперь несут index kind metadata.
 - `CandidatePageIndex` теперь раскрывает `kind()` для будущих static index implementations.
 - Binary Fuse/XOR/Ribbon indexes остаются roadmap items; fake implementation не добавлялся.
+- Добавлен `RecallPolicy` как центральная recall filtering policy.
+- Добавлен `AgentCapabilities` для explicit future access grants.
+- CLI recall теперь имеет opt-in flags `--include-deprecated` и `--include-secret-references`.
+- Добавлены `AuditLogger` interface и `NoopAuditLogger` recall hook.
 
 ## В Работе
 
@@ -72,6 +76,7 @@
 
 - Добавить store-level clustering config и optional marker-overlap seal mode.
 - Добавить реальный static filter index за `CandidatePageIndex`.
+- Добавить durable audit log storage в следующем security package.
 - SDK wrappers добавлять только после стабилизации Rust core API.
 
 ## Откаты / Не Повторять
@@ -96,13 +101,14 @@ cargo run -p mge-cli -- stats
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 24 tests.
+- `cargo test`: passed, 27 tests.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
 - Default clustering smoke commands: passed.
 - Recall JSON score debug smoke command: passed.
 - Index kind stats/config smoke command: passed.
+- Recall policy secret-reference opt-in smoke command: passed.
 - Smoke result после sealing:
   - hot cells: 0
   - sealed pages: 1-2 depending on smoke scenario

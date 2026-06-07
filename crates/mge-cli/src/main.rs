@@ -71,6 +71,12 @@ enum Commands {
 
         #[arg(long)]
         json: bool,
+
+        #[arg(long)]
+        include_deprecated: bool,
+
+        #[arg(long)]
+        include_secret_references: bool,
     },
     Seal,
     Config {
@@ -161,6 +167,8 @@ fn main() -> Result<()> {
             scope,
             kind,
             json,
+            include_deprecated,
+            include_secret_references,
         } => {
             let engine = open_engine(&cli.store)?;
             let mut request = RecallRequest::new(query);
@@ -168,6 +176,8 @@ fn main() -> Result<()> {
             request.markers = markers;
             request.scope = scope;
             request.kind = kind.as_deref().map(MemoryKind::from_str).transpose()?;
+            request.include_deprecated = include_deprecated;
+            request.include_secret_references = include_secret_references;
 
             let packet = engine.recall(request)?;
             if json {

@@ -29,7 +29,10 @@ pub use pages::{
     DEFAULT_TARGET_PAGE_BYTES,
 };
 pub use retrieval::{build_context_packet, score_cell, score_cell_debug, RecallRequest, Retriever};
-pub use security::{NoSecurity, SecurityProvider};
+pub use security::{
+    AgentCapabilities, AgentCapability, AuditEvent, AuditLogger, NoSecurity, NoopAuditLogger,
+    RecallPolicy, SecurityProvider,
+};
 pub use store::{
     InitOptions, InspectReport, MemoryEngine, RememberRequest, SealReport, StorageConfig,
     StorageConfigUpdate, StorageConfigUpdateReport, Store, StoreStats, DEFAULT_STORE_DIR,

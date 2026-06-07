@@ -176,3 +176,20 @@ Future blind marker direction:
 ```text
 blind_marker = HMAC(index_key, canonical_marker)
 ```
+
+## Policy Foundation
+
+Recall использует `RecallPolicy` как центральную filtering policy. Defaults ограничивают рискованную память:
+
+- deprecated memories исключены;
+- rejected memories исключены;
+- `SecretReference` cells исключены.
+
+`AgentCapabilities` задает API boundary для будущих explicit access grants, например `ReadSecretReferences`. CLI recall дает opt-in flags для compatibility и testing:
+
+```bash
+mge recall "api key" --include-secret-references
+mge recall "old decision" --include-deprecated
+```
+
+`AuditLogger` определен как interface и подключен через `NoopAuditLogger` hook в recall. Durable audit storage намеренно оставлен для следующего security package.

@@ -24,7 +24,7 @@ use crate::pages::{
 use crate::retrieval::{
     build_context_packet, score_cell_debug, RankedCell, RecallRequest, Retriever,
 };
-use crate::security::{NoSecurity, SecurityProvider};
+use crate::security::{AuditEvent, AuditLogger, NoSecurity, NoopAuditLogger, SecurityProvider};
 
 pub const DEFAULT_STORE_DIR: &str = ".memory-genome";
 
@@ -422,6 +422,15 @@ impl MemoryEngine {
             total_candidates: ranked.len(),
             score_details: Vec::new(),
         };
+
+        NoopAuditLogger.record(&AuditEvent {
+            event_type: "recall".to_string(),
+            summary: format!(
+                "query markers={}, candidates={}",
+                query_marker_ids.len(),
+                ranked.len()
+            ),
+        })?;
 
         Ok(build_context_packet(
             request.query,

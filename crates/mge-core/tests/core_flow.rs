@@ -1,11 +1,11 @@
 use mge_core::{
     build_context_packet, build_pages_from_cells, build_pages_with_clusterer, canonicalize_marker,
-    marker_strings_for_cell_fields, score_cell_debug, CandidatePageIndex, CompressionKind,
-    Compressor, ContextDebugInfo, ExactMarkerPageIndex, IndexKind, InitOptions,
-    MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemoryStatus, MemoryValue,
-    MessagePackPageCodec, PageBuildOptions, PageCatalogEntry, PageCodec, PageCodecKind,
-    RecallRequest, RememberRequest, ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate,
-    TrustLevel, ZstdCompression,
+    marker_strings_for_cell_fields, score_cell_debug, AgentCapabilities, AgentCapability,
+    AuditEvent, AuditLogger, CandidatePageIndex, CompressionKind, Compressor, ContextDebugInfo,
+    ExactMarkerPageIndex, IndexKind, InitOptions, MarkerOverlapClusterer, MemoryEngine, MemoryKind,
+    MemoryStatus, MemoryValue, MessagePackPageCodec, NoopAuditLogger, PageBuildOptions,
+    PageCatalogEntry, PageCodec, PageCodecKind, RecallPolicy, RecallRequest, RememberRequest,
+    ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate, TrustLevel, ZstdCompression,
 };
 use tempfile::tempdir;
 
@@ -441,6 +441,56 @@ fn secret_reference_memories_are_filtered() {
     let packet = engine.recall(RecallRequest::new("api key")).unwrap();
 
     assert!(packet.relevant_memory.is_empty());
+}
+
+#[test]
+fn policy_capabilities_can_allow_secret_references_explicitly() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let mut request = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Reference("vault://api-key".to_string()),
+    );
+    request.sensitivity = SensitivityLevel::SecretReference;
+    request.markers = vec!["tag:api".to_string(), "tag:key".to_string()];
+    engine.remember(request).unwrap();
+
+    let mut recall = RecallRequest::new("api key");
+    recall.capabilities = AgentCapabilities::new([AgentCapability::ReadSecretReferences]);
+    let packet = engine.recall(recall).unwrap();
+
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert_eq!(
+        packet.relevant_memory[0].sensitivity,
+        SensitivityLevel::SecretReference
+    );
+    assert!(!packet
+        .constraints
+        .iter()
+        .any(|constraint| constraint.contains("secret_reference")));
+    assert!(packet
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("SecretReference cells were included")));
+}
+
+#[test]
+fn recall_policy_defaults_are_restrictive() {
+    let policy = RecallPolicy::default();
+
+    assert!(!policy.include_deprecated);
+    assert!(!policy.include_rejected);
+    assert!(!policy.allow_secret_references);
+}
+
+#[test]
+fn noop_audit_logger_accepts_events() {
+    NoopAuditLogger
+        .record(&AuditEvent {
+            event_type: "test".to_string(),
+            summary: "policy audit hook".to_string(),
+        })
+        .unwrap();
 }
 
 #[test]
