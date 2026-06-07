@@ -150,6 +150,7 @@ Reranking is transparent in JSON/debug output. `ContextDebugInfo.score_details` 
 - marker overlap score;
 - exact subject match score;
 - value overlap score;
+- exact value match score;
 - trust bonus;
 - status bonus;
 - sensitivity penalty.

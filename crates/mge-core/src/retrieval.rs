@@ -105,6 +105,7 @@ pub fn score_cell_debug(
         .iter()
         .filter(|token| query_token_set.contains(token.as_str()))
         .count() as i64;
+    let exact_value_match = exact_canonical_match(&cell.value.to_plain_text(), &request.query);
 
     let exact_subject_match = cell.subject.as_ref().is_some_and(|subject| {
         let subject_tokens = tokenize_keywords(subject);
@@ -121,8 +122,10 @@ pub fn score_cell_debug(
     } else {
         0
     };
+    let exact_value_score = if exact_value_match { 3 } else { 0 };
 
-    let relevance = marker_overlap_score + exact_subject_score + value_overlap_score;
+    let relevance =
+        marker_overlap_score + exact_subject_score + value_overlap_score + exact_value_score;
 
     if relevance <= 0 {
         return None;
@@ -142,6 +145,8 @@ pub fn score_cell_debug(
         exact_subject_score,
         value_overlap,
         value_overlap_score,
+        exact_value_match,
+        exact_value_score,
         trust_bonus,
         status_bonus,
         sensitivity_penalty,
@@ -250,4 +255,10 @@ fn sensitivity_penalty(sensitivity: SensitivityLevel) -> i64 {
         SensitivityLevel::Confidential => 2,
         SensitivityLevel::SecretReference => 100,
     }
+}
+
+fn exact_canonical_match(left: &str, right: &str) -> bool {
+    let left = canonicalize_marker_value(left);
+    let right = canonicalize_marker_value(right);
+    !left.is_empty() && left == right
 }

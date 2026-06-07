@@ -58,7 +58,7 @@
 - Добавлен `PageBuildOptions` с defaults: 64 KiB target page bytes и 512 max cells.
 - Page builder теперь соблюдает logical page limits.
 - Добавлен `ContextDebugInfo.score_details` для transparent reranking в JSON/debug output.
-- Reranking теперь записывает marker, subject, value, trust, status и sensitivity score components.
+- Reranking теперь записывает marker, subject, value overlap, exact value match, trust, status и sensitivity score components.
 - Prompt text output остается компактным и не раскрывает score internals.
 - Добавлен `IndexKind` с реализованным kind `exact_marker_page`.
 - Manifest, page catalog, stats и exact index files теперь несут index kind metadata.
@@ -117,7 +117,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 37 tests total (1 core unit test + 36 integration tests).
+- `cargo test`: passed, 38 tests total (1 core unit test + 37 integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.

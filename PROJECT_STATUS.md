@@ -61,7 +61,7 @@ This file is the working ledger for this repository. Keep it current so we do no
 - `PageBuildOptions` added with 64 KiB target page bytes and 512 max cells defaults.
 - Page builder now enforces logical page limits.
 - `ContextDebugInfo.score_details` added for transparent reranking in JSON/debug output.
-- Reranking now records marker, subject, value, trust, status, and sensitivity score components.
+- Reranking now records marker, subject, value overlap, exact value match, trust, status, and sensitivity score components.
 - Prompt text output remains compact and does not expose score internals.
 - `IndexKind` added with the implemented `exact_marker_page` kind.
 - Manifest, page catalog, stats, and exact index files now carry index kind metadata.
@@ -120,7 +120,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 37 tests total (1 core unit test + 36 integration tests).
+- `cargo test`: passed, 38 tests total (1 core unit test + 37 integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.

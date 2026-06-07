@@ -82,6 +82,10 @@ pub struct ContextScoreDebugItem {
     pub exact_subject_score: i64,
     pub value_overlap: i64,
     pub value_overlap_score: i64,
+    #[serde(default)]
+    pub exact_value_match: bool,
+    #[serde(default)]
+    pub exact_value_score: i64,
     pub trust_bonus: i64,
     pub status_bonus: i64,
     pub sensitivity_penalty: i64,

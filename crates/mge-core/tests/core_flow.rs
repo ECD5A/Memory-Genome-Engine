@@ -777,6 +777,46 @@ fn score_debug_explains_status_trust_and_sensitivity() {
         detail.marker_overlap_score
             + detail.exact_subject_score
             + detail.value_overlap_score
+            + detail.exact_value_score
+            + detail.trust_bonus
+            + detail.status_bonus
+            - detail.sensitivity_penalty
+    );
+}
+
+#[test]
+fn score_debug_explains_exact_value_match() {
+    let cell = mge_core::MemoryCell::new(
+        1,
+        MemoryKind::UserPreference,
+        Some("answer style".to_string()),
+        MemoryValue::Symbol("concise technical".to_string()),
+        "global".to_string(),
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        SensitivityLevel::Private,
+        vec![10],
+        None,
+        Vec::new(),
+    );
+
+    let detail = score_cell_debug(
+        &cell,
+        &RecallRequest::new("concise technical"),
+        &[10],
+        &["concise".to_string(), "technical".to_string()],
+    )
+    .unwrap();
+
+    assert!(detail.exact_value_match);
+    assert_eq!(detail.exact_value_score, 3);
+    assert_eq!(detail.value_overlap, 2);
+    assert_eq!(
+        detail.score,
+        detail.marker_overlap_score
+            + detail.exact_subject_score
+            + detail.value_overlap_score
+            + detail.exact_value_score
             + detail.trust_bonus
             + detail.status_bonus
             - detail.sensitivity_penalty
