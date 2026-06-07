@@ -70,6 +70,7 @@
 - Tests теперь проверяют `exact_candidates ⊆ binary_fuse_candidates` на тех же sealed pages и проверяют смену index kind без rewrite page files.
 - Добавлен synthetic benchmark tool: `cargo run -p mge-cli --bin mge-synthetic-bench`.
 - Synthetic benchmark сравнивает `exact_marker_page` и opt-in `binary_fuse_page` на одинаковых generated stores и проверяет `exact_candidates ⊆ binary_fuse_candidates`.
+- Hot log archiving теперь использует уникальные archive names, если несколько seals попадают в одно timestamp window.
 - Добавлен `RecallPolicy` как центральная recall filtering policy.
 - Добавлен `AgentCapabilities` для explicit future access grants.
 - CLI recall теперь имеет opt-in flags `--include-deprecated` и `--include-secret-references`.
@@ -113,7 +114,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 33 tests.
+- `cargo test`: passed, 34 tests total (1 core unit test + 33 integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.

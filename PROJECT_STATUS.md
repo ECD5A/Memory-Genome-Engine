@@ -73,6 +73,7 @@ This file is the working ledger for this repository. Keep it current so we do no
 - Tests now assert `exact_candidates ⊆ binary_fuse_candidates` for the same sealed pages and verify index-kind switching without page rewrites.
 - Synthetic benchmark tool added as `cargo run -p mge-cli --bin mge-synthetic-bench`.
 - Synthetic benchmark compares `exact_marker_page` and opt-in `binary_fuse_page` on identical generated stores and checks `exact_candidates ⊆ binary_fuse_candidates`.
+- Hot log archiving now uses unique archive names when multiple seals happen within the same timestamp window.
 - `RecallPolicy` added as the central recall filtering policy.
 - `AgentCapabilities` added for explicit future access grants.
 - CLI recall now has opt-in flags `--include-deprecated` and `--include-secret-references`.
@@ -116,7 +117,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 33 tests.
+- `cargo test`: passed, 34 tests total (1 core unit test + 33 integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.

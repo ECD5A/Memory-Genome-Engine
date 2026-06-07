@@ -65,9 +65,56 @@ impl HotStore {
             .join("archive");
         fs::create_dir_all(&archive_dir)?;
 
-        let archive_path = archive_dir.join(format!("hot_cells_{}.jsonl", current_timestamp()));
+        let archive_path = unique_archive_path(&archive_dir, current_timestamp());
         fs::rename(&self.path, &archive_path)?;
         fs::write(&self.path, b"")?;
         Ok(Some(archive_path))
+    }
+}
+
+fn unique_archive_path(archive_dir: &Path, timestamp: i64) -> PathBuf {
+    let first = archive_dir.join(format!("hot_cells_{timestamp}.jsonl"));
+    if !first.exists() {
+        return first;
+    }
+
+    for suffix in 1.. {
+        let candidate = archive_dir.join(format!("hot_cells_{timestamp}_{suffix}.jsonl"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    unreachable!("unbounded archive suffix loop must return")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn archive_path_uses_suffix_when_timestamp_name_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let timestamp = 123_456;
+
+        let first = unique_archive_path(dir.path(), timestamp);
+        assert_eq!(
+            first.file_name().and_then(|name| name.to_str()),
+            Some("hot_cells_123456.jsonl")
+        );
+        fs::write(&first, b"first").unwrap();
+
+        let second = unique_archive_path(dir.path(), timestamp);
+        assert_eq!(
+            second.file_name().and_then(|name| name.to_str()),
+            Some("hot_cells_123456_1.jsonl")
+        );
+        fs::write(&second, b"second").unwrap();
+
+        let third = unique_archive_path(dir.path(), timestamp);
+        assert_eq!(
+            third.file_name().and_then(|name| name.to_str()),
+            Some("hot_cells_123456_2.jsonl")
+        );
     }
 }
