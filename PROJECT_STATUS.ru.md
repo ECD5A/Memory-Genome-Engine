@@ -32,6 +32,7 @@
   - `validate`
   - `stats`
   - `export --format json`
+- CLI `remember` поддерживает structured values через `--json-value`, сохраняемые как `MemoryValue::Structured`.
 - Добавлена документация:
   - `README.md`
   - `README.ru.md`
@@ -105,6 +106,7 @@ cargo build
 cargo test
 cargo run -p mge-cli -- init
 cargo run -p mge-cli -- remember "User prefers concise technical explanations" --kind user_preference --scope global --trust user_confirmed
+cargo run -p mge-cli -- remember --kind user_preference --subject answer_style --json-value '{"style":"concise","max_examples":2}'
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
@@ -118,7 +120,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 39 tests total (1 core unit test + 38 integration tests).
+- `cargo test`: passed, 43 tests total (4 CLI unit tests + 1 core unit test + 38 integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -134,6 +136,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
   - subset check: `exact_candidates ⊆ binary_fuse_candidates` passed.
 - Validate CLI smoke commands: passed для `exact_marker_page` и `binary_fuse_page`.
 - Page checksum smoke command: passed для MessagePack+zstd sealed page, checksum length 64, `mge validate --json` ok.
+- Structured JSON remember smoke command: passed, exported value type `structured`.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.
 - Smoke result после sealing:

@@ -46,6 +46,9 @@ enum Commands {
         #[arg(long)]
         value: Option<String>,
 
+        #[arg(long = "json-value")]
+        json_value: Option<String>,
+
         #[arg(long, default_value = "global")]
         scope: String,
 
@@ -158,6 +161,7 @@ fn main() -> Result<()> {
             kind,
             subject,
             value,
+            json_value,
             scope,
             trust,
             status,
@@ -169,7 +173,7 @@ fn main() -> Result<()> {
             let parsed_trust = TrustLevel::from_str(&trust)?;
             let parsed_status = MemoryStatus::from_str(&status)?;
             let parsed_sensitivity = SensitivityLevel::from_str(&sensitivity)?;
-            let memory_value = parse_memory_value(text, value)?;
+            let memory_value = parse_memory_value(text, value, json_value)?;
 
             let mut request = RememberRequest::new(parsed_kind, memory_value);
             request.subject = subject;
@@ -320,11 +324,24 @@ fn open_engine(store: &PathBuf) -> Result<MemoryEngine> {
     })
 }
 
-fn parse_memory_value(text: Option<String>, value: Option<String>) -> Result<MemoryValue> {
-    match (text, value) {
-        (Some(text), None) => Ok(MemoryValue::Text(text)),
-        (_, Some(value)) => Ok(parse_scalar_value(&value)),
-        (None, None) => bail!("remember requires a text argument or --value"),
+fn parse_memory_value(
+    text: Option<String>,
+    value: Option<String>,
+    json_value: Option<String>,
+) -> Result<MemoryValue> {
+    match (text, value, json_value) {
+        (Some(_), _, Some(_)) => {
+            bail!("remember accepts a text argument or --json-value, not both")
+        }
+        (_, Some(_), Some(_)) => bail!("remember accepts --value or --json-value, not both"),
+        (_, _, Some(json_value)) => {
+            let parsed = serde_json::from_str(&json_value)
+                .with_context(|| "failed to parse --json-value as JSON")?;
+            Ok(MemoryValue::Structured(parsed))
+        }
+        (Some(text), None, None) => Ok(MemoryValue::Text(text)),
+        (_, Some(value), None) => Ok(parse_scalar_value(&value)),
+        (None, None, None) => bail!("remember requires a text argument, --value, or --json-value"),
     }
 }
 
@@ -335,5 +352,54 @@ fn parse_scalar_value(raw: &str) -> MemoryValue {
         MemoryValue::Number(value)
     } else {
         MemoryValue::Symbol(raw.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_text_memory_value() {
+        let value = parse_memory_value(Some("plain memory".to_string()), None, None).unwrap();
+
+        assert_eq!(value, MemoryValue::Text("plain memory".to_string()));
+    }
+
+    #[test]
+    fn parse_scalar_memory_value() {
+        let value = parse_memory_value(None, Some("true".to_string()), None).unwrap();
+
+        assert_eq!(value, MemoryValue::Boolean(true));
+    }
+
+    #[test]
+    fn parse_structured_json_memory_value() {
+        let value = parse_memory_value(
+            None,
+            None,
+            Some(r#"{"answer_style":"concise","max_examples":2}"#.to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            value,
+            MemoryValue::Structured(serde_json::json!({
+                "answer_style": "concise",
+                "max_examples": 2
+            }))
+        );
+    }
+
+    #[test]
+    fn parse_structured_json_rejects_ambiguous_text() {
+        let err = parse_memory_value(
+            Some("plain memory".to_string()),
+            None,
+            Some(r#"{"answer_style":"concise"}"#.to_string()),
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("text argument or --json-value"));
     }
 }

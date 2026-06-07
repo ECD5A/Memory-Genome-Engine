@@ -111,6 +111,7 @@ mge init --page-codec messagepack --compression zstd
 mge init --index-kind binary_fuse_page
 mge config set --page-clusterer marker_overlap
 mge remember "..." --kind user_preference --scope global --trust user_confirmed
+mge remember --kind user_preference --subject answer_style --json-value '{"style":"concise","max_examples":2}'
 mge recall "technical answer style"
 mge recall "api key" --include-secret-references
 mge seal
@@ -129,9 +130,17 @@ Use `--marker` on recall for explicit marker search:
 mge recall "technical answer style" --marker kind:user_preference --marker scope:global
 ```
 
+Use `--json-value` on remember when the value should be stored as `MemoryValue::Structured` instead of text or a scalar:
+
+```bash
+mge remember --kind user_preference --subject answer_style --json-value '{"style":"concise","max_examples":2}'
+```
+
+In PowerShell, pass escaped quotes or assign the JSON string to a variable before invoking `mge`.
+
 `mge config set` changes defaults and lightweight derived indexes only. Existing page files are not rewritten; each catalog entry keeps the codec/compression needed to read that page. Changing `--index-kind` rebuilds only the candidate page index from existing sealed pages.
 
-`mge validate` is a read-only consistency check for manifest, page catalog, page files, marker references, and candidate index coverage.
+`mge validate` is a read-only consistency check for manifest, page catalog, page files, page checksums, marker references, and candidate index coverage.
 
 `BinaryFusePageIndex` is a probabilistic candidate page filter, not an inverted `marker -> pages` map. It builds one real `xorf::BinaryFuse16` static filter per sealed page from that page's `marker_summary`, scans page filters on query, and may return extra candidate pages. `ExactMarkerPageIndex` remains the default for stable debugging.
 

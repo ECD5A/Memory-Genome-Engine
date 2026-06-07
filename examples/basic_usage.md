@@ -12,6 +12,11 @@ cargo run -p mge-cli -- remember "User prefers concise technical explanations" \
   --scope global \
   --trust user_confirmed
 
+cargo run -p mge-cli -- remember \
+  --kind user_preference \
+  --subject answer_style \
+  --json-value '{"style":"concise","max_examples":2}'
+
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 ```
 
