@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::errors::Result;
+use crate::errors::{MgeError, Result};
 use crate::models::{MarkerId, PageId};
 use crate::pages::MemoryPage;
 
@@ -14,6 +16,47 @@ pub trait CandidatePageIndex {
         Self: Sized;
 
     fn query(&self, markers: &[MarkerId]) -> Result<Vec<PageId>>;
+
+    fn kind(&self) -> IndexKind;
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexKind {
+    ExactMarkerPage,
+}
+
+impl IndexKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ExactMarkerPage => "exact_marker_page",
+        }
+    }
+}
+
+impl Default for IndexKind {
+    fn default() -> Self {
+        Self::ExactMarkerPage
+    }
+}
+
+impl fmt::Display for IndexKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for IndexKind {
+    type Err = MgeError;
+
+    fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
+        match input.trim().to_ascii_lowercase().as_str() {
+            "exact_marker_page" | "exact" | "exact_marker_page_index" => Ok(Self::ExactMarkerPage),
+            other => Err(MgeError::InvalidInput(format!(
+                "unknown index kind: {other}; v0.1 supports exact_marker_page only"
+            ))),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -26,6 +69,8 @@ pub enum QueryMode {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct ExactMarkerPageIndex {
+    #[serde(default)]
+    pub index_kind: IndexKind,
     pub marker_to_pages: BTreeMap<MarkerId, Vec<PageId>>,
     pub all_pages: Vec<PageId>,
 }
@@ -46,6 +91,7 @@ impl CandidatePageIndex for ExactMarkerPageIndex {
         }
 
         Ok(Self {
+            index_kind: IndexKind::ExactMarkerPage,
             marker_to_pages: marker_to_pages
                 .into_iter()
                 .map(|(marker, pages)| (marker, pages.into_iter().collect()))
@@ -56,6 +102,10 @@ impl CandidatePageIndex for ExactMarkerPageIndex {
 
     fn query(&self, markers: &[MarkerId]) -> Result<Vec<PageId>> {
         Ok(self.query_with_mode(markers, QueryMode::PreferIntersection))
+    }
+
+    fn kind(&self) -> IndexKind {
+        self.index_kind
     }
 }
 

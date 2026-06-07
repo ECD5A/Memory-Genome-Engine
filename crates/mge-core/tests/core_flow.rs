@@ -1,10 +1,11 @@
 use mge_core::{
     build_context_packet, build_pages_from_cells, build_pages_with_clusterer, canonicalize_marker,
     marker_strings_for_cell_fields, score_cell_debug, CandidatePageIndex, CompressionKind,
-    Compressor, ContextDebugInfo, ExactMarkerPageIndex, InitOptions, MarkerOverlapClusterer,
-    MemoryEngine, MemoryKind, MemoryStatus, MemoryValue, MessagePackPageCodec, PageBuildOptions,
-    PageCatalogEntry, PageCodec, PageCodecKind, RecallRequest, RememberRequest, ScopeKindClusterer,
-    SensitivityLevel, StorageConfigUpdate, TrustLevel, ZstdCompression,
+    Compressor, ContextDebugInfo, ExactMarkerPageIndex, IndexKind, InitOptions,
+    MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemoryStatus, MemoryValue,
+    MessagePackPageCodec, PageBuildOptions, PageCatalogEntry, PageCodec, PageCodecKind,
+    RecallRequest, RememberRequest, ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate,
+    TrustLevel, ZstdCompression,
 };
 use tempfile::tempdir;
 
@@ -103,6 +104,7 @@ fn init_options_are_saved_in_manifest() {
         InitOptions {
             page_codec: PageCodecKind::MessagePack,
             compression: CompressionKind::Zstd,
+            index_kind: IndexKind::ExactMarkerPage,
         },
     )
     .unwrap();
@@ -111,6 +113,7 @@ fn init_options_are_saved_in_manifest() {
 
     assert_eq!(inspect.manifest.page_codec, PageCodecKind::MessagePack);
     assert_eq!(inspect.manifest.compression, CompressionKind::Zstd);
+    assert_eq!(inspect.manifest.index_kind, IndexKind::ExactMarkerPage);
 }
 
 #[test]
@@ -200,6 +203,7 @@ fn recall_from_messagepack_zstd_sealed_pages() {
         InitOptions {
             page_codec: PageCodecKind::MessagePack,
             compression: CompressionKind::Zstd,
+            index_kind: IndexKind::ExactMarkerPage,
         },
     )
     .unwrap();
@@ -287,8 +291,18 @@ fn marker_to_page_index_queries_candidates() {
     let pages = build_pages_from_cells(&[cell], 1);
     let index = ExactMarkerPageIndex::build(&pages).unwrap();
 
+    assert_eq!(index.kind(), IndexKind::ExactMarkerPage);
+    assert_eq!(index.index_kind, IndexKind::ExactMarkerPage);
     assert_eq!(index.query(&[10]).unwrap(), vec![1]);
     assert_eq!(index.query(&[999]).unwrap(), Vec::<u64>::new());
+}
+
+#[test]
+fn page_catalog_defaults_to_exact_marker_page_index_kind() {
+    let catalog: mge_core::PageCatalog =
+        serde_json::from_value(serde_json::json!({ "pages": [] })).unwrap();
+
+    assert_eq!(catalog.index_kind, IndexKind::ExactMarkerPage);
 }
 
 #[test]
@@ -516,7 +530,8 @@ fn stats_output_contains_required_fields() {
 
     assert!(stats_text.contains("hot cells: 1"));
     assert!(stats_text.contains("marker count:"));
-    assert!(stats_text.contains("index type: exact_marker_page_index"));
+    assert!(stats_text.contains("index type: exact_marker_page"));
+    assert!(stats_text.contains("current index kind: exact_marker_page"));
 }
 
 fn remember_answer_style(engine: &mut MemoryEngine) {

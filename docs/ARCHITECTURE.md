@@ -112,6 +112,8 @@ The public index abstraction is `CandidatePageIndex`. Later versions can replace
 
 Hot memory uses mutable scanning/indexing. Sealed pages use static candidate indexes.
 
+`IndexKind` records the current index implementation in manifest/catalog/index metadata. The only implemented kind is `exact_marker_page`. Binary Fuse/XOR/Ribbon are intentionally not faked.
+
 ## Retrieval
 
 Recall does the following:

@@ -59,6 +59,10 @@
 - Добавлен `ContextDebugInfo.score_details` для transparent reranking в JSON/debug output.
 - Reranking теперь записывает marker, subject, value, trust, status и sensitivity score components.
 - Prompt text output остается компактным и не раскрывает score internals.
+- Добавлен `IndexKind` с реализованным kind `exact_marker_page`.
+- Manifest, page catalog, stats и exact index files теперь несут index kind metadata.
+- `CandidatePageIndex` теперь раскрывает `kind()` для будущих static index implementations.
+- Binary Fuse/XOR/Ribbon indexes остаются roadmap items; fake implementation не добавлялся.
 
 ## В Работе
 
@@ -92,16 +96,18 @@ cargo run -p mge-cli -- stats
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 23 tests.
+- `cargo test`: passed, 24 tests.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
 - Default clustering smoke commands: passed.
 - Recall JSON score debug smoke command: passed.
+- Index kind stats/config smoke command: passed.
 - Smoke result после sealing:
   - hot cells: 0
   - sealed pages: 1-2 depending on smoke scenario
   - sealed cells: 1-2 depending on smoke scenario
-  - index type: `exact_marker_page_index`
+  - index type: `exact_marker_page`
+  - current index kind: `exact_marker_page`
   - current page codec: `messagepack`
   - current compression: `zstd`

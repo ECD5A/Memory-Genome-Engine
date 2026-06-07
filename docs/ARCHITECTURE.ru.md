@@ -112,6 +112,8 @@ MarkerId -> Vec<PageId>
 
 Hot memory использует mutable scanning/indexing. Sealed pages используют static candidate indexes.
 
+`IndexKind` фиксирует текущую index implementation в manifest/catalog/index metadata. Единственный реализованный kind - `exact_marker_page`. Binary Fuse/XOR/Ribbon намеренно не подделаны.
+
 ## Retrieval
 
 Recall делает следующее:

@@ -4,7 +4,7 @@ use std::str::FromStr;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use mge_core::{
-    CompressionKind, InitOptions, MemoryEngine, MemoryKind, MemoryStatus, MemoryValue,
+    CompressionKind, IndexKind, InitOptions, MemoryEngine, MemoryKind, MemoryStatus, MemoryValue,
     PageCodecKind, RecallRequest, RememberRequest, SensitivityLevel, TrustLevel, DEFAULT_STORE_DIR,
 };
 
@@ -114,6 +114,7 @@ fn main() -> Result<()> {
             let options = InitOptions {
                 page_codec: PageCodecKind::from_str(&page_codec)?,
                 compression: CompressionKind::from_str(&compression)?,
+                index_kind: IndexKind::ExactMarkerPage,
             };
             let engine = MemoryEngine::init_with_options(&cli.store, options)
                 .with_context(|| format!("failed to initialize {}", cli.store.display()))?;
@@ -189,6 +190,7 @@ fn main() -> Result<()> {
                 } else {
                     println!("page codec: {}", config.page_codec);
                     println!("compression: {}", config.compression);
+                    println!("index kind: {}", config.index_kind);
                 }
             }
             ConfigCommands::Set {
@@ -216,11 +218,12 @@ fn main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&report)?);
                 } else {
                     println!(
-                        "storage config: page_codec {} -> {}, compression {} -> {}",
+                        "storage config: page_codec {} -> {}, compression {} -> {}, index_kind {}",
                         report.previous.page_codec,
                         report.current.page_codec,
                         report.previous.compression,
-                        report.current.compression
+                        report.current.compression,
+                        report.current.index_kind
                     );
                     println!(
                         "existing sealed pages unchanged: {}",

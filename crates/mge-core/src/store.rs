@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::compression::{compress_with, decompress_with, CompressionKind};
 use crate::errors::{MgeError, Result};
 use crate::hot::HotStore;
-use crate::indexes::{CandidatePageIndex, ExactMarkerPageIndex};
+use crate::indexes::{CandidatePageIndex, ExactMarkerPageIndex, IndexKind};
 use crate::markers::{
     canonicalize_marker, extract_query_marker_strings, marker_strings_for_cell_fields,
     tokenize_keywords, MarkerDebugEntry, MarkerDictionary,
@@ -54,18 +54,22 @@ pub struct Manifest {
     pub page_codec: PageCodecKind,
     #[serde(default)]
     pub compression: CompressionKind,
+    #[serde(default)]
+    pub index_kind: IndexKind,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct InitOptions {
     pub page_codec: PageCodecKind,
     pub compression: CompressionKind,
+    pub index_kind: IndexKind,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StorageConfig {
     pub page_codec: PageCodecKind,
     pub compression: CompressionKind,
+    pub index_kind: IndexKind,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -129,6 +133,7 @@ pub struct StoreStats {
     pub page_count: usize,
     pub current_page_codec: PageCodecKind,
     pub current_compression: CompressionKind,
+    pub current_index_kind: IndexKind,
     pub index_type: String,
     pub last_seal_time: Option<i64>,
     pub store_size_bytes: u64,
@@ -145,6 +150,7 @@ marker count: {}
 page count: {}
 current page codec: {}
 current compression: {}
+current index kind: {}
 index type: {}
 last seal time: {}
 store size bytes: {}
@@ -156,6 +162,7 @@ store size bytes: {}
             self.page_count,
             self.current_page_codec,
             self.current_compression,
+            self.current_index_kind,
             self.index_type,
             self.last_seal_time
                 .map(|value| value.to_string())
@@ -197,6 +204,7 @@ impl MemoryEngine {
                 last_seal_time: None,
                 page_codec: options.page_codec,
                 compression: options.compression,
+                index_kind: options.index_kind,
             };
             fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
         }
@@ -248,6 +256,7 @@ impl MemoryEngine {
         StorageConfig {
             page_codec: self.manifest.page_codec,
             compression: self.manifest.compression,
+            index_kind: self.manifest.index_kind,
         }
     }
 
@@ -463,7 +472,7 @@ impl MemoryEngine {
         self.save_page_catalog(&catalog)?;
 
         let all_pages = self.load_all_pages()?;
-        let index = ExactMarkerPageIndex::build(&all_pages)?;
+        let index = self.build_candidate_index(&all_pages)?;
         index.save_to_path(self.marker_index_path())?;
 
         let archived_hot_log = hot_store.archive_and_clear()?;
@@ -491,7 +500,8 @@ impl MemoryEngine {
             page_count: catalog.pages.len(),
             current_page_codec: self.manifest.page_codec,
             current_compression: self.manifest.compression,
-            index_type: "exact_marker_page_index".to_string(),
+            current_index_kind: self.manifest.index_kind,
+            index_type: self.manifest.index_kind.to_string(),
             last_seal_time: self.manifest.last_seal_time,
             store_size_bytes: store_size_bytes(&self.root)?,
         })
@@ -535,7 +545,9 @@ impl MemoryEngine {
     }
 
     fn save_page_catalog(&self, catalog: &PageCatalog) -> Result<()> {
-        save_json(self.page_catalog_path(), catalog)
+        let mut catalog = catalog.clone();
+        catalog.index_kind = self.manifest.index_kind;
+        save_json(self.page_catalog_path(), &catalog)
     }
 
     fn load_all_pages(&self) -> Result<Vec<MemoryPage>> {
@@ -564,6 +576,12 @@ impl MemoryEngine {
         // Future order remains: encode page -> compress page -> encrypt page -> write page.
         fs::write(self.pages_dir().join(page_file_name(page.page_id)), stored)?;
         Ok(())
+    }
+
+    fn build_candidate_index(&self, pages: &[MemoryPage]) -> Result<ExactMarkerPageIndex> {
+        match self.manifest.index_kind {
+            IndexKind::ExactMarkerPage => ExactMarkerPageIndex::build(pages),
+        }
     }
 
     fn manifest_path(&self) -> PathBuf {

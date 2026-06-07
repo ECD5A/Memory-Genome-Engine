@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::compression::CompressionKind;
 use crate::errors::{MgeError, Result};
+use crate::indexes::IndexKind;
 use crate::models::{current_timestamp, MarkerId, MemoryCell, PageId};
 
 pub const DEFAULT_TARGET_PAGE_BYTES: usize = 64 * 1024;
@@ -24,6 +25,8 @@ pub struct MemoryPage {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct PageCatalog {
+    #[serde(default)]
+    pub index_kind: IndexKind,
     pub pages: Vec<PageCatalogEntry>,
 }
 
