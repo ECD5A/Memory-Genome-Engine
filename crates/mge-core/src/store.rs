@@ -679,6 +679,10 @@ impl MemoryEngine {
         let mut report = ValidationReport::new(self.manifest.index_kind);
         let catalog = self.load_page_catalog()?;
 
+        for error in self.dictionary.consistency_errors() {
+            report.error(format!("marker dictionary inconsistency: {error}"));
+        }
+
         if catalog.index_kind != self.manifest.index_kind {
             report.error(format!(
                 "page catalog index kind {} does not match manifest index kind {}",

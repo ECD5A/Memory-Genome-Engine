@@ -84,6 +84,7 @@
 - Добавлены `ValidationReport` и CLI `validate` как read-only consistency checks для manifest, catalog, pages, page checksums, marker references и candidate index coverage.
 - Store validation теперь проверяет cell links на unknown targets и self-links.
 - Store validation теперь предупреждает об orphan page files и unknown unmanaged index files.
+- Store validation теперь проверяет marker dictionary forward/reverse consistency, canonical markers и `next_id`.
 - Добавлен `RecallPolicy` как центральная recall filtering policy.
 - Добавлен `AgentCapabilities` для explicit future access grants.
 - CLI recall теперь имеет opt-in flags `--include-deprecated` и `--include-secret-references`.
@@ -134,7 +135,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 57 tests total (9 CLI unit tests + 1 CLI integration test + 1 core unit test + 46 core integration tests).
+- `cargo test`: passed, 58 tests total (9 CLI unit tests + 1 CLI integration test + 1 core unit test + 47 core integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -160,6 +161,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Structured JSON marker extraction tests: passed для marker generation и hot recall.
 - Structured JSON marker extraction CLI smoke command: passed, recall matched `tag:style` и `tag:concise`.
 - CLI milestone integration test: passed для init, remember, recall JSON, seal, stats JSON и validate JSON.
+- Marker dictionary consistency validation test: passed.
 - Stats JSON smoke command: passed, `sealed_pages` и `current_index_kind` exported.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.

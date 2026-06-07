@@ -81,6 +81,65 @@ impl MarkerDictionary {
             .collect()
     }
 
+    pub fn consistency_errors(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+
+        for (marker, id) in &self.marker_to_id {
+            if *id == 0 {
+                errors.push(format!("marker {marker} uses invalid id 0"));
+            }
+            match canonicalize_marker(marker) {
+                Ok(canonical) if canonical == *marker => {}
+                Ok(canonical) => errors.push(format!(
+                    "marker {marker} is not canonical; expected {canonical}"
+                )),
+                Err(_) => errors.push(format!("marker {marker} is invalid")),
+            }
+            match self.id_to_marker.get(id) {
+                Some(reverse_marker) if reverse_marker == marker => {}
+                Some(reverse_marker) => errors.push(format!(
+                    "marker_to_id {marker}->{id} conflicts with id_to_marker {id}->{reverse_marker}"
+                )),
+                None => errors.push(format!(
+                    "marker_to_id {marker}->{id} is missing reverse id_to_marker entry"
+                )),
+            }
+        }
+
+        for (id, marker) in &self.id_to_marker {
+            if *id == 0 {
+                errors.push(format!(
+                    "id_to_marker uses invalid id 0 for marker {marker}"
+                ));
+            }
+            match self.marker_to_id.get(marker) {
+                Some(forward_id) if forward_id == id => {}
+                Some(forward_id) => errors.push(format!(
+                    "id_to_marker {id}->{marker} conflicts with marker_to_id {marker}->{forward_id}"
+                )),
+                None => errors.push(format!(
+                    "id_to_marker {id}->{marker} is missing forward marker_to_id entry"
+                )),
+            }
+        }
+
+        let max_id = self
+            .id_to_marker
+            .keys()
+            .chain(self.marker_to_id.values())
+            .copied()
+            .max()
+            .unwrap_or(0);
+        if max_id >= self.next_id {
+            errors.push(format!(
+                "next_id {} must be greater than max marker id {}",
+                self.next_id, max_id
+            ));
+        }
+
+        errors
+    }
+
     pub fn save_to_path(&self, path: impl AsRef<Path>) -> Result<()> {
         if let Some(parent) = path.as_ref().parent() {
             fs::create_dir_all(parent)?;

@@ -1118,6 +1118,34 @@ fn validate_warns_about_unknown_index_file() {
 }
 
 #[test]
+fn validate_reports_marker_dictionary_inconsistency() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    let markers_path = dir.path().join("markers.json");
+    let mut markers_json: serde_json::Value =
+        serde_json::from_slice(&fs::read(&markers_path).unwrap()).unwrap();
+    markers_json["id_to_marker"]
+        .as_object_mut()
+        .unwrap()
+        .remove("1");
+    fs::write(
+        &markers_path,
+        serde_json::to_vec_pretty(&markers_json).unwrap(),
+    )
+    .unwrap();
+    let engine = MemoryEngine::open_at(dir.path()).unwrap();
+
+    let report = engine.validate().unwrap();
+
+    assert!(!report.ok);
+    assert!(report
+        .errors
+        .iter()
+        .any(|error| error.contains("marker dictionary inconsistency")));
+}
+
+#[test]
 fn validate_accepts_existing_cell_link() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();

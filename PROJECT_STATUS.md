@@ -87,6 +87,7 @@ This file is the working ledger for this repository. Keep it current so we do no
 - `ValidationReport` and CLI `validate` added as read-only consistency checks for manifest, catalog, pages, page checksums, marker references, and candidate index coverage.
 - Store validation now checks cell links for unknown targets and self-links.
 - Store validation now warns about orphan page files and unknown unmanaged index files.
+- Store validation now checks marker dictionary forward/reverse consistency, canonical markers, and `next_id`.
 - `RecallPolicy` added as the central recall filtering policy.
 - `AgentCapabilities` added for explicit future access grants.
 - CLI recall now has opt-in flags `--include-deprecated` and `--include-secret-references`.
@@ -137,7 +138,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 57 tests total (9 CLI unit tests + 1 CLI integration test + 1 core unit test + 46 core integration tests).
+- `cargo test`: passed, 58 tests total (9 CLI unit tests + 1 CLI integration test + 1 core unit test + 47 core integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -163,6 +164,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Structured JSON marker extraction tests: passed for marker generation and hot recall.
 - Structured JSON marker extraction CLI smoke command: passed, recall matched `tag:style` and `tag:concise`.
 - CLI milestone integration test: passed for init, remember, recall JSON, seal, stats JSON, and validate JSON.
+- Marker dictionary consistency validation test: passed.
 - Stats JSON smoke command: passed, `sealed_pages` and `current_index_kind` exported.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.
