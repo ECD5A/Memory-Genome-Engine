@@ -48,6 +48,7 @@
 - Добавлен `ZstdCompression` за существующим trait `Compressor`.
 - Store manifest теперь хранит default `page_codec` и `compression` для новых sealed pages.
 - Page catalog entries теперь хранят per-page codec/compression для mixed-store и backward-compatible reads.
+- Новые sealed pages теперь хранят codec-independent SHA-256 content checksums.
 - CLI `init` теперь поддерживает `--page-codec json|messagepack` и `--compression none|zstd`.
 - Добавлены CLI `config show` и `config set` для существующих stores.
 - Storage config updates меняют только defaults для будущих seals; существующие pages остаются нетронутыми и читаются через catalog metadata.
@@ -72,7 +73,7 @@
 - Добавлен synthetic benchmark tool: `cargo run -p mge-cli --bin mge-synthetic-bench`.
 - Synthetic benchmark сравнивает `exact_marker_page` и opt-in `binary_fuse_page` на одинаковых generated stores и проверяет `exact_candidates ⊆ binary_fuse_candidates`.
 - Hot log archiving теперь использует уникальные archive names, если несколько seals попадают в одно timestamp window.
-- Добавлены `ValidationReport` и CLI `validate` как read-only consistency checks для manifest, catalog, pages, marker references и candidate index coverage.
+- Добавлены `ValidationReport` и CLI `validate` как read-only consistency checks для manifest, catalog, pages, page checksums, marker references и candidate index coverage.
 - Добавлен `RecallPolicy` как центральная recall filtering policy.
 - Добавлен `AgentCapabilities` для explicit future access grants.
 - CLI recall теперь имеет opt-in flags `--include-deprecated` и `--include-secret-references`.
@@ -117,7 +118,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 38 tests total (1 core unit test + 37 integration tests).
+- `cargo test`: passed, 39 tests total (1 core unit test + 38 integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -132,6 +133,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
   - binary_fuse_page: avg recall latency 13426 us, total candidate pages 60, loaded pages 60, sealed cells scanned 600, result count 120, post-load false-positive pages 0.
   - subset check: `exact_candidates ⊆ binary_fuse_candidates` passed.
 - Validate CLI smoke commands: passed для `exact_marker_page` и `binary_fuse_page`.
+- Page checksum smoke command: passed для MessagePack+zstd sealed page, checksum length 64, `mge validate --json` ok.
 - Recall policy secret-reference opt-in smoke command: passed.
 - Marker-overlap clusterer seal smoke command: passed.
 - Smoke result после sealing:

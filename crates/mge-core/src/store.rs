@@ -20,8 +20,9 @@ use crate::models::{
 };
 use crate::packet::{ContextDebugInfo, ContextPacket};
 use crate::pages::{
-    build_pages_with_kind, decode_page_with, encode_page_with, page_file_name, MemoryPage,
-    PageBuildOptions, PageCatalog, PageCatalogEntry, PageClustererKind, PageCodecKind,
+    attach_page_checksum, build_pages_with_kind, decode_page_with, encode_page_with,
+    page_checksum_matches, page_file_name, MemoryPage, PageBuildOptions, PageCatalog,
+    PageCatalogEntry, PageClustererKind, PageCodecKind,
 };
 use crate::retrieval::{
     build_context_packet, score_cell_debug, RankedCell, RecallRequest, Retriever,
@@ -586,12 +587,15 @@ impl MemoryEngine {
             }
         }
 
-        let pages = build_pages_with_kind(
+        let mut pages = build_pages_with_kind(
             &hot_cells,
             self.manifest.next_page_id,
             self.manifest.page_clusterer,
             PageBuildOptions::default(),
         );
+        for page in &mut pages {
+            attach_page_checksum(page)?;
+        }
         let mut catalog = self.load_page_catalog()?;
         for page in &pages {
             self.write_page(page)?;
@@ -894,6 +898,17 @@ impl MemoryEngine {
                 "page {} marker_summary does not match page cells",
                 entry.page_id
             ));
+        }
+        match &page.checksum {
+            Some(_) => match page_checksum_matches(page) {
+                Ok(true) => {}
+                Ok(false) => report.error(format!("page {} checksum mismatch", entry.page_id)),
+                Err(err) => report.error(format!(
+                    "page {} checksum verification failed: {err}",
+                    entry.page_id
+                )),
+            },
+            None => report.warning(format!("page {} has no checksum", entry.page_id)),
         }
 
         for cell in &page.cells {

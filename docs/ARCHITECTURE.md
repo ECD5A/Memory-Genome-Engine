@@ -73,6 +73,8 @@ Page files use codecs hidden behind the `PageCodec` trait:
 - `JsonPageCodec`
 - `MessagePackPageCodec`
 
+New sealed pages carry a SHA-256 content checksum computed over a canonical page representation with the checksum field cleared. The checksum is codec-independent and is verified by `mge validate`.
+
 Compression is hidden behind the `Compressor` trait:
 
 - `NoCompression`
@@ -82,7 +84,7 @@ The manifest stores the default codec/compression for newly sealed pages. Each `
 
 `mge config set` updates manifest defaults and lightweight derived indexes. It does not rewrite existing page files or mutate existing page catalog entries. Changing `--index-kind` rebuilds only the candidate index from existing sealed pages.
 
-`mge validate` is a read-only storage consistency check. It verifies manifest/catalog/index kind alignment, page file readability, page metadata, marker summaries, marker dictionary references, and candidate-index coverage. It does not repair or rewrite store data.
+`mge validate` is a read-only storage consistency check. It verifies manifest/catalog/index kind alignment, page file readability, page metadata, marker summaries, page checksums, marker dictionary references, and candidate-index coverage. It does not repair or rewrite store data.
 
 ## Page Clustering
 

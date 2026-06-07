@@ -192,6 +192,12 @@ fn seal_hot_cells_into_pages() {
     assert_eq!(stats.hot_cells, 0);
     assert_eq!(stats.sealed_pages, 1);
     assert_eq!(stats.sealed_cells, 1);
+    let exported = engine.export_json().unwrap();
+    let page = serde_json::from_value::<Vec<mge_core::MemoryPage>>(exported["pages"].clone())
+        .unwrap()
+        .remove(0);
+    assert!(page.checksum.is_some());
+    assert!(mge_core::page_checksum_matches(&page).unwrap());
 }
 
 #[test]
@@ -233,6 +239,12 @@ fn recall_from_messagepack_zstd_sealed_pages() {
     let entry = inspect.page_catalog.pages.first().unwrap();
     assert_eq!(entry.page_codec, PageCodecKind::MessagePack);
     assert_eq!(entry.compression, CompressionKind::Zstd);
+    let exported = engine.export_json().unwrap();
+    let page = serde_json::from_value::<Vec<mge_core::MemoryPage>>(exported["pages"].clone())
+        .unwrap()
+        .remove(0);
+    assert!(page.checksum.is_some());
+    assert!(mge_core::page_checksum_matches(&page).unwrap());
 
     let packet = engine
         .recall(RecallRequest::new(
@@ -895,6 +907,29 @@ fn validate_reports_missing_page_file() {
         .errors
         .iter()
         .any(|error| error.contains("missing page file")));
+}
+
+#[test]
+fn validate_reports_page_checksum_mismatch() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let page_file = engine.inspect().unwrap().page_catalog.pages[0].file.clone();
+    let page_path = dir.path().join("pages").join(page_file);
+    let mut page: mge_core::MemoryPage =
+        serde_json::from_slice(&fs::read(&page_path).unwrap()).unwrap();
+    page.checksum = Some("bad-checksum".to_string());
+    fs::write(&page_path, serde_json::to_vec(&page).unwrap()).unwrap();
+
+    let report = engine.validate().unwrap();
+
+    assert!(!report.ok);
+    assert!(report
+        .errors
+        .iter()
+        .any(|error| error.contains("checksum mismatch")));
 }
 
 #[test]

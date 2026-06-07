@@ -26,7 +26,8 @@ pub use models::{
 };
 pub use packet::{ContextDebugInfo, ContextMemoryItem, ContextPacket};
 pub use pages::{
-    build_pages_from_cells, build_pages_with_clusterer, build_pages_with_kind, JsonPageCodec,
+    attach_page_checksum, build_pages_from_cells, build_pages_with_clusterer,
+    build_pages_with_kind, page_checksum_matches, page_content_checksum, JsonPageCodec,
     MarkerOverlapClusterer, MemoryPage, MessagePackPageCodec, PageBuildOptions, PageCatalog,
     PageCatalogEntry, PageClusterer, PageClustererKind, PageCodec, PageCodecKind,
     ScopeKindClusterer, DEFAULT_MAX_CELLS_PER_PAGE, DEFAULT_TARGET_PAGE_BYTES,

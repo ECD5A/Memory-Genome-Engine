@@ -3,6 +3,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::compression::CompressionKind;
 use crate::errors::{MgeError, Result};
@@ -130,6 +131,25 @@ pub fn decode_page_with(kind: PageCodecKind, bytes: &[u8]) -> Result<MemoryPage>
         PageCodecKind::Json => JsonPageCodec.decode(bytes),
         PageCodecKind::MessagePack => MessagePackPageCodec.decode(bytes),
     }
+}
+
+pub fn attach_page_checksum(page: &mut MemoryPage) -> Result<()> {
+    page.checksum = Some(page_content_checksum(page)?);
+    Ok(())
+}
+
+pub fn page_content_checksum(page: &MemoryPage) -> Result<String> {
+    let mut canonical = page.clone();
+    canonical.checksum = None;
+    let bytes = serde_json::to_vec(&canonical)?;
+    Ok(sha256_hex(&bytes))
+}
+
+pub fn page_checksum_matches(page: &MemoryPage) -> Result<bool> {
+    let Some(expected) = &page.checksum else {
+        return Ok(true);
+    };
+    Ok(expected == &page_content_checksum(page)?)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -385,4 +405,13 @@ fn estimate_cell_bytes(cell: &MemoryCell) -> usize {
     serde_json::to_vec(cell)
         .map(|bytes| bytes.len())
         .unwrap_or(DEFAULT_TARGET_PAGE_BYTES)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        output.push_str(&format!("{byte:02x}"));
+    }
+    output
 }
