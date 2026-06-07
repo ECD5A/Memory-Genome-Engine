@@ -2,7 +2,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::errors::Result;
+use crate::errors::{MgeError, Result};
 use crate::models::{current_timestamp, MemoryCell};
 
 #[derive(Clone, Debug)]
@@ -27,11 +27,16 @@ impl HotStore {
 
     pub fn append_cell(&self, cell: &MemoryCell) -> Result<()> {
         self.ensure_exists()?;
+        let record = rmp_serde::to_vec_named(cell)?;
+        let record_len = u32::try_from(record.len()).map_err(|_| {
+            MgeError::InvalidInput("hot memory record is larger than 4 GiB".to_string())
+        })?;
         let mut file = OpenOptions::new()
             .append(true)
             .create(true)
             .open(&self.path)?;
-        writeln!(file, "{}", serde_json::to_string(cell)?)?;
+        file.write_all(&record_len.to_le_bytes())?;
+        file.write_all(&record)?;
         Ok(())
     }
 
@@ -40,13 +45,29 @@ impl HotStore {
             return Ok(Vec::new());
         }
 
-        let content = fs::read_to_string(&self.path)?;
+        let content = fs::read(&self.path)?;
         let mut cells = Vec::new();
-        for line in content.lines() {
-            if line.trim().is_empty() {
-                continue;
+        let mut offset = 0usize;
+        while offset < content.len() {
+            if content.len() - offset < 4 {
+                return Err(MgeError::InvalidInput(format!(
+                    "truncated hot memory log at byte {offset}"
+                )));
             }
-            cells.push(serde_json::from_str(line)?);
+            let mut len_bytes = [0u8; 4];
+            len_bytes.copy_from_slice(&content[offset..offset + 4]);
+            offset += 4;
+
+            let record_len = u32::from_le_bytes(len_bytes) as usize;
+            if content.len() - offset < record_len {
+                return Err(MgeError::InvalidInput(format!(
+                    "truncated hot memory record at byte {offset}"
+                )));
+            }
+            cells.push(rmp_serde::from_slice(
+                &content[offset..offset + record_len],
+            )?);
+            offset += record_len;
         }
         Ok(cells)
     }
@@ -73,13 +94,13 @@ impl HotStore {
 }
 
 fn unique_archive_path(archive_dir: &Path, timestamp: i64) -> PathBuf {
-    let first = archive_dir.join(format!("hot_cells_{timestamp}.jsonl"));
+    let first = archive_dir.join(format!("hot_{timestamp}.mgl"));
     if !first.exists() {
         return first;
     }
 
     for suffix in 1.. {
-        let candidate = archive_dir.join(format!("hot_cells_{timestamp}_{suffix}.jsonl"));
+        let candidate = archive_dir.join(format!("hot_{timestamp}_{suffix}.mgl"));
         if !candidate.exists() {
             return candidate;
         }
@@ -100,21 +121,21 @@ mod tests {
         let first = unique_archive_path(dir.path(), timestamp);
         assert_eq!(
             first.file_name().and_then(|name| name.to_str()),
-            Some("hot_cells_123456.jsonl")
+            Some("hot_123456.mgl")
         );
         fs::write(&first, b"first").unwrap();
 
         let second = unique_archive_path(dir.path(), timestamp);
         assert_eq!(
             second.file_name().and_then(|name| name.to_str()),
-            Some("hot_cells_123456_1.jsonl")
+            Some("hot_123456_1.mgl")
         );
         fs::write(&second, b"second").unwrap();
 
         let third = unique_archive_path(dir.path(), timestamp);
         assert_eq!(
             third.file_name().and_then(|name| name.to_str()),
-            Some("hot_cells_123456_2.jsonl")
+            Some("hot_123456_2.mgl")
         );
     }
 }

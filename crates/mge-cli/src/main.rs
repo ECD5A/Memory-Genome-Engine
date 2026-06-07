@@ -121,7 +121,7 @@ enum Commands {
         json: bool,
     },
     Export {
-        #[arg(long, default_value = "json")]
+        #[arg(long, default_value = "markdown")]
         format: String,
     },
 }
@@ -341,11 +341,17 @@ fn main() -> Result<()> {
             }
         }
         Commands::Export { format } => {
-            if format != "json" {
-                bail!("only --format json is supported in v0.1");
-            }
             let engine = open_engine(&cli.store)?;
-            println!("{}", serde_json::to_string_pretty(&engine.export_json()?)?);
+            match format.as_str() {
+                "markdown" | "md" => {
+                    let path = engine.export_markdown_to_default_path()?;
+                    println!("Exported Markdown memory to {}", path.display());
+                }
+                "json" | "debug-json" => {
+                    println!("{}", serde_json::to_string_pretty(&engine.export_json()?)?);
+                }
+                other => bail!("unsupported export format: {other}; supported: markdown, json"),
+            }
         }
     }
 
@@ -387,7 +393,7 @@ fn init_options_from_args(
 fn init_options_for_profile(profile: &str) -> Result<InitOptions> {
     match profile {
         "debug" | "default" | "compat" => Ok(InitOptions {
-            page_codec: PageCodecKind::Json,
+            page_codec: PageCodecKind::MessagePack,
             compression: CompressionKind::None,
             index_kind: IndexKind::ExactMarkerPage,
             page_clusterer: PageClustererKind::ScopeKind,
@@ -494,14 +500,14 @@ mod tests {
     fn init_profile_allows_explicit_overrides() {
         let options = init_options_from_args(
             "fast",
-            Some("json"),
+            Some("messagepack"),
             Some("none"),
             Some("marker_overlap"),
             Some("binary_fuse_page"),
         )
         .unwrap();
 
-        assert_eq!(options.page_codec, PageCodecKind::Json);
+        assert_eq!(options.page_codec, PageCodecKind::MessagePack);
         assert_eq!(options.compression, CompressionKind::None);
         assert_eq!(options.index_kind, IndexKind::BinaryFusePage);
         assert_eq!(options.page_clusterer, PageClustererKind::MarkerOverlap);

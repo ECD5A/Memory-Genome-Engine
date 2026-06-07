@@ -19,8 +19,11 @@
 - MessagePack page codec. Сделано как foundation.
 - zstd compression. Сделано как foundation.
 - Store config show/set для future page defaults. Сделано.
-- JSON runtime path reduction. В работе: JSON остаётся для debug/export/config compatibility, runtime storage уходит в MessagePack/binary.
+- Binary runtime storage layout. Сделано: `manifest.mgm`, `dictionary/markers.mgd`, `hot/hot.mgl`, `pages/*.mgp` и `indexes/*.mgi`.
+- JSON runtime storage removal. Сделано для текущего storage path; JSON остаётся только как явный debug output/API parsing.
 - Fast storage profile. Сделано как opt-in `mge init --profile fast`.
+- Markdown human-readable export. Сделано как `.memory-genome/exports/memory.md`.
+- Canonical page checksum и logical page sizing убраны с JSON и переведены на MessagePack bytes. Сделано.
 - Page clustering trait и logical page limits. Сделано как foundation.
 - Reranking transparency через debug score details. Сделано.
 - Exact value match и context-packet dedupe. Сделано как reranking/output hardening.

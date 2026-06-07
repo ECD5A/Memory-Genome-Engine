@@ -51,51 +51,59 @@ sensitivity:private
 tag:technical
 ```
 
-The dictionary persists stable integer IDs in `.memory-genome/markers.json`.
+The dictionary persists stable integer IDs in `.memory-genome/dictionary/markers.mgd`.
 
 ## Storage Layers
 
 Hot memory is mutable and append-only:
 
 ```text
-.memory-genome/hot/hot_cells.jsonl
+.memory-genome/hot/hot.mgl
 ```
 
 Sealed memory is semi-static and page based:
 
 ```text
+.memory-genome/manifest.mgm
+.memory-genome/dictionary/markers.mgd
+.memory-genome/hot/hot.mgl
 .memory-genome/pages/000001.mgp
-.memory-genome/indexes/page_catalog.json
-.memory-genome/indexes/marker_to_pages.json
-.memory-genome/indexes/binary_fuse_pages.json
+.memory-genome/pages/000002.mgp
+.memory-genome/indexes/page_index.mgi
+.memory-genome/indexes/marker_index.mgi
+.memory-genome/indexes/fuse_index.mgi
+.memory-genome/exports/memory.md
 ```
 
 ## Storage Format Direction
 
-JSON is not the final runtime storage target. It remains only as a bootstrap/debug/export/config compatibility layer while the engine moves toward compact binary-oriented runtime formats.
+Internal runtime storage is binary from the beginning. JSON is only an optional debug output format; it is not storage, not the default export, and not part of the storage architecture.
 
 Current direction:
 
-- sealed pages: prefer MessagePack now, custom binary page codec later;
+- manifest: MessagePack binary `.mgm`;
+- marker dictionary: MessagePack binary `.mgd`;
+- hot memory: length-prefixed MessagePack append-only `.mgl`;
+- sealed pages: MessagePack binary `.mgp`, with a future custom binary page codec boundary;
+- page catalog and candidate indexes: MessagePack binary `.mgi`;
 - compression: zstd is available now;
 - fast profile: `mge init --profile fast` uses MessagePack + zstd while keeping `ExactMarkerPageIndex` as the default index;
-- hot memory: JSONL is temporary and should move to an append-only binary log;
-- indexes/catalogs: JSON is debuggable foundation, not the long-term hot path;
-- export/debug: JSON remains useful and supported.
+- human-readable export: Markdown at `.memory-genome/exports/memory.md`;
+- debug output: JSON may be emitted explicitly by CLI flags such as `--json` or `export --format json`.
 
 Page files use codecs hidden behind the `PageCodec` trait:
 
-- `JsonPageCodec`
-- `MessagePackPageCodec`
+- `MessagePackPageCodec` for runtime page storage;
+- `JsonPageCodec` exists only as an optional debug/legacy codec and is rejected for runtime store initialization/config.
 
-New sealed pages carry a SHA-256 content checksum computed over a canonical page representation with the checksum field cleared. The checksum is codec-independent and is verified by `mge validate`.
+New sealed pages carry a SHA-256 content checksum computed over a canonical MessagePack page representation with the checksum field cleared. The checksum is codec-independent and is verified by `mge validate`.
 
 Compression is hidden behind the `Compressor` trait:
 
 - `NoCompression`
 - `ZstdCompression`
 
-The manifest stores the default codec/compression for newly sealed pages. Each `PageCatalogEntry` stores the actual codec/compression for that page, so the engine can read mixed stores and old JSON/no-compression pages.
+The manifest stores the default codec/compression for newly sealed pages. Each `PageCatalogEntry` stores the actual codec/compression for that page, so the engine can read mixed binary stores without rewriting existing pages.
 
 `mge config set` updates manifest defaults and lightweight derived indexes. It does not rewrite existing page files or mutate existing page catalog entries. Changing `--index-kind` rebuilds only the candidate index from existing sealed pages.
 

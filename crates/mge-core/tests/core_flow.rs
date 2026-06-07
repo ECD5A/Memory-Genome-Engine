@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 
 use mge_core::{
@@ -154,6 +155,55 @@ fn init_options_are_saved_in_manifest() {
 }
 
 #[test]
+fn init_creates_binary_storage_layout() {
+    let dir = tempdir().unwrap();
+    MemoryEngine::init_at(dir.path()).unwrap();
+
+    assert!(dir.path().join("manifest.mgm").is_file());
+    assert!(dir.path().join("dictionary").join("markers.mgd").is_file());
+    assert!(dir.path().join("hot").join("hot.mgl").is_file());
+    assert!(dir.path().join("indexes").join("page_index.mgi").is_file());
+    assert!(dir
+        .path()
+        .join("indexes")
+        .join("marker_index.mgi")
+        .is_file());
+    assert!(dir.path().join("indexes").join("fuse_index.mgi").is_file());
+    assert!(dir.path().join("exports").is_dir());
+
+    assert!(!dir.path().join("manifest.json").exists());
+    assert!(!dir.path().join("markers.json").exists());
+    assert!(!dir.path().join("hot").join("hot_cells.jsonl").exists());
+    assert!(!dir
+        .path()
+        .join("indexes")
+        .join("page_catalog.json")
+        .exists());
+    assert!(!dir
+        .path()
+        .join("indexes")
+        .join("marker_to_pages.json")
+        .exists());
+}
+
+#[test]
+fn init_rejects_json_runtime_page_codec() {
+    let dir = tempdir().unwrap();
+    let err = MemoryEngine::init_with_options(
+        dir.path(),
+        InitOptions {
+            page_codec: PageCodecKind::Json,
+            compression: CompressionKind::None,
+            index_kind: IndexKind::ExactMarkerPage,
+            page_clusterer: PageClustererKind::ScopeKind,
+        },
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("json page codec"));
+}
+
+#[test]
 fn storage_config_update_changes_future_defaults() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
@@ -167,7 +217,7 @@ fn storage_config_update_changes_future_defaults() {
         })
         .unwrap();
 
-    assert_eq!(report.previous.page_codec, PageCodecKind::Json);
+    assert_eq!(report.previous.page_codec, PageCodecKind::MessagePack);
     assert_eq!(report.previous.compression, CompressionKind::None);
     assert_eq!(report.current.page_codec, PageCodecKind::MessagePack);
     assert_eq!(report.current.compression, CompressionKind::Zstd);
@@ -294,6 +344,22 @@ fn seal_preserves_source_and_links() {
 }
 
 #[test]
+fn markdown_export_writes_human_readable_memory_file() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let path = engine.export_markdown_to_default_path().unwrap();
+    let markdown = fs::read_to_string(&path).unwrap();
+
+    assert_eq!(path, dir.path().join("exports").join("memory.md"));
+    assert!(markdown.contains("# Memory Genome Export"));
+    assert!(markdown.contains("## Sealed Pages"));
+    assert!(markdown.contains("User prefers concise technical explanations"));
+}
+
+#[test]
 fn recall_from_sealed_pages() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
@@ -379,7 +445,7 @@ fn storage_config_update_keeps_existing_pages_readable() {
     assert_eq!(inspect.page_catalog.pages.len(), 2);
     assert_eq!(
         inspect.page_catalog.pages[0].page_codec,
-        PageCodecKind::Json
+        PageCodecKind::MessagePack
     );
     assert_eq!(
         inspect.page_catalog.pages[0].compression,
@@ -543,7 +609,7 @@ fn recall_from_binary_fuse_page_index() {
     let mut engine = MemoryEngine::init_with_options(
         dir.path(),
         InitOptions {
-            page_codec: PageCodecKind::Json,
+            page_codec: PageCodecKind::MessagePack,
             compression: CompressionKind::None,
             index_kind: IndexKind::BinaryFusePage,
             page_clusterer: PageClustererKind::ScopeKind,
@@ -683,7 +749,7 @@ fn marker_overlap_clusterer_groups_similar_cells() {
 }
 
 #[test]
-fn legacy_page_catalog_entries_default_to_json_without_compression() {
+fn page_catalog_entries_default_to_binary_without_compression() {
     let value = serde_json::json!({
         "page_id": 1,
         "file": "000001.mgp",
@@ -694,7 +760,7 @@ fn legacy_page_catalog_entries_default_to_json_without_compression() {
 
     let entry: PageCatalogEntry = serde_json::from_value(value).unwrap();
 
-    assert_eq!(entry.page_codec, PageCodecKind::Json);
+    assert_eq!(entry.page_codec, PageCodecKind::MessagePack);
     assert_eq!(entry.compression, CompressionKind::None);
     assert_eq!(entry.page_clusterer, PageClustererKind::ScopeKind);
 }
@@ -726,6 +792,44 @@ fn messagepack_page_codec_roundtrips_page() {
     assert_eq!(decoded.page_id, 42);
     assert_eq!(decoded.cells.len(), 1);
     assert_eq!(decoded.cells[0].value, page.cells[0].value);
+}
+
+#[test]
+fn page_checksum_is_independent_of_page_codec() {
+    let cell = mge_core::MemoryCell::new(
+        1,
+        MemoryKind::ProjectFact,
+        Some("checksum".to_string()),
+        MemoryValue::Text("Codec-independent checksum".to_string()),
+        "project".to_string(),
+        MemoryStatus::Active,
+        TrustLevel::SystemGenerated,
+        SensitivityLevel::Public,
+        vec![1, 2],
+        None,
+        Vec::new(),
+    );
+    let mut page = build_pages_from_cells(&[cell], 42)
+        .into_iter()
+        .next()
+        .unwrap();
+    mge_core::attach_page_checksum(&mut page).unwrap();
+
+    let json_codec = mge_core::JsonPageCodec;
+    let msgpack_codec = MessagePackPageCodec;
+    let json_decoded = json_codec
+        .decode(&json_codec.encode(&page).unwrap())
+        .unwrap();
+    let msgpack_decoded = msgpack_codec
+        .decode(&msgpack_codec.encode(&page).unwrap())
+        .unwrap();
+
+    assert_eq!(
+        mge_core::page_content_checksum(&json_decoded).unwrap(),
+        mge_core::page_content_checksum(&msgpack_decoded).unwrap()
+    );
+    assert!(mge_core::page_checksum_matches(&json_decoded).unwrap());
+    assert!(mge_core::page_checksum_matches(&msgpack_decoded).unwrap());
 }
 
 #[test]
@@ -1018,7 +1122,7 @@ fn validate_clean_binary_fuse_store_passes() {
     let mut engine = MemoryEngine::init_with_options(
         dir.path(),
         InitOptions {
-            page_codec: PageCodecKind::Json,
+            page_codec: PageCodecKind::MessagePack,
             compression: CompressionKind::None,
             index_kind: IndexKind::BinaryFusePage,
             page_clusterer: PageClustererKind::ScopeKind,
@@ -1065,10 +1169,10 @@ fn validate_reports_page_checksum_mismatch() {
 
     let page_file = engine.inspect().unwrap().page_catalog.pages[0].file.clone();
     let page_path = dir.path().join("pages").join(page_file);
-    let mut page: mge_core::MemoryPage =
-        serde_json::from_slice(&fs::read(&page_path).unwrap()).unwrap();
+    let codec = MessagePackPageCodec;
+    let mut page: mge_core::MemoryPage = codec.decode(&fs::read(&page_path).unwrap()).unwrap();
     page.checksum = Some("bad-checksum".to_string());
-    fs::write(&page_path, serde_json::to_vec(&page).unwrap()).unwrap();
+    fs::write(&page_path, codec.encode(&page).unwrap()).unwrap();
 
     let report = engine.validate().unwrap();
 
@@ -1103,7 +1207,7 @@ fn validate_warns_about_unknown_index_file() {
     remember_answer_style(&mut engine);
     engine.seal().unwrap();
     fs::write(
-        dir.path().join("indexes").join("scratch-index.json"),
+        dir.path().join("indexes").join("scratch-index.mgi"),
         b"not managed",
     )
     .unwrap();
@@ -1122,18 +1226,19 @@ fn validate_reports_marker_dictionary_inconsistency() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
     remember_answer_style(&mut engine);
-    let markers_path = dir.path().join("markers.json");
-    let mut markers_json: serde_json::Value =
-        serde_json::from_slice(&fs::read(&markers_path).unwrap()).unwrap();
-    markers_json["id_to_marker"]
-        .as_object_mut()
-        .unwrap()
-        .remove("1");
-    fs::write(
-        &markers_path,
-        serde_json::to_vec_pretty(&markers_json).unwrap(),
-    )
-    .unwrap();
+    let markers_path = dir.path().join("dictionary").join("markers.mgd");
+    #[derive(serde::Serialize)]
+    struct BrokenMarkerDictionary {
+        marker_to_id: BTreeMap<String, u32>,
+        id_to_marker: BTreeMap<u32, String>,
+        next_id: u32,
+    }
+    let broken = BrokenMarkerDictionary {
+        marker_to_id: BTreeMap::from([("kind:user_preference".to_string(), 1)]),
+        id_to_marker: BTreeMap::new(),
+        next_id: 2,
+    };
+    fs::write(&markers_path, rmp_serde::to_vec_named(&broken).unwrap()).unwrap();
     let engine = MemoryEngine::open_at(dir.path()).unwrap();
 
     let report = engine.validate().unwrap();
@@ -1190,7 +1295,7 @@ fn synthetic_binary_fuse_candidates_cover_exact_candidates() {
     let mut exact = MemoryEngine::init_with_options(
         exact_dir.path(),
         InitOptions {
-            page_codec: PageCodecKind::Json,
+            page_codec: PageCodecKind::MessagePack,
             compression: CompressionKind::None,
             index_kind: IndexKind::ExactMarkerPage,
             page_clusterer: PageClustererKind::ScopeKind,
@@ -1200,7 +1305,7 @@ fn synthetic_binary_fuse_candidates_cover_exact_candidates() {
     let mut binary = MemoryEngine::init_with_options(
         binary_dir.path(),
         InitOptions {
-            page_codec: PageCodecKind::Json,
+            page_codec: PageCodecKind::MessagePack,
             compression: CompressionKind::None,
             index_kind: IndexKind::BinaryFusePage,
             page_clusterer: PageClustererKind::ScopeKind,

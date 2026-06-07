@@ -64,7 +64,7 @@ impl PageCodecKind {
 
 impl Default for PageCodecKind {
     fn default() -> Self {
-        Self::Json
+        Self::MessagePack
     }
 }
 
@@ -141,7 +141,7 @@ pub fn attach_page_checksum(page: &mut MemoryPage) -> Result<()> {
 pub fn page_content_checksum(page: &MemoryPage) -> Result<String> {
     let mut canonical = page.clone();
     canonical.checksum = None;
-    let bytes = serde_json::to_vec(&canonical)?;
+    let bytes = rmp_serde::to_vec_named(&canonical)?;
     Ok(sha256_hex(&bytes))
 }
 
@@ -402,7 +402,7 @@ fn split_group_by_limits(
 }
 
 fn estimate_cell_bytes(cell: &MemoryCell) -> usize {
-    serde_json::to_vec(cell)
+    rmp_serde::to_vec_named(cell)
         .map(|bytes| bytes.len())
         .unwrap_or(DEFAULT_TARGET_PAGE_BYTES)
 }

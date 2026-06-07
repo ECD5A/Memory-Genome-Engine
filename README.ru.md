@@ -32,8 +32,8 @@ Cells -> Marker Genome -> Hot Memory -> Sealed Pages -> Candidate Page Index -> 
 
 - `mge-core`: переиспользуемая библиотека движка памяти.
 - `mge-cli`: первый CLI-интерфейс, бинарник `mge`.
-- `.memory-genome/`: локальное хранилище с manifest, marker dictionary, hot JSONL log, page files и JSON indexes.
-- Page storage поддерживает JSON или MessagePack codecs и none/zstd compression через стабильные traits.
+- `.memory-genome/`: локальное binary-хранилище с `manifest.mgm`, `dictionary/markers.mgd`, `hot/hot.mgl`, `pages/*.mgp` и `indexes/*.mgi`.
+- Runtime storage использует MessagePack-oriented binary files; zstd compression доступен для sealed pages.
 - Candidate page search по умолчанию использует `ExactMarkerPageIndex`; `BinaryFusePageIndex` доступен как opt-in probabilistic page filter на реальном `xorf::BinaryFuse16`.
 
 Подробнее:
@@ -45,7 +45,7 @@ Cells -> Marker Genome -> Hot Memory -> Sealed Pages -> Candidate Page Index -> 
 
 ## Почему Не Markdown
 
-Markdown удобен для экспорта и чтения человеком, но плох как внутренний высокоскоростной формат памяти. Этот движок хранит типизированные cells и marker IDs, а наружу отдает readable context packets или JSON export.
+Markdown удобен для экспорта и чтения человеком, но плох как внутренний высокоскоростной формат памяти. Этот движок хранит типизированные cells и marker IDs, а наружу отдает readable context packets, Markdown exports или явный debug JSON.
 
 ## Почему Не Vector-Only RAG
 
@@ -126,7 +126,8 @@ mge inspect
 mge validate
 mge stats
 mge stats --json
-mge export --format json
+mge export
+mge export --format json # explicit debug export
 ```
 
 Для явного marker search используйте `--marker`:

@@ -168,7 +168,7 @@ fn run_mode(
     let mut engine = MemoryEngine::init_with_options(
         &mode_root,
         InitOptions {
-            page_codec: PageCodecKind::Json,
+            page_codec: PageCodecKind::MessagePack,
             compression: CompressionKind::None,
             index_kind,
             page_clusterer: PageClustererKind::ScopeKind,

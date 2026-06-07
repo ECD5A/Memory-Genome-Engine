@@ -44,11 +44,25 @@ fn cli_milestone_flow_outputs_context_stats_and_validation_json() {
     assert_eq!(stats["hot_cells"], 0);
     assert_eq!(stats["sealed_pages"], 1);
     assert_eq!(stats["sealed_cells"], 1);
+    assert_eq!(stats["current_page_codec"], "message_pack");
     assert_eq!(stats["current_index_kind"], "exact_marker_page");
 
     let validation = run_mge_json(&store, &["validate", "--json"]);
     assert_eq!(validation["ok"], true);
     assert_eq!(validation["errors"].as_array().unwrap().len(), 0);
+
+    run_mge(&store, &["export"]);
+    assert!(store.join("manifest.mgm").is_file());
+    assert!(store.join("dictionary").join("markers.mgd").is_file());
+    assert!(store.join("hot").join("hot.mgl").is_file());
+    assert!(store.join("indexes").join("page_index.mgi").is_file());
+    assert!(store.join("indexes").join("marker_index.mgi").is_file());
+    assert!(store.join("indexes").join("fuse_index.mgi").is_file());
+    assert!(store.join("exports").join("memory.md").is_file());
+
+    assert!(!store.join("manifest.json").exists());
+    assert!(!store.join("markers.json").exists());
+    assert!(!store.join("hot").join("hot_cells.jsonl").exists());
 }
 
 #[test]

@@ -29,18 +29,18 @@ Non-negotiable rules:
 
 JSON policy:
 
-- JSON is currently allowed as a bootstrap/debug/export/config compatibility layer.
-- JSON is not the final runtime storage direction.
-- Runtime storage should move toward MessagePack, zstd, custom binary page codec, and compact binary/index formats.
-- `MemoryValue::Structured(serde_json::Value)` is currently an API-level structured value, not a promise to store memory as JSON forever.
+- JSON/JSONL are not internal runtime storage, not defaults, and not part of the storage architecture.
+- JSON is allowed only as explicit debug output, CLI `--json` output, or API-level structured input parsing.
+- Runtime storage uses compact binary files now: MessagePack-based `.mgm`, `.mgd`, `.mgl`, `.mgp`, and `.mgi`.
+- `MemoryValue::Structured(serde_json::Value)` is an API-level structured value, not a promise to store memory as JSON.
 
 ## Roadmap Snapshot
 
 | Stage | Status | Notes |
 | --- | --- | --- |
 | v0.1 core/CLI | Done / hardening | Rust core, CLI, cells, markers, hot memory, sealed pages, exact index, recall, and context packets work. |
-| v0.2 storage/index foundation | Mostly done / hardening | MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in, and validation hardening are done. |
-| v0.2 remaining | In progress | Move away from JSON runtime path, benchmark-driven reranking, compact storage/index hardening. |
+| v0.2 storage/index foundation | Done / hardening | Binary runtime storage layout, MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in, and validation hardening are done. |
+| v0.2 remaining | In progress | Benchmark-driven reranking and compact storage/index hardening. |
 | v0.3 SDK/MCP | Not started | Python/TypeScript/MCP only after Rust core API stabilizes. |
 | v0.4 security | Foundation only | Interfaces/policy exist; real encryption/session unlock/blind markers are not started. |
 | v0.5 safety/search | Partial foundation | Policy/capabilities exist; poisoning/conflict/vector reranking are not started. |
@@ -48,7 +48,7 @@ JSON policy:
 ## Current Focus
 
 - Push the v0.1/v0.2 core/storage/index foundation toward a fast compact runtime path.
-- Gradually push JSON out of runtime storage while keeping JSON for debug/export/config compatibility.
+- Keep JSON out of internal runtime storage; use it only for explicit debug output and structured input parsing.
 - Keep the implementation deterministic, local, compact, marker/page based, and ready for later encryption, SDKs, and MCP.
 
 ## Done
@@ -67,8 +67,8 @@ JSON policy:
   - marker canonicalization and persistent dictionary;
   - deterministic marker extraction;
   - deterministic shallow marker extraction for structured JSON keys and short scalar values;
-  - append-only hot JSONL store;
-  - page model and JSON page codec;
+  - append-only binary hot log;
+  - page model and MessagePack page codec;
   - exact marker-to-page candidate index;
   - recall, reranking, filtering, and context packet output;
   - extension traits for store, page codec, compression, index, retrieval, and security.
@@ -80,7 +80,8 @@ JSON policy:
   - `inspect`
   - `validate`
   - `stats`
-  - `export --format json`
+  - `export` / `export --format markdown`
+  - `export --format json` as explicit debug output
 - CLI `remember` supports structured values through `--json-value`, stored as `MemoryValue::Structured`.
 - CLI `remember` supports typed reference and timestamp values through `--reference-value` and `--timestamp-value`.
 - CLI `remember` supports provenance and graph hints through `--source-type`, `--source-ref`, and repeated `--link`.
@@ -101,12 +102,25 @@ JSON policy:
 - `ZstdCompression` added behind the existing `Compressor` trait.
 - Store manifest now records default `page_codec` and `compression` for newly sealed pages.
 - Page catalog entries now record per-page codec/compression for mixed-store and backward-compatible reads.
+- Internal store files now use the final binary layout:
+  - `manifest.mgm`
+  - `dictionary/markers.mgd`
+  - `hot/hot.mgl`
+  - `pages/*.mgp`
+  - `indexes/page_index.mgi`
+  - `indexes/marker_index.mgi`
+  - `indexes/fuse_index.mgi`
+  - `exports/memory.md` for human-readable Markdown export
+- Hot memory now uses length-prefixed MessagePack records instead of JSONL.
+- Marker dictionary, manifest, page catalog, and candidate indexes now persist as MessagePack binary files.
 - New sealed pages now store codec-independent SHA-256 content checksums.
-- CLI `init` now supports `--page-codec json|messagepack` and `--compression none|zstd`.
+- Page checksum canonical bytes and logical page-size estimates now use MessagePack instead of JSON.
+- CLI `init` now supports binary runtime storage by default; JSON page codec is rejected for runtime store initialization/config.
 - CLI `init --profile fast` added as opt-in compact storage profile: MessagePack + zstd + exact index.
+- CLI `export` now writes Markdown to `.memory-genome/exports/memory.md` by default; JSON export is explicit debug output.
 - CLI `config show` and `config set` added for existing stores.
 - Storage config updates change only future seal defaults; existing pages remain untouched and readable through catalog metadata.
-- Tests added for zstd roundtrip, init options, MessagePack+zstd sealed recall, and legacy catalog defaults.
+- Tests added for zstd roundtrip, init options, MessagePack+zstd sealed recall, binary storage layout, Markdown export, and binary catalog defaults.
 - `PageClusterer` trait added.
 - `ScopeKindClusterer` kept as the default seal clustering strategy.
 - `MarkerOverlapClusterer` added as a deterministic no-ML extension strategy.
@@ -175,6 +189,7 @@ cargo run -p mge-cli -- recall "How should the agent answer technical questions?
 cargo run -p mge-cli -- stats
 cargo run -p mge-cli -- stats --json
 cargo run -p mge-cli -- validate
+cargo run -p mge-cli -- export
 cargo run -p mge-cli -- init --index-kind binary_fuse_page
 cargo run -p mge-cli -- config set --index-kind binary_fuse_page
 cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --marker-groups 12 --targeted-queries 6 --noise-queries 3
@@ -183,7 +198,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 62 tests total (12 CLI unit tests + 2 CLI integration tests + 1 core unit test + 47 core integration tests).
+- `cargo test`: passed, 66 tests total (12 CLI unit tests + 2 CLI integration tests + 1 core unit test + 51 core integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -192,10 +207,17 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Index kind stats/config smoke command: passed.
 - Binary Fuse init/recall/stats smoke command: passed.
 - Exact-to-Binary-Fuse config switch smoke command: passed; sealed page hash unchanged.
+- Binary storage layout CLI smoke command: passed; required `.mgm/.mgd/.mgl/.mgp/.mgi` files exist, old JSON/JSONL storage files absent, Markdown export size 621 bytes.
+- JSON runtime page codec reject smoke command: passed; `mge init --page-codec json` exits with `invalid input`.
 - Synthetic exact-vs-Binary-Fuse benchmark smoke command: passed.
   - config: 1200 cells, 120 sealed pages, 12 marker groups, 6 targeted queries, 3 noise queries.
   - exact: avg recall latency 11545 us, total candidate pages 60, loaded pages 60, sealed cells scanned 600, result count 120.
   - binary_fuse_page: avg recall latency 13426 us, total candidate pages 60, loaded pages 60, sealed cells scanned 600, result count 120, post-load false-positive pages 0.
+  - subset check: `exact_candidates ⊆ binary_fuse_candidates` passed.
+- Small post-binary-layout benchmark smoke command: passed.
+  - config: 120 cells, 12 sealed pages, 4 marker groups, 3 targeted queries, 1 noise query.
+  - exact: avg recall latency 7410 us, total candidate pages 9, loaded pages 9, sealed cells scanned 90, result count 60.
+  - binary_fuse_page: avg recall latency 4182 us, total candidate pages 9, loaded pages 9, sealed cells scanned 90, result count 60, post-load false-positive pages 0.
   - subset check: `exact_candidates ⊆ binary_fuse_candidates` passed.
 - Validate CLI smoke commands: passed for `exact_marker_page` and `binary_fuse_page`.
 - Page checksum smoke command: passed for MessagePack+zstd sealed page, checksum length 64, `mge validate --json` ok.
@@ -210,6 +232,8 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Structured JSON marker extraction CLI smoke command: passed, recall matched `tag:style` and `tag:concise`.
 - CLI milestone integration test: passed for init, remember, recall JSON, seal, stats JSON, and validate JSON.
 - Fast profile CLI integration test: passed for `mge init --profile fast`.
+- Binary storage layout tests: passed for `.mgm/.mgd/.mgl/.mgp/.mgi` files and absence of old JSON/JSONL storage files.
+- Markdown export test: passed for `.memory-genome/exports/memory.md`.
 - Marker dictionary consistency validation test: passed.
 - Stats JSON smoke command: passed, `sealed_pages` and `current_index_kind` exported.
 - Recall policy secret-reference opt-in smoke command: passed.
@@ -220,5 +244,5 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
   - sealed cells: 1-2 depending on smoke scenario
   - index type: `exact_marker_page` or `binary_fuse_page` depending on smoke scenario
   - current index kind: `exact_marker_page` or `binary_fuse_page` depending on smoke scenario
-  - current page codec: `json` or `messagepack` depending on smoke scenario
+  - current page codec: `messagepack`
   - current compression: `none` or `zstd` depending on smoke scenario

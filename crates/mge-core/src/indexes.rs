@@ -234,7 +234,7 @@ impl BinaryFusePageIndex {
         if let Some(parent) = path.as_ref().parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(path, serde_json::to_vec_pretty(self)?)?;
+        fs::write(path, rmp_serde::to_vec_named(self)?)?;
         Ok(())
     }
 
@@ -242,7 +242,7 @@ impl BinaryFusePageIndex {
         if !path.as_ref().exists() {
             return Ok(Self::default());
         }
-        Ok(serde_json::from_slice(&fs::read(path)?)?)
+        Ok(rmp_serde::from_slice(&fs::read(path)?)?)
     }
 
     fn union(&self, markers: &[MarkerId]) -> Vec<PageId> {
@@ -365,7 +365,7 @@ impl ExactMarkerPageIndex {
         if let Some(parent) = path.as_ref().parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(path, serde_json::to_vec_pretty(self)?)?;
+        fs::write(path, rmp_serde::to_vec_named(self)?)?;
         Ok(())
     }
 
@@ -373,7 +373,7 @@ impl ExactMarkerPageIndex {
         if !path.as_ref().exists() {
             return Ok(Self::default());
         }
-        Ok(serde_json::from_slice(&fs::read(path)?)?)
+        Ok(rmp_serde::from_slice(&fs::read(path)?)?)
     }
 
     fn union(&self, markers: &[MarkerId]) -> Vec<PageId> {

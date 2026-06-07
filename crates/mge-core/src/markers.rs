@@ -144,7 +144,7 @@ impl MarkerDictionary {
         if let Some(parent) = path.as_ref().parent() {
             fs::create_dir_all(parent)?;
         }
-        let bytes = serde_json::to_vec_pretty(self)?;
+        let bytes = rmp_serde::to_vec_named(self)?;
         fs::write(path, bytes)?;
         Ok(())
     }
@@ -154,7 +154,7 @@ impl MarkerDictionary {
             return Ok(Self::new());
         }
         let bytes = fs::read(path)?;
-        let mut dictionary: Self = serde_json::from_slice(&bytes)?;
+        let mut dictionary: Self = rmp_serde::from_slice(&bytes)?;
         if dictionary.next_id == 0 {
             dictionary.next_id = dictionary
                 .id_to_marker

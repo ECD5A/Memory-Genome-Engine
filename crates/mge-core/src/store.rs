@@ -30,6 +30,12 @@ use crate::retrieval::{
 use crate::security::{AuditEvent, AuditLogger, NoSecurity, NoopAuditLogger, SecurityProvider};
 
 pub const DEFAULT_STORE_DIR: &str = ".memory-genome";
+const MANIFEST_FILE: &str = "manifest.mgm";
+const MARKER_DICTIONARY_FILE: &str = "markers.mgd";
+const HOT_LOG_FILE: &str = "hot.mgl";
+const PAGE_CATALOG_FILE: &str = "page_index.mgi";
+const EXACT_MARKER_INDEX_FILE: &str = "marker_index.mgi";
+const BINARY_FUSE_INDEX_FILE: &str = "fuse_index.mgi";
 
 pub trait Store {
     fn remember(&mut self, request: RememberRequest) -> Result<MemoryCell>;
@@ -266,13 +272,16 @@ impl MemoryEngine {
     }
 
     pub fn init_with_options(store_root: impl AsRef<Path>, options: InitOptions) -> Result<Self> {
+        ensure_runtime_page_codec(options.page_codec)?;
+
         let root = store_root.as_ref().to_path_buf();
+        fs::create_dir_all(root.join("dictionary"))?;
         fs::create_dir_all(root.join("hot"))?;
         fs::create_dir_all(root.join("pages"))?;
         fs::create_dir_all(root.join("indexes"))?;
-        fs::create_dir_all(root.join("debug"))?;
+        fs::create_dir_all(root.join("exports"))?;
 
-        let manifest_path = root.join("manifest.json");
+        let manifest_path = root.join(MANIFEST_FILE);
         if !manifest_path.exists() {
             let now = current_timestamp();
             let manifest = Manifest {
@@ -287,32 +296,27 @@ impl MemoryEngine {
                 index_kind: options.index_kind,
                 page_clusterer: options.page_clusterer,
             };
-            fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
+            save_messagepack(&manifest_path, &manifest)?;
         }
 
-        let dictionary = MarkerDictionary::load_from_path(root.join("markers.json"))?;
-        dictionary.save_to_path(root.join("markers.json"))?;
+        let markers_path = root.join("dictionary").join(MARKER_DICTIONARY_FILE);
+        let dictionary = MarkerDictionary::load_from_path(&markers_path)?;
+        dictionary.save_to_path(&markers_path)?;
 
-        HotStore::new(root.join("hot").join("hot_cells.jsonl")).ensure_exists()?;
-        if !root.join("indexes").join("page_catalog.json").exists() {
-            save_json(
-                root.join("indexes").join("page_catalog.json"),
+        HotStore::new(root.join("hot").join(HOT_LOG_FILE)).ensure_exists()?;
+        if !root.join("indexes").join(PAGE_CATALOG_FILE).exists() {
+            save_messagepack(
+                root.join("indexes").join(PAGE_CATALOG_FILE),
                 &PageCatalog::default(),
             )?;
         }
-        match options.index_kind {
-            IndexKind::ExactMarkerPage => {
-                if !root.join("indexes").join("marker_to_pages.json").exists() {
-                    ExactMarkerPageIndex::default()
-                        .save_to_path(root.join("indexes").join("marker_to_pages.json"))?;
-                }
-            }
-            IndexKind::BinaryFusePage => {
-                if !root.join("indexes").join("binary_fuse_pages.json").exists() {
-                    BinaryFusePageIndex::default()
-                        .save_to_path(root.join("indexes").join("binary_fuse_pages.json"))?;
-                }
-            }
+        if !root.join("indexes").join(EXACT_MARKER_INDEX_FILE).exists() {
+            ExactMarkerPageIndex::default()
+                .save_to_path(root.join("indexes").join(EXACT_MARKER_INDEX_FILE))?;
+        }
+        if !root.join("indexes").join(BINARY_FUSE_INDEX_FILE).exists() {
+            BinaryFusePageIndex::default()
+                .save_to_path(root.join("indexes").join(BINARY_FUSE_INDEX_FILE))?;
         }
 
         Self::open_at(root)
@@ -320,13 +324,15 @@ impl MemoryEngine {
 
     pub fn open_at(store_root: impl AsRef<Path>) -> Result<Self> {
         let root = store_root.as_ref().to_path_buf();
-        let manifest_path = root.join("manifest.json");
+        let manifest_path = root.join(MANIFEST_FILE);
         if !manifest_path.exists() {
             return Err(MgeError::NotInitialized(root.display().to_string()));
         }
 
-        let manifest: Manifest = serde_json::from_slice(&fs::read(manifest_path)?)?;
-        let dictionary = MarkerDictionary::load_from_path(root.join("markers.json"))?;
+        let manifest: Manifest = rmp_serde::from_slice(&fs::read(manifest_path)?)?;
+        ensure_runtime_page_codec(manifest.page_codec)?;
+        let dictionary =
+            MarkerDictionary::load_from_path(root.join("dictionary").join(MARKER_DICTIONARY_FILE))?;
 
         Ok(Self {
             root,
@@ -356,6 +362,9 @@ impl MemoryEngine {
         &mut self,
         update: StorageConfigUpdate,
     ) -> Result<StorageConfigUpdateReport> {
+        if let Some(page_codec) = update.page_codec {
+            ensure_runtime_page_codec(page_codec)?;
+        }
         if update.page_codec.is_none()
             && update.compression.is_none()
             && update.index_kind.is_none()
@@ -675,6 +684,58 @@ impl MemoryEngine {
         }))
     }
 
+    pub fn export_markdown(&self) -> Result<String> {
+        let hot_cells = HotStore::new(self.hot_cells_path()).load_cells()?;
+        let catalog = self.load_page_catalog()?;
+        let pages = self.load_all_pages()?;
+
+        let mut output = String::new();
+        output.push_str("# Memory Genome Export\n\n");
+        output.push_str("## Store\n\n");
+        output.push_str(&format!("- version: {}\n", self.manifest.version));
+        output.push_str(&format!("- markers: {}\n", self.dictionary.len()));
+        output.push_str(&format!("- hot cells: {}\n", hot_cells.len()));
+        output.push_str(&format!("- sealed pages: {}\n", catalog.pages.len()));
+        output.push_str(&format!("- index kind: {}\n\n", self.manifest.index_kind));
+
+        output.push_str("## Hot Memory\n\n");
+        if hot_cells.is_empty() {
+            output.push_str("_No hot cells._\n\n");
+        } else {
+            for cell in &hot_cells {
+                append_cell_markdown(&mut output, cell, &self.dictionary);
+            }
+        }
+
+        output.push_str("## Sealed Pages\n\n");
+        if pages.is_empty() {
+            output.push_str("_No sealed pages._\n");
+        } else {
+            for page in &pages {
+                output.push_str(&format!(
+                    "### Page {}\n\n- cells: {}\n- markers: {}\n\n",
+                    page.page_id,
+                    page.cells.len(),
+                    page.marker_summary.len()
+                ));
+                for cell in &page.cells {
+                    append_cell_markdown(&mut output, cell, &self.dictionary);
+                }
+            }
+        }
+
+        Ok(output)
+    }
+
+    pub fn export_markdown_to_default_path(&self) -> Result<PathBuf> {
+        let path = self.export_markdown_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, self.export_markdown()?)?;
+        Ok(path)
+    }
+
     pub fn validate(&self) -> Result<ValidationReport> {
         let mut report = ValidationReport::new(self.manifest.index_kind);
         let catalog = self.load_page_catalog()?;
@@ -835,7 +896,7 @@ impl MemoryEngine {
     }
 
     fn save_manifest(&self) -> Result<()> {
-        save_json(self.manifest_path(), &self.manifest)
+        save_messagepack(self.manifest_path(), &self.manifest)
     }
 
     fn load_page_catalog(&self) -> Result<PageCatalog> {
@@ -843,13 +904,13 @@ impl MemoryEngine {
         if !path.exists() {
             return Ok(PageCatalog::default());
         }
-        Ok(serde_json::from_slice(&fs::read(path)?)?)
+        Ok(rmp_serde::from_slice(&fs::read(path)?)?)
     }
 
     fn save_page_catalog(&self, catalog: &PageCatalog) -> Result<()> {
         let mut catalog = catalog.clone();
         catalog.index_kind = self.manifest.index_kind;
-        save_json(self.page_catalog_path(), &catalog)
+        save_messagepack(self.page_catalog_path(), &catalog)
     }
 
     fn load_all_pages(&self) -> Result<Vec<MemoryPage>> {
@@ -1090,15 +1151,15 @@ impl MemoryEngine {
     }
 
     fn manifest_path(&self) -> PathBuf {
-        self.root.join("manifest.json")
+        self.root.join(MANIFEST_FILE)
     }
 
     fn markers_path(&self) -> PathBuf {
-        self.root.join("markers.json")
+        self.root.join("dictionary").join(MARKER_DICTIONARY_FILE)
     }
 
     fn hot_cells_path(&self) -> PathBuf {
-        self.root.join("hot").join("hot_cells.jsonl")
+        self.root.join("hot").join(HOT_LOG_FILE)
     }
 
     fn pages_dir(&self) -> PathBuf {
@@ -1106,19 +1167,23 @@ impl MemoryEngine {
     }
 
     fn page_catalog_path(&self) -> PathBuf {
-        self.root.join("indexes").join("page_catalog.json")
+        self.root.join("indexes").join(PAGE_CATALOG_FILE)
     }
 
     fn indexes_dir(&self) -> PathBuf {
         self.root.join("indexes")
     }
 
+    fn export_markdown_path(&self) -> PathBuf {
+        self.root.join("exports").join("memory.md")
+    }
+
     fn marker_index_path(&self) -> PathBuf {
-        self.root.join("indexes").join("marker_to_pages.json")
+        self.root.join("indexes").join(EXACT_MARKER_INDEX_FILE)
     }
 
     fn binary_fuse_index_path(&self) -> PathBuf {
-        self.root.join("indexes").join("binary_fuse_pages.json")
+        self.root.join("indexes").join(BINARY_FUSE_INDEX_FILE)
     }
 }
 
@@ -1146,11 +1211,44 @@ impl Retriever for MemoryEngine {
     }
 }
 
-fn save_json(path: impl AsRef<Path>, value: &impl Serialize) -> Result<()> {
+fn save_messagepack(path: impl AsRef<Path>, value: &impl Serialize) -> Result<()> {
     if let Some(parent) = path.as_ref().parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, serde_json::to_vec_pretty(value)?)?;
+    fs::write(path, rmp_serde::to_vec_named(value)?)?;
+    Ok(())
+}
+
+fn append_cell_markdown(output: &mut String, cell: &MemoryCell, dictionary: &MarkerDictionary) {
+    output.push_str(&format!("#### Cell {}\n\n", cell.id));
+    output.push_str(&format!("- kind: {}\n", cell.kind));
+    output.push_str(&format!("- scope: {}\n", cell.scope));
+    output.push_str(&format!("- status: {}\n", cell.status));
+    output.push_str(&format!("- trust: {}\n", cell.trust));
+    output.push_str(&format!("- sensitivity: {}\n", cell.sensitivity));
+    if let Some(subject) = &cell.subject {
+        output.push_str(&format!("- subject: {}\n", subject));
+    }
+    let markers = cell
+        .markers
+        .iter()
+        .filter_map(|marker| dictionary.marker(*marker))
+        .collect::<Vec<_>>();
+    if !markers.is_empty() {
+        output.push_str(&format!("- markers: `{}`\n", markers.join("`, `")));
+    }
+    output.push_str("\n");
+    output.push_str(&cell.value.to_plain_text());
+    output.push_str("\n\n");
+}
+
+fn ensure_runtime_page_codec(page_codec: PageCodecKind) -> Result<()> {
+    if page_codec == PageCodecKind::Json {
+        return Err(MgeError::InvalidInput(
+            "json page codec is only allowed for optional debug/export paths, not runtime storage"
+                .to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -1209,7 +1307,7 @@ fn validate_cell_links(
 fn is_known_index_file(file_name: &str) -> bool {
     matches!(
         file_name,
-        "page_catalog.json" | "marker_to_pages.json" | "binary_fuse_pages.json"
+        PAGE_CATALOG_FILE | EXACT_MARKER_INDEX_FILE | BINARY_FUSE_INDEX_FILE
     )
 }
 

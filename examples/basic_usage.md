@@ -50,6 +50,7 @@ cargo run -p mge-cli -- recall "How should the agent answer technical questions?
 cargo run -p mge-cli -- stats
 cargo run -p mge-cli -- stats --json
 cargo run -p mge-cli -- validate
+cargo run -p mge-cli -- export
 ```
 
 Compact page storage for a new store:
