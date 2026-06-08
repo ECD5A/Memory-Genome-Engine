@@ -542,6 +542,29 @@ fn recall_from_sealed_pages() {
 }
 
 #[test]
+fn recall_debug_includes_timing_breakdown_and_counters() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let packet = engine
+        .recall(RecallRequest::new(
+            "How should the agent answer technical questions?",
+        ))
+        .unwrap();
+
+    assert_eq!(packet.debug.pages_considered, 1);
+    assert_eq!(packet.debug.loaded_pages, 1);
+    assert_eq!(packet.debug.pruned_candidate_pages, 0);
+    assert_eq!(packet.debug.cells_decoded, 1);
+    assert_eq!(packet.debug.cells_ranked, 1);
+    assert_eq!(packet.debug.returned_items, 1);
+    assert!(packet.debug.total_recall_micros >= packet.debug.context_packet_build_micros);
+    assert!(packet.debug.total_recall_micros >= packet.debug.reranking_micros);
+}
+
+#[test]
 fn recall_from_messagepack_zstd_sealed_pages() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_with_options(

@@ -81,9 +81,23 @@ struct MetricSamples {
 struct RecallBenchRun {
     recall_mode: RecallMode,
     latency_micros: MetricSamples,
+    query_marker_extraction_micros: MetricSamples,
+    hot_memory_lookup_micros: MetricSamples,
+    candidate_page_index_lookup_micros: MetricSamples,
+    page_file_read_load_micros: MetricSamples,
+    page_decode_micros: MetricSamples,
+    cell_filtering_micros: MetricSamples,
+    reranking_micros: MetricSamples,
+    context_packet_build_micros: MetricSamples,
+    total_recall_micros: MetricSamples,
     candidate_pages: MetricSamples,
+    pages_considered: MetricSamples,
     pages_loaded: MetricSamples,
+    pruned_candidate_pages: MetricSamples,
     cells_scanned: MetricSamples,
+    cells_decoded: MetricSamples,
+    cells_filtered: MetricSamples,
+    cells_ranked: MetricSamples,
     sealed_cells_scanned: MetricSamples,
     returned_items: MetricSamples,
     first_repeat_candidate_pages: BTreeMap<String, Vec<u64>>,
@@ -374,9 +388,23 @@ fn run_recall_bench(
     let mut run = RecallBenchRun {
         recall_mode,
         latency_micros: MetricSamples::default(),
+        query_marker_extraction_micros: MetricSamples::default(),
+        hot_memory_lookup_micros: MetricSamples::default(),
+        candidate_page_index_lookup_micros: MetricSamples::default(),
+        page_file_read_load_micros: MetricSamples::default(),
+        page_decode_micros: MetricSamples::default(),
+        cell_filtering_micros: MetricSamples::default(),
+        reranking_micros: MetricSamples::default(),
+        context_packet_build_micros: MetricSamples::default(),
+        total_recall_micros: MetricSamples::default(),
         candidate_pages: MetricSamples::default(),
+        pages_considered: MetricSamples::default(),
         pages_loaded: MetricSamples::default(),
+        pruned_candidate_pages: MetricSamples::default(),
         cells_scanned: MetricSamples::default(),
+        cells_decoded: MetricSamples::default(),
+        cells_filtered: MetricSamples::default(),
+        cells_ranked: MetricSamples::default(),
         sealed_cells_scanned: MetricSamples::default(),
         returned_items: MetricSamples::default(),
         first_repeat_candidate_pages: BTreeMap::new(),
@@ -404,8 +432,33 @@ fn run_recall_bench(
             run.latency_micros.record_elapsed(started);
             run.candidate_pages
                 .record_usize(packet.debug.candidate_pages.len());
+            run.query_marker_extraction_micros
+                .record_u64(packet.debug.query_marker_extraction_micros);
+            run.hot_memory_lookup_micros
+                .record_u64(packet.debug.hot_memory_lookup_micros);
+            run.candidate_page_index_lookup_micros
+                .record_u64(packet.debug.candidate_page_index_lookup_micros);
+            run.page_file_read_load_micros
+                .record_u64(packet.debug.page_file_read_load_micros);
+            run.page_decode_micros
+                .record_u64(packet.debug.page_decode_micros);
+            run.cell_filtering_micros
+                .record_u64(packet.debug.cell_filtering_micros);
+            run.reranking_micros
+                .record_u64(packet.debug.reranking_micros);
+            run.context_packet_build_micros
+                .record_u64(packet.debug.context_packet_build_micros);
+            run.total_recall_micros
+                .record_u64(packet.debug.total_recall_micros);
+            run.pages_considered
+                .record_usize(packet.debug.pages_considered);
             run.pages_loaded.record_usize(packet.debug.loaded_pages);
+            run.pruned_candidate_pages
+                .record_usize(packet.debug.pruned_candidate_pages);
             run.cells_scanned.record_usize(packet.debug.cells_scanned);
+            run.cells_decoded.record_usize(packet.debug.cells_decoded);
+            run.cells_filtered.record_usize(packet.debug.cells_filtered);
+            run.cells_ranked.record_usize(packet.debug.cells_ranked);
             run.sealed_cells_scanned
                 .record_usize(packet.debug.sealed_cells_scanned);
             run.returned_items.record_usize(packet.debug.returned_items);
@@ -614,9 +667,25 @@ fn recall_to_json(run: &RecallBenchRun) -> serde_json::Value {
     json!({
         "recall_mode": run.recall_mode,
         "latency_micros": run.latency_micros.to_json(),
+        "timing_breakdown_micros": {
+            "query_marker_extraction": run.query_marker_extraction_micros.to_json(),
+            "hot_memory_lookup": run.hot_memory_lookup_micros.to_json(),
+            "candidate_page_index_lookup": run.candidate_page_index_lookup_micros.to_json(),
+            "page_file_read_load": run.page_file_read_load_micros.to_json(),
+            "page_decode": run.page_decode_micros.to_json(),
+            "cell_filtering": run.cell_filtering_micros.to_json(),
+            "reranking": run.reranking_micros.to_json(),
+            "context_packet_build": run.context_packet_build_micros.to_json(),
+            "total_recall": run.total_recall_micros.to_json(),
+        },
         "candidate_pages": run.candidate_pages.to_json(),
+        "pages_considered": run.pages_considered.to_json(),
         "pages_loaded": run.pages_loaded.to_json(),
+        "pruned_candidate_pages": run.pruned_candidate_pages.to_json(),
         "cells_scanned": run.cells_scanned.to_json(),
+        "cells_decoded": run.cells_decoded.to_json(),
+        "cells_filtered": run.cells_filtered.to_json(),
+        "cells_ranked": run.cells_ranked.to_json(),
         "sealed_cells_scanned": run.sealed_cells_scanned.to_json(),
         "returned_items": run.returned_items.to_json(),
     })
@@ -652,6 +721,10 @@ impl MetricSamples {
 
     fn record_usize(&mut self, value: usize) {
         self.samples.push(u64::try_from(value).unwrap_or(u64::MAX));
+    }
+
+    fn record_u64(&mut self, value: u64) {
+        self.samples.push(value);
     }
 
     fn avg(&self) -> u64 {

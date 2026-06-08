@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -27,8 +28,8 @@ use crate::pages::{
     PageCatalogEntry, PageClustererKind, PageCodecKind,
 };
 use crate::retrieval::{
-    build_context_packet, full_scope_cell_debug, score_cell_debug, RankedCell, RecallRequest,
-    Retriever,
+    build_context_packet, full_scope_cell_debug_with_filter, score_cell_debug_with_context,
+    RankedCell, RecallFilterContext, RecallRequest, Retriever, ScoringContext,
 };
 use crate::security::{AuditEvent, AuditLogger, NoSecurity, NoopAuditLogger, SecurityProvider};
 
@@ -269,6 +270,13 @@ warnings: {}
     }
 }
 
+#[derive(Clone, Debug)]
+struct TimedPageRead {
+    page: MemoryPage,
+    file_read_micros: u64,
+    decode_micros: u64,
+}
+
 impl MemoryEngine {
     pub fn init_at(store_root: impl AsRef<Path>) -> Result<Self> {
         Self::init_with_options(store_root, InitOptions::default())
@@ -464,21 +472,28 @@ impl MemoryEngine {
     }
 
     pub fn recall(&self, request: RecallRequest) -> Result<ContextPacket> {
+        let total_recall_started = Instant::now();
         if request.mode == RecallMode::FullScope && request.scope.is_none() {
             return Err(MgeError::InvalidInput(
                 "full-scope recall requires an explicit scope (--scope <scope>)".to_string(),
             ));
         }
 
+        let query_marker_started = Instant::now();
         let mut marker_strings = extract_query_marker_strings(&request.query);
+        let mut required_page_marker_strings = Vec::new();
         for explicit in &request.markers {
             marker_strings.push(canonicalize_marker(explicit)?);
         }
         if let Some(scope) = &request.scope {
-            marker_strings.push(canonicalize_marker(&format!("scope:{scope}"))?);
+            let marker = canonicalize_marker(&format!("scope:{scope}"))?;
+            required_page_marker_strings.push(marker.clone());
+            marker_strings.push(marker);
         }
         if let Some(kind) = request.kind {
-            marker_strings.push(canonicalize_marker(&format!("kind:{}", kind.as_str()))?);
+            let marker = canonicalize_marker(&format!("kind:{}", kind.as_str()))?;
+            required_page_marker_strings.push(marker.clone());
+            marker_strings.push(marker);
         }
         marker_strings.sort();
         marker_strings.dedup();
@@ -487,15 +502,27 @@ impl MemoryEngine {
             .iter()
             .filter_map(|marker| self.dictionary.lookup(marker))
             .collect::<Vec<_>>();
+        let required_page_marker_ids = required_page_marker_strings
+            .iter()
+            .filter_map(|marker| self.dictionary.lookup(marker))
+            .collect::<Vec<_>>();
         let query_tokens = tokenize_keywords(&request.query);
+        let scoring_context = ScoringContext::new(&request, &query_marker_ids, &query_tokens);
+        let filter_context = RecallFilterContext::new(&request);
+        let query_marker_extraction_micros = elapsed_micros(query_marker_started);
 
+        let hot_memory_started = Instant::now();
         let hot_cells = HotStore::new(self.hot_cells_path()).load_cells()?;
+        let hot_memory_lookup_micros = elapsed_micros(hot_memory_started);
+
         let mut ranked = Vec::new();
+        let mut cells_evaluated = 0usize;
+        let filtering_started = Instant::now();
         for cell in &hot_cells {
             if let Some(score_detail) = match request.mode {
-                RecallMode::FullScope => full_scope_cell_debug(cell, &request),
+                RecallMode::FullScope => full_scope_cell_debug_with_filter(cell, &filter_context),
                 RecallMode::Focused | RecallMode::Broad => {
-                    score_cell_debug(cell, &request, &query_marker_ids, &query_tokens)
+                    score_cell_debug_with_context(cell, &scoring_context)
                 }
             } {
                 ranked.push(RankedCell {
@@ -504,8 +531,11 @@ impl MemoryEngine {
                     score_detail,
                 });
             }
+            cells_evaluated += 1;
         }
+        let mut cell_filtering_micros = elapsed_micros(filtering_started);
 
+        let candidate_page_index_started = Instant::now();
         let index = self.load_candidate_index()?;
         let candidate_query = if query_marker_ids.is_empty() {
             Default::default()
@@ -516,6 +546,7 @@ impl MemoryEngine {
             };
             index.query_with_mode_stats(&query_marker_ids, query_mode)?
         };
+        let candidate_page_index_lookup_micros = elapsed_micros(candidate_page_index_started);
         let candidate_pages = candidate_query.page_ids;
 
         let catalog = self.load_page_catalog()?;
@@ -526,21 +557,38 @@ impl MemoryEngine {
             .collect::<BTreeMap<_, _>>();
 
         let mut sealed_cells_scanned = 0;
+        let mut cells_decoded = 0;
         let mut loaded_pages = 0;
+        let mut pruned_candidate_pages = 0;
         let mut false_positive_candidate_pages = 0;
+        let mut page_file_read_load_micros = 0u64;
+        let mut page_decode_micros = 0u64;
         for page_id in &candidate_pages {
             let Some(entry) = entries_by_id.get(page_id) else {
                 continue;
             };
-            let page = self.read_page(entry)?;
+            if should_prune_candidate_page(entry, &query_marker_ids, &required_page_marker_ids) {
+                pruned_candidate_pages += 1;
+                continue;
+            }
+
+            let timed_page = self.read_page_with_timing(entry)?;
+            page_file_read_load_micros =
+                page_file_read_load_micros.saturating_add(timed_page.file_read_micros);
+            page_decode_micros = page_decode_micros.saturating_add(timed_page.decode_micros);
+            let page = timed_page.page;
             loaded_pages += 1;
             sealed_cells_scanned += page.cells.len();
+            cells_decoded += page.cells.len();
             let before_page_candidates = ranked.len();
+            let filtering_started = Instant::now();
             for cell in &page.cells {
                 if let Some(score_detail) = match request.mode {
-                    RecallMode::FullScope => full_scope_cell_debug(cell, &request),
+                    RecallMode::FullScope => {
+                        full_scope_cell_debug_with_filter(cell, &filter_context)
+                    }
                     RecallMode::Focused | RecallMode::Broad => {
-                        score_cell_debug(cell, &request, &query_marker_ids, &query_tokens)
+                        score_cell_debug_with_context(cell, &scoring_context)
                     }
                 } {
                     ranked.push(RankedCell {
@@ -549,12 +597,20 @@ impl MemoryEngine {
                         score_detail,
                     });
                 }
+                cells_evaluated += 1;
             }
+            cell_filtering_micros =
+                cell_filtering_micros.saturating_add(elapsed_micros(filtering_started));
             if ranked.len() == before_page_candidates {
                 false_positive_candidate_pages += 1;
             }
         }
 
+        let cells_ranked = ranked.len();
+        let cells_scanned = hot_cells.len() + sealed_cells_scanned;
+        let cells_filtered = cells_evaluated.saturating_sub(cells_ranked);
+
+        let reranking_started = Instant::now();
         ranked.sort_by(|left, right| {
             right
                 .score
@@ -562,6 +618,7 @@ impl MemoryEngine {
                 .then_with(|| right.cell.updated_at.cmp(&left.cell.updated_at))
                 .then_with(|| left.cell.id.cmp(&right.cell.id))
         });
+        let reranking_micros = elapsed_micros(reranking_started);
 
         let max_items = request.effective_max_items(ranked.len());
         let debug = ContextDebugInfo {
@@ -569,16 +626,30 @@ impl MemoryEngine {
             max_items,
             index_kind: self.manifest.index_kind,
             hot_cells_scanned: hot_cells.len(),
-            cells_scanned: hot_cells.len() + sealed_cells_scanned,
+            cells_scanned,
             candidate_pages,
+            pages_considered: candidate_query.candidate_pages_returned,
             page_filters_scanned: candidate_query.page_filters_scanned,
             candidate_pages_returned: candidate_query.candidate_pages_returned,
             loaded_pages,
+            pruned_candidate_pages,
             sealed_cells_scanned,
+            cells_decoded,
+            cells_filtered,
+            cells_ranked,
             false_positive_candidate_pages,
             total_candidates: ranked.len(),
             returned_items: 0,
             full_scope_used: request.mode == RecallMode::FullScope,
+            query_marker_extraction_micros,
+            hot_memory_lookup_micros,
+            candidate_page_index_lookup_micros,
+            page_file_read_load_micros,
+            page_decode_micros,
+            cell_filtering_micros,
+            reranking_micros,
+            context_packet_build_micros: 0,
+            total_recall_micros: 0,
             score_details: Vec::new(),
         };
 
@@ -591,13 +662,13 @@ impl MemoryEngine {
             ),
         })?;
 
-        Ok(build_context_packet(
-            request.query,
-            &ranked,
-            &self.dictionary,
-            debug,
-            max_items,
-        ))
+        let context_packet_started = Instant::now();
+        let mut packet =
+            build_context_packet(request.query, &ranked, &self.dictionary, debug, max_items);
+        packet.debug.context_packet_build_micros = elapsed_micros(context_packet_started);
+        packet.debug.total_recall_micros = elapsed_micros(total_recall_started);
+
+        Ok(packet)
     }
 
     pub fn seal(&mut self) -> Result<SealReport> {
@@ -961,7 +1032,15 @@ impl MemoryEngine {
     }
 
     fn read_page(&self, entry: &PageCatalogEntry) -> Result<MemoryPage> {
+        Ok(self.read_page_with_timing(entry)?.page)
+    }
+
+    fn read_page_with_timing(&self, entry: &PageCatalogEntry) -> Result<TimedPageRead> {
+        let file_read_started = Instant::now();
         let bytes = fs::read(self.pages_dir().join(&entry.file))?;
+        let file_read_micros = elapsed_micros(file_read_started);
+
+        let decode_started = Instant::now();
         let frame = binary::decode_frame(&bytes, FileKind::Page)?;
         let expected_codec = page_storage_codec(entry.page_codec, entry.compression)?;
         if frame.codec != expected_codec {
@@ -975,7 +1054,14 @@ impl MemoryEngine {
         let security = NoSecurity;
         let opened = security.open_page_bytes(&frame.payload)?;
         let decoded = decompress_with(entry.compression, &opened)?;
-        decode_page_with(entry.page_codec, &decoded)
+        let page = decode_page_with(entry.page_codec, &decoded)?;
+        let decode_micros = elapsed_micros(decode_started);
+
+        Ok(TimedPageRead {
+            page,
+            file_read_micros,
+            decode_micros,
+        })
     }
 
     fn write_page(&self, page: &MemoryPage) -> Result<()> {
@@ -1358,6 +1444,28 @@ fn validate_cell_links(
             }
         }
     }
+}
+
+fn should_prune_candidate_page(
+    entry: &PageCatalogEntry,
+    query_marker_ids: &[MarkerId],
+    required_page_marker_ids: &[MarkerId],
+) -> bool {
+    for required_marker in required_page_marker_ids {
+        if !entry.marker_summary.contains(required_marker) {
+            return true;
+        }
+    }
+
+    !query_marker_ids.is_empty()
+        && !entry
+            .marker_summary
+            .iter()
+            .any(|marker| query_marker_ids.contains(marker))
+}
+
+fn elapsed_micros(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX)
 }
 
 fn is_known_index_file(file_name: &str) -> bool {

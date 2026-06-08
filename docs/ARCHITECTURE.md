@@ -200,7 +200,12 @@ Recall debug/statistics output also exposes the candidate-index path:
 - recall mode;
 - effective max items;
 - index kind;
+- pages considered;
+- pruned candidate pages;
 - hot/sealed/total cells scanned;
+- cells decoded;
+- cells filtered;
+- cells ranked;
 - page filters scanned;
 - candidate pages returned;
 - loaded pages;
@@ -208,6 +213,18 @@ Recall debug/statistics output also exposes the candidate-index path:
 - false-positive candidate pages after page load;
 - returned items;
 - whether full-scope was used.
+
+Detailed recall timing is also reported for performance diagnosis:
+
+- query marker extraction;
+- hot memory lookup;
+- candidate page index lookup;
+- page file read/load;
+- page decode;
+- cell filtering;
+- reranking;
+- ContextPacket build;
+- total recall time.
 
 ## Extension Traits
 

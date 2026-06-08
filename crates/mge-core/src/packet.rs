@@ -70,16 +70,44 @@ pub struct ContextDebugInfo {
     #[serde(default)]
     pub cells_scanned: usize,
     pub candidate_pages: Vec<PageId>,
+    #[serde(default)]
+    pub pages_considered: usize,
     pub page_filters_scanned: usize,
     pub candidate_pages_returned: usize,
     pub loaded_pages: usize,
+    #[serde(default)]
+    pub pruned_candidate_pages: usize,
     pub sealed_cells_scanned: usize,
+    #[serde(default)]
+    pub cells_decoded: usize,
+    #[serde(default)]
+    pub cells_filtered: usize,
+    #[serde(default)]
+    pub cells_ranked: usize,
     pub false_positive_candidate_pages: usize,
     pub total_candidates: usize,
     #[serde(default)]
     pub returned_items: usize,
     #[serde(default)]
     pub full_scope_used: bool,
+    #[serde(default)]
+    pub query_marker_extraction_micros: u64,
+    #[serde(default)]
+    pub hot_memory_lookup_micros: u64,
+    #[serde(default)]
+    pub candidate_page_index_lookup_micros: u64,
+    #[serde(default)]
+    pub page_file_read_load_micros: u64,
+    #[serde(default)]
+    pub page_decode_micros: u64,
+    #[serde(default)]
+    pub cell_filtering_micros: u64,
+    #[serde(default)]
+    pub reranking_micros: u64,
+    #[serde(default)]
+    pub context_packet_build_micros: u64,
+    #[serde(default)]
+    pub total_recall_micros: u64,
     #[serde(default)]
     pub score_details: Vec<ContextScoreDebugItem>,
 }

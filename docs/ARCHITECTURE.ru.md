@@ -200,7 +200,12 @@ Recall debug/statistics output также показывает candidate-index p
 - recall mode;
 - effective max items;
 - index kind;
+- pages considered;
+- pruned candidate pages;
 - hot/sealed/total cells scanned;
+- cells decoded;
+- cells filtered;
+- cells ranked;
 - page filters scanned;
 - candidate pages returned;
 - loaded pages;
@@ -208,6 +213,18 @@ Recall debug/statistics output также показывает candidate-index p
 - false-positive candidate pages after page load;
 - returned items;
 - whether full-scope was used.
+
+Detailed recall timing также пишется для performance diagnosis:
+
+- query marker extraction;
+- hot memory lookup;
+- candidate page index lookup;
+- page file read/load;
+- page decode;
+- cell filtering;
+- reranking;
+- ContextPacket build;
+- total recall time.
 
 ## Extension Traits
 

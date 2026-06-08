@@ -73,6 +73,58 @@ pub struct RankedCell {
     pub score_detail: ContextScoreDebugItem,
 }
 
+#[derive(Clone, Debug)]
+pub struct RecallFilterContext {
+    kind: Option<MemoryKind>,
+    scope_canonical: Option<String>,
+    policy: RecallPolicy,
+}
+
+impl RecallFilterContext {
+    pub fn new(request: &RecallRequest) -> Self {
+        Self {
+            kind: request.kind,
+            scope_canonical: request.scope.as_deref().map(canonicalize_marker_value),
+            policy: request.effective_policy(),
+        }
+    }
+
+    pub fn permits_cell(&self, cell: &MemoryCell) -> bool {
+        if let Some(kind) = self.kind {
+            if cell.kind != kind {
+                return false;
+            }
+        }
+
+        if let Some(scope) = &self.scope_canonical {
+            if canonicalize_marker_value(&cell.scope) != *scope {
+                return false;
+            }
+        }
+
+        self.policy.permits_cell(cell)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ScoringContext {
+    filter: RecallFilterContext,
+    query_marker_set: HashSet<u32>,
+    query_token_set: HashSet<String>,
+    query_canonical: String,
+}
+
+impl ScoringContext {
+    pub fn new(request: &RecallRequest, query_marker_ids: &[u32], query_tokens: &[String]) -> Self {
+        Self {
+            filter: RecallFilterContext::new(request),
+            query_marker_set: query_marker_ids.iter().copied().collect(),
+            query_token_set: query_tokens.iter().cloned().collect(),
+            query_canonical: canonicalize_marker_value(&request.query),
+        }
+    }
+}
+
 pub fn score_cell(
     cell: &MemoryCell,
     request: &RecallRequest,
@@ -88,31 +140,38 @@ pub fn score_cell_debug(
     query_marker_ids: &[u32],
     query_tokens: &[String],
 ) -> Option<ContextScoreDebugItem> {
-    if !request_filters_permit_cell(cell, request) {
+    let context = ScoringContext::new(request, query_marker_ids, query_tokens);
+    score_cell_debug_with_context(cell, &context)
+}
+
+pub fn score_cell_debug_with_context(
+    cell: &MemoryCell,
+    context: &ScoringContext,
+) -> Option<ContextScoreDebugItem> {
+    if !context.filter.permits_cell(cell) {
         return None;
     }
 
-    let query_marker_set: HashSet<u32> = query_marker_ids.iter().copied().collect();
     let marker_overlap = cell
         .markers
         .iter()
-        .filter(|marker| query_marker_set.contains(marker))
+        .filter(|marker| context.query_marker_set.contains(marker))
         .count() as i64;
 
-    let query_token_set: HashSet<&str> = query_tokens.iter().map(String::as_str).collect();
-    let value_tokens = tokenize_keywords(&cell.value.to_plain_text());
+    let value_text = cell.value.to_plain_text();
+    let value_tokens = tokenize_keywords(&value_text);
     let value_overlap = value_tokens
         .iter()
-        .filter(|token| query_token_set.contains(token.as_str()))
+        .filter(|token| context.query_token_set.contains(token.as_str()))
         .count() as i64;
-    let exact_value_match = exact_canonical_match(&cell.value.to_plain_text(), &request.query);
+    let exact_value_match = exact_canonical_match(&value_text, &context.query_canonical);
 
     let exact_subject_match = cell.subject.as_ref().is_some_and(|subject| {
         let subject_tokens = tokenize_keywords(subject);
         !subject_tokens.is_empty()
             && subject_tokens
                 .iter()
-                .all(|token| query_token_set.contains(token.as_str()))
+                .all(|token| context.query_token_set.contains(token.as_str()))
     });
 
     let marker_overlap_score = marker_overlap * 10;
@@ -157,7 +216,15 @@ pub fn full_scope_cell_debug(
     cell: &MemoryCell,
     request: &RecallRequest,
 ) -> Option<ContextScoreDebugItem> {
-    if !request_filters_permit_cell(cell, request) {
+    let filter = RecallFilterContext::new(request);
+    full_scope_cell_debug_with_filter(cell, &filter)
+}
+
+pub fn full_scope_cell_debug_with_filter(
+    cell: &MemoryCell,
+    filter: &RecallFilterContext,
+) -> Option<ContextScoreDebugItem> {
+    if !filter.permits_cell(cell) {
         return None;
     }
 
@@ -262,22 +329,6 @@ pub fn build_context_packet(
     }
 }
 
-fn request_filters_permit_cell(cell: &MemoryCell, request: &RecallRequest) -> bool {
-    if let Some(kind) = request.kind {
-        if cell.kind != kind {
-            return false;
-        }
-    }
-
-    if let Some(scope) = &request.scope {
-        if canonicalize_marker_value(&cell.scope) != canonicalize_marker_value(scope) {
-            return false;
-        }
-    }
-
-    request.effective_policy().permits_cell(cell)
-}
-
 fn trust_bonus(trust: TrustLevel) -> i64 {
     match trust {
         TrustLevel::UserConfirmed => 5,
@@ -307,8 +358,7 @@ fn sensitivity_penalty(sensitivity: SensitivityLevel) -> i64 {
     }
 }
 
-fn exact_canonical_match(left: &str, right: &str) -> bool {
+fn exact_canonical_match(left: &str, right_canonical: &str) -> bool {
     let left = canonicalize_marker_value(left);
-    let right = canonicalize_marker_value(right);
-    !left.is_empty() && left == right
+    !left.is_empty() && left == right_canonical
 }

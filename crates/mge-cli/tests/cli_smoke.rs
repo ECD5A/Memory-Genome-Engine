@@ -189,6 +189,26 @@ fn synthetic_benchmark_outputs_valid_core_metrics() {
             mode["recall_modes"]["focused"]["latency_micros"]["count"],
             8
         );
+        assert_eq!(
+            mode["recall_modes"]["focused"]["timing_breakdown_micros"]["total_recall"]["count"],
+            8
+        );
+        assert_eq!(
+            mode["recall_modes"]["focused"]["timing_breakdown_micros"]["page_decode"]["count"],
+            8
+        );
+        assert!(
+            mode["recall_modes"]["focused"]["pages_considered"]["count"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert!(
+            mode["recall_modes"]["focused"]["cells_ranked"]["count"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
         assert_eq!(mode["recall_modes"]["broad"]["latency_micros"]["count"], 8);
         assert_eq!(
             mode["recall_modes"]["full_scope"]["latency_micros"]["count"],

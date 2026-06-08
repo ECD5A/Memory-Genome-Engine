@@ -133,6 +133,7 @@ JSON policy:
 - Добавлены явные recall modes: `focused` по умолчанию, `broad` и `full_scope`.
 - `ContextPacket` считается task-relevant и size-controlled, а не искусственно маленьким.
 - `ContextDebugInfo` теперь показывает recall mode, effective max items, scanned cells, returned items и full-scope usage.
+- `ContextDebugInfo` теперь содержит detailed recall timing breakdown: query marker extraction, hot memory lookup, candidate page index lookup, page file read/load, page decode, cell filtering, reranking, ContextPacket build и total recall.
 - Добавлен `IndexKind` с реализованным kind `exact_marker_page`.
 - Manifest, page catalog, stats и exact index files теперь несут index kind metadata.
 - `CandidatePageIndex` теперь раскрывает `kind()` и query statistics для static index implementations.
@@ -141,6 +142,7 @@ JSON policy:
 - CLI `init` и `config set` теперь поддерживают `--index-kind exact_marker_page|binary_fuse_page`.
 - При смене `index_kind` пересобирается только candidate index по существующим sealed pages; sealed page files не переписываются.
 - Recall debug теперь показывает index kind, page filters scanned, candidate pages returned, loaded pages, sealed cells scanned и post-load false-positive candidate pages.
+- Recall debug теперь также показывает pages considered, pruned candidate pages, cells decoded, cells filtered и cells ranked.
 - Tests теперь проверяют `exact_candidates ⊆ binary_fuse_candidates` на тех же sealed pages и проверяют смену index kind без rewrite page files.
 - Добавлен synthetic benchmark tool: `cargo run -p mge-cli --bin mge-synthetic-bench`.
 - Synthetic benchmark сравнивает `exact_marker_page` и opt-in `binary_fuse_page` на одинаковых generated stores и проверяет `exact_candidates ⊆ binary_fuse_candidates`.
@@ -205,7 +207,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 80 tests total (12 CLI unit tests + 4 CLI integration tests + 1 core unit test + 63 core integration tests).
+- `cargo test`: passed, 81 tests total (12 CLI unit tests + 4 CLI integration tests + 1 core unit test + 64 core integration tests).
 - Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.
 - Benchmark harness integration smoke test: passed для exact + Binary Fuse modes и required metrics.
@@ -214,6 +216,15 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - exact_marker_page: remember avg 8367 us, seal avg 61834 us, focused recall avg 5270 us, broad recall avg 12575 us, full-scope recall avg 1764 us, index lookup avg 1 us, page decode avg 391 us, ContextPacket build avg 944 us, storage 108585 bytes.
   - binary_fuse_page: remember avg 8040 us, seal avg 54785 us, focused recall avg 5312 us, broad recall avg 12805 us, full-scope recall avg 1871 us, index lookup avg 1 us, page decode avg 395 us, ContextPacket build avg 952 us, storage 112749 bytes.
   - subset check: focused exact candidates subset of binary_fuse candidates passed.
+- Recall detailed breakdown package: passed.
+  - Safe hot-path optimization: scoring теперь переиспользует precomputed query marker/token sets, canonical query/scope values и effective recall policy вместо пересборки на каждую cell.
+  - Safe page pruning: candidate pages, где catalog `marker_summary` доказывает отсутствие query marker match, пропускаются до page decode.
+  - Benchmark before/after на той же smoke config:
+    - before exact focused/broad/full-scope avg: 5856 / 13152 / 1991 us.
+    - after exact focused/broad/full-scope avg: 5102 / 12722 / 2019 us.
+    - before binary_fuse focused/broad/full-scope avg: 5327 / 13753 / 1913 us.
+    - after binary_fuse focused/broad/full-scope avg: 5132 / 12333 / 2100 us.
+  - Current broad bottlenecks: cell filtering и page decode; index lookup не главный расход на этом dataset.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
