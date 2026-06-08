@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::binary::{self, CodecId, FileKind};
 use crate::compression::{compress_with, decompress_with, CompressionKind};
 use crate::errors::{MgeError, Result};
 use crate::hot::HotStore;
@@ -296,7 +297,7 @@ impl MemoryEngine {
                 index_kind: options.index_kind,
                 page_clusterer: options.page_clusterer,
             };
-            save_messagepack(&manifest_path, &manifest)?;
+            binary::write_messagepack_file(&manifest_path, FileKind::Manifest, &manifest)?;
         }
 
         let markers_path = root.join("dictionary").join(MARKER_DICTIONARY_FILE);
@@ -305,8 +306,9 @@ impl MemoryEngine {
 
         HotStore::new(root.join("hot").join(HOT_LOG_FILE)).ensure_exists()?;
         if !root.join("indexes").join(PAGE_CATALOG_FILE).exists() {
-            save_messagepack(
+            binary::write_messagepack_file(
                 root.join("indexes").join(PAGE_CATALOG_FILE),
+                FileKind::PageIndex,
                 &PageCatalog::default(),
             )?;
         }
@@ -329,7 +331,7 @@ impl MemoryEngine {
             return Err(MgeError::NotInitialized(root.display().to_string()));
         }
 
-        let manifest: Manifest = rmp_serde::from_slice(&fs::read(manifest_path)?)?;
+        let manifest: Manifest = binary::read_messagepack_file(&manifest_path, FileKind::Manifest)?;
         ensure_runtime_page_codec(manifest.page_codec)?;
         let dictionary =
             MarkerDictionary::load_from_path(root.join("dictionary").join(MARKER_DICTIONARY_FILE))?;
@@ -738,7 +740,13 @@ impl MemoryEngine {
 
     pub fn validate(&self) -> Result<ValidationReport> {
         let mut report = ValidationReport::new(self.manifest.index_kind);
-        let catalog = self.load_page_catalog()?;
+        let catalog = match self.load_page_catalog() {
+            Ok(catalog) => catalog,
+            Err(err) => {
+                report.error(format!("page catalog load failed: {err}"));
+                PageCatalog::default()
+            }
+        };
 
         for error in self.dictionary.consistency_errors() {
             report.error(format!("marker dictionary inconsistency: {error}"));
@@ -770,7 +778,13 @@ impl MemoryEngine {
 
         let mut cell_ids = BTreeSet::new();
         let mut cell_links = Vec::new();
-        let hot_cells = HotStore::new(self.hot_cells_path()).load_cells()?;
+        let hot_cells = match HotStore::new(self.hot_cells_path()).load_cells() {
+            Ok(cells) => cells,
+            Err(err) => {
+                report.error(format!("hot memory load failed: {err}"));
+                Vec::new()
+            }
+        };
         report.checked_hot_cells = hot_cells.len();
         let mut max_cell_id = 0;
         for cell in &hot_cells {
@@ -896,7 +910,7 @@ impl MemoryEngine {
     }
 
     fn save_manifest(&self) -> Result<()> {
-        save_messagepack(self.manifest_path(), &self.manifest)
+        binary::write_messagepack_file(self.manifest_path(), FileKind::Manifest, &self.manifest)
     }
 
     fn load_page_catalog(&self) -> Result<PageCatalog> {
@@ -904,13 +918,13 @@ impl MemoryEngine {
         if !path.exists() {
             return Ok(PageCatalog::default());
         }
-        Ok(rmp_serde::from_slice(&fs::read(path)?)?)
+        binary::read_messagepack_file(path, FileKind::PageIndex)
     }
 
     fn save_page_catalog(&self, catalog: &PageCatalog) -> Result<()> {
         let mut catalog = catalog.clone();
         catalog.index_kind = self.manifest.index_kind;
-        save_messagepack(self.page_catalog_path(), &catalog)
+        binary::write_messagepack_file(self.page_catalog_path(), FileKind::PageIndex, &catalog)
     }
 
     fn load_all_pages(&self) -> Result<Vec<MemoryPage>> {
@@ -923,9 +937,19 @@ impl MemoryEngine {
     }
 
     fn read_page(&self, entry: &PageCatalogEntry) -> Result<MemoryPage> {
-        let stored = fs::read(self.pages_dir().join(&entry.file))?;
+        let bytes = fs::read(self.pages_dir().join(&entry.file))?;
+        let frame = binary::decode_frame(&bytes, FileKind::Page)?;
+        let expected_codec = page_storage_codec(entry.page_codec, entry.compression)?;
+        if frame.codec != expected_codec {
+            return Err(MgeError::StorageFormat(format!(
+                "wrong codec for page {}: expected {}, found {}",
+                entry.page_id,
+                expected_codec.as_str(),
+                frame.codec.as_str()
+            )));
+        }
         let security = NoSecurity;
-        let opened = security.open_page_bytes(&stored)?;
+        let opened = security.open_page_bytes(&frame.payload)?;
         let decoded = decompress_with(entry.compression, &opened)?;
         decode_page_with(entry.page_codec, &decoded)
     }
@@ -936,8 +960,13 @@ impl MemoryEngine {
         let encoded = encode_page_with(self.manifest.page_codec, page)?;
         let compressed = compress_with(self.manifest.compression, &encoded)?;
         let stored = security.seal_page_bytes(&compressed)?;
+        let stored = binary::encode_frame(
+            FileKind::Page,
+            page_storage_codec(self.manifest.page_codec, self.manifest.compression)?,
+            &stored,
+        )?;
         // Future order remains: encode page -> compress page -> encrypt page -> write page.
-        fs::write(self.pages_dir().join(page_file_name(page.page_id)), stored)?;
+        binary::atomic_write_bytes(self.pages_dir().join(page_file_name(page.page_id)), &stored)?;
         Ok(())
     }
 
@@ -1211,14 +1240,6 @@ impl Retriever for MemoryEngine {
     }
 }
 
-fn save_messagepack(path: impl AsRef<Path>, value: &impl Serialize) -> Result<()> {
-    if let Some(parent) = path.as_ref().parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, rmp_serde::to_vec_named(value)?)?;
-    Ok(())
-}
-
 fn append_cell_markdown(output: &mut String, cell: &MemoryCell, dictionary: &MarkerDictionary) {
     output.push_str(&format!("#### Cell {}\n\n", cell.id));
     output.push_str(&format!("- kind: {}\n", cell.kind));
@@ -1240,6 +1261,17 @@ fn append_cell_markdown(output: &mut String, cell: &MemoryCell, dictionary: &Mar
     output.push_str("\n");
     output.push_str(&cell.value.to_plain_text());
     output.push_str("\n\n");
+}
+
+fn page_storage_codec(page_codec: PageCodecKind, compression: CompressionKind) -> Result<CodecId> {
+    match (page_codec, compression) {
+        (PageCodecKind::MessagePack, CompressionKind::None) => Ok(CodecId::MessagePack),
+        (PageCodecKind::MessagePack, CompressionKind::Zstd) => Ok(CodecId::MessagePackZstd),
+        (PageCodecKind::Json, _) => Err(MgeError::InvalidInput(
+            "json page codec is only allowed for optional debug/export paths, not runtime storage"
+                .to_string(),
+        )),
+    }
 }
 
 fn ensure_runtime_page_codec(page_codec: PageCodecKind) -> Result<()> {

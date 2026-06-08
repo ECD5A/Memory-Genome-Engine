@@ -1,7 +1,7 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::binary::{self, CodecId, FileKind};
 use crate::errors::{MgeError, Result};
 use crate::models::{current_timestamp, MemoryCell};
 
@@ -19,8 +19,8 @@ impl HotStore {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
-        if !self.path.exists() {
-            fs::write(&self.path, b"")?;
+        if !self.path.exists() || fs::metadata(&self.path)?.len() == 0 {
+            binary::atomic_write_bytes(&self.path, &empty_hot_log_bytes()?)?;
         }
         Ok(())
     }
@@ -28,15 +28,11 @@ impl HotStore {
     pub fn append_cell(&self, cell: &MemoryCell) -> Result<()> {
         self.ensure_exists()?;
         let record = rmp_serde::to_vec_named(cell)?;
-        let record_len = u32::try_from(record.len()).map_err(|_| {
-            MgeError::InvalidInput("hot memory record is larger than 4 GiB".to_string())
-        })?;
-        let mut file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(&self.path)?;
-        file.write_all(&record_len.to_le_bytes())?;
-        file.write_all(&record)?;
+        let record = binary::encode_frame(FileKind::HotRecord, CodecId::MessagePack, &record)?;
+        let mut bytes = fs::read(&self.path)?;
+        binary::decode_frame_at(&bytes, 0, FileKind::HotLog)?;
+        bytes.extend_from_slice(&record);
+        binary::atomic_write_bytes(&self.path, &bytes)?;
         Ok(())
     }
 
@@ -47,35 +43,32 @@ impl HotStore {
 
         let content = fs::read(&self.path)?;
         let mut cells = Vec::new();
-        let mut offset = 0usize;
+        if content.is_empty() {
+            return Ok(cells);
+        }
+        let (_, mut offset) = binary::decode_frame_at(&content, 0, FileKind::HotLog)?;
         while offset < content.len() {
-            if content.len() - offset < 4 {
-                return Err(MgeError::InvalidInput(format!(
-                    "truncated hot memory log at byte {offset}"
+            let (record, next_offset) =
+                binary::decode_frame_at(&content, offset, FileKind::HotRecord)?;
+            if record.codec != CodecId::MessagePack {
+                return Err(MgeError::StorageFormat(format!(
+                    "wrong codec for hot record: expected {}, found {}",
+                    CodecId::MessagePack.as_str(),
+                    record.codec.as_str()
                 )));
             }
-            let mut len_bytes = [0u8; 4];
-            len_bytes.copy_from_slice(&content[offset..offset + 4]);
-            offset += 4;
-
-            let record_len = u32::from_le_bytes(len_bytes) as usize;
-            if content.len() - offset < record_len {
-                return Err(MgeError::InvalidInput(format!(
-                    "truncated hot memory record at byte {offset}"
-                )));
-            }
-            cells.push(rmp_serde::from_slice(
-                &content[offset..offset + record_len],
-            )?);
-            offset += record_len;
+            cells.push(rmp_serde::from_slice(&record.payload)?);
+            offset = next_offset;
         }
         Ok(cells)
     }
 
     pub fn archive_and_clear(&self) -> Result<Option<PathBuf>> {
         self.ensure_exists()?;
-        if fs::metadata(&self.path)?.len() == 0 {
-            fs::write(&self.path, b"")?;
+        let bytes = fs::read(&self.path)?;
+        let (_, offset) = binary::decode_frame_at(&bytes, 0, FileKind::HotLog)?;
+        if bytes.len() == offset {
+            binary::atomic_write_bytes(&self.path, &empty_hot_log_bytes()?)?;
             return Ok(None);
         }
 
@@ -88,9 +81,13 @@ impl HotStore {
 
         let archive_path = unique_archive_path(&archive_dir, current_timestamp());
         fs::rename(&self.path, &archive_path)?;
-        fs::write(&self.path, b"")?;
+        binary::atomic_write_bytes(&self.path, &empty_hot_log_bytes()?)?;
         Ok(Some(archive_path))
     }
+}
+
+fn empty_hot_log_bytes() -> Result<Vec<u8>> {
+    binary::encode_frame(FileKind::HotLog, CodecId::None, &[])
 }
 
 fn unique_archive_path(archive_dir: &Path, timestamp: i64) -> PathBuf {

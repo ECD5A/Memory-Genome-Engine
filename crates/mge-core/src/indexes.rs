@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::fs;
 use std::path::Path;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use xorf::{BinaryFuse16, Filter};
 
+use crate::binary::{self, FileKind};
 use crate::errors::{MgeError, Result};
 use crate::models::{MarkerId, PageId};
 use crate::pages::MemoryPage;
@@ -231,18 +231,14 @@ impl BinaryFusePageIndex {
     }
 
     pub fn save_to_path(&self, path: impl AsRef<Path>) -> Result<()> {
-        if let Some(parent) = path.as_ref().parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(path, rmp_serde::to_vec_named(self)?)?;
-        Ok(())
+        binary::write_messagepack_file(path, FileKind::FuseIndex, self)
     }
 
     pub fn load_from_path(path: impl AsRef<Path>) -> Result<Self> {
         if !path.as_ref().exists() {
             return Ok(Self::default());
         }
-        Ok(rmp_serde::from_slice(&fs::read(path)?)?)
+        binary::read_messagepack_file(path, FileKind::FuseIndex)
     }
 
     fn union(&self, markers: &[MarkerId]) -> Vec<PageId> {
@@ -362,18 +358,14 @@ impl ExactMarkerPageIndex {
     }
 
     pub fn save_to_path(&self, path: impl AsRef<Path>) -> Result<()> {
-        if let Some(parent) = path.as_ref().parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(path, rmp_serde::to_vec_named(self)?)?;
-        Ok(())
+        binary::write_messagepack_file(path, FileKind::MarkerIndex, self)
     }
 
     pub fn load_from_path(path: impl AsRef<Path>) -> Result<Self> {
         if !path.as_ref().exists() {
             return Ok(Self::default());
         }
-        Ok(rmp_serde::from_slice(&fs::read(path)?)?)
+        binary::read_messagepack_file(path, FileKind::MarkerIndex)
     }
 
     fn union(&self, markers: &[MarkerId]) -> Vec<PageId> {

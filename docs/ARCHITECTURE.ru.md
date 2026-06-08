@@ -91,6 +91,10 @@ Internal runtime storage с самого начала binary. JSON разреш�
 - human-readable export: Markdown в `.memory-genome/exports/memory.md`;
 - debug output: JSON может выводиться явно через CLI flags вроде `--json` или `export --format json`.
 
+Binary runtime files имеют fixed headers с magic bytes, file kind, format version, codec identifier, payload length и SHA-256 payload checksum. Это относится к `manifest.mgm`, `dictionary/markers.mgd`, frames внутри `hot/hot.mgl`, `pages/*.mgp` и `indexes/*.mgi`.
+
+Full-file storage writes используют temporary file, flush/sync и same-directory rename where practical. Hot memory остаётся binary log format: `hot/hot.mgl` содержит `hot_log` frame, затем `hot_record` frames.
+
 Page files используют codecs, скрытые за trait `PageCodec`:
 
 - `MessagePackPageCodec` для runtime page storage;
@@ -107,7 +111,7 @@ Manifest хранит default codec/compression для новых sealed pages. 
 
 `mge config set` обновляет manifest defaults и легкие derived indexes. Он не переписывает существующие page files и не мутирует существующие page catalog entries. При смене `--index-kind` пересобирается только candidate index по существующим sealed pages.
 
-`mge validate` - read-only storage consistency check. Он проверяет согласованность manifest/catalog/index kind, читаемость page files, page metadata, marker summaries, page checksums, marker dictionary consistency и references, cell links, candidate-index coverage и orphan storage files. Он не чинит и не переписывает store data.
+`mge validate` - read-only storage consistency check. Он проверяет согласованность manifest/catalog/index kind, читаемость page files, binary headers, payload checksums, page metadata, marker summaries, page checksums, marker dictionary consistency и references, cell links, candidate-index coverage и orphan storage files. Он сообщает wrong magic, wrong file kind, unsupported version, truncated payload и corrupted payload errors. Он не чинит и не переписывает store data.
 
 ## Page Clustering
 

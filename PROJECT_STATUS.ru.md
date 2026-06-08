@@ -110,6 +110,9 @@ JSON policy:
   - `exports/memory.md` для human-readable Markdown export
 - Hot memory теперь использует length-prefixed MessagePack records вместо JSONL.
 - Marker dictionary, manifest, page catalog и candidate indexes теперь persist как MessagePack binary files.
+- Binary runtime files теперь имеют fixed headers с magic bytes, file kind, format version, codec identifier, payload length и SHA-256 payload checksum.
+- Full-file storage writes теперь используют temp-file writes, flush/sync и same-directory rename where practical.
+- Hot memory теперь хранит `hot_log` frame, затем `hot_record` frames.
 - Новые sealed pages теперь хранят codec-independent SHA-256 content checksums.
 - Canonical bytes для page checksum и logical page-size estimates теперь используют MessagePack вместо JSON.
 - CLI `init` теперь использует binary runtime storage by default; JSON page codec отклоняется для runtime store initialization/config.
@@ -195,7 +198,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 66 tests total (12 CLI unit tests + 2 CLI integration tests + 1 core unit test + 51 core integration tests).
+- `cargo test`: passed, 73 tests total (12 CLI unit tests + 2 CLI integration tests + 1 core unit test + 58 core integration tests).
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
@@ -205,6 +208,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - Binary Fuse init/recall/stats smoke command: passed.
 - Exact-to-Binary-Fuse config switch smoke command: passed; sealed page hash unchanged.
 - Binary storage layout CLI smoke command: passed; required `.mgm/.mgd/.mgl/.mgp/.mgi` files существуют, старые JSON/JSONL storage files отсутствуют, Markdown export size 621 bytes.
+- Binary header CLI smoke command: passed; все runtime `.mg*` files имели `MGEFILE` magic, а corrupted page validation вернул `wrong magic for page`.
 - JSON runtime page codec reject smoke command: passed; `mge init --page-codec json` завершается с `invalid input`.
 - Synthetic exact-vs-Binary-Fuse benchmark smoke command: passed.
   - config: 1200 cells, 120 sealed pages, 12 marker groups, 6 targeted queries, 3 noise queries.
@@ -230,6 +234,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 - CLI milestone integration test: passed для init, remember, recall JSON, seal, stats JSON и validate JSON.
 - Fast profile CLI integration test: passed для `mge init --profile fast`.
 - Binary storage layout tests: passed для `.mgm/.mgd/.mgl/.mgp/.mgi` files и отсутствия старых JSON/JSONL storage files.
+- Binary storage header validation tests: passed для wrong magic, wrong file kind, unsupported version, truncated payload, corrupted payload, wrong hot log magic и wrong index magic.
 - Markdown export test: passed для `.memory-genome/exports/memory.md`.
 - Marker dictionary consistency validation test: passed.
 - Stats JSON smoke command: passed, `sealed_pages` и `current_index_kind` exported.

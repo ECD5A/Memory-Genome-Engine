@@ -16,6 +16,9 @@ pub enum MgeError {
     #[error("messagepack decode error: {0}")]
     MessagePackDecode(#[from] rmp_serde::decode::Error),
 
+    #[error("storage format error: {0}")]
+    StorageFormat(String),
+
     #[error("invalid marker: {0}")]
     InvalidMarker(String),
 

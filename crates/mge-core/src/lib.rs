@@ -1,3 +1,4 @@
+pub mod binary;
 pub mod compression;
 pub mod errors;
 pub mod hot;

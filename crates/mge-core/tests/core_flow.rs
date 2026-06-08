@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 
+use mge_core::binary::{self, CodecId, FileKind};
 use mge_core::{
     build_context_packet, build_pages_from_cells, build_pages_with_clusterer, canonicalize_marker,
     marker_strings_for_cell_fields, score_cell_debug, AgentCapabilities, AgentCapability,
@@ -1170,9 +1171,12 @@ fn validate_reports_page_checksum_mismatch() {
     let page_file = engine.inspect().unwrap().page_catalog.pages[0].file.clone();
     let page_path = dir.path().join("pages").join(page_file);
     let codec = MessagePackPageCodec;
-    let mut page: mge_core::MemoryPage = codec.decode(&fs::read(&page_path).unwrap()).unwrap();
+    let frame = binary::decode_frame(&fs::read(&page_path).unwrap(), FileKind::Page).unwrap();
+    let mut page: mge_core::MemoryPage = codec.decode(&frame.payload).unwrap();
     page.checksum = Some("bad-checksum".to_string());
-    fs::write(&page_path, codec.encode(&page).unwrap()).unwrap();
+    let page_payload = codec.encode(&page).unwrap();
+    let framed = binary::encode_frame(FileKind::Page, CodecId::MessagePack, &page_payload).unwrap();
+    fs::write(&page_path, framed).unwrap();
 
     let report = engine.validate().unwrap();
 
@@ -1181,6 +1185,82 @@ fn validate_reports_page_checksum_mismatch() {
         .errors
         .iter()
         .any(|error| error.contains("checksum mismatch")));
+}
+
+#[test]
+fn validate_reports_wrong_page_file_magic() {
+    assert_page_storage_error_after_corruption(|bytes| bytes[0] ^= 0xff, "wrong magic");
+}
+
+#[test]
+fn validate_reports_wrong_page_file_kind() {
+    assert_page_storage_error_after_corruption(
+        |bytes| bytes[8] = FileKind::Manifest as u8,
+        "wrong file kind",
+    );
+}
+
+#[test]
+fn validate_reports_unsupported_page_file_version() {
+    assert_page_storage_error_after_corruption(|bytes| bytes[9] = 2, "unsupported version");
+}
+
+#[test]
+fn validate_reports_truncated_page_file_payload() {
+    assert_page_storage_error_after_corruption(
+        |bytes| {
+            bytes.pop();
+        },
+        "truncated page payload",
+    );
+}
+
+#[test]
+fn validate_reports_corrupted_page_file_payload() {
+    assert_page_storage_error_after_corruption(
+        |bytes| {
+            let last = bytes.len() - 1;
+            bytes[last] ^= 0xff;
+        },
+        "corrupted page payload checksum",
+    );
+}
+
+#[test]
+fn validate_reports_wrong_hot_log_magic() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    let hot_path = dir.path().join("hot").join("hot.mgl");
+    let mut bytes = fs::read(&hot_path).unwrap();
+    bytes[0] ^= 0xff;
+    fs::write(&hot_path, bytes).unwrap();
+
+    let report = engine.validate().unwrap();
+
+    assert!(!report.ok);
+    assert!(report.errors.iter().any(|error| {
+        error.contains("hot memory load failed") && error.contains("wrong magic")
+    }));
+}
+
+#[test]
+fn validate_reports_wrong_index_magic() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+    let index_path = dir.path().join("indexes").join("marker_index.mgi");
+    let mut bytes = fs::read(&index_path).unwrap();
+    bytes[0] ^= 0xff;
+    fs::write(&index_path, bytes).unwrap();
+
+    let report = engine.validate().unwrap();
+
+    assert!(!report.ok);
+    assert!(report.errors.iter().any(|error| {
+        error.contains("candidate index load failed") && error.contains("wrong magic")
+    }));
 }
 
 #[test]
@@ -1238,7 +1318,7 @@ fn validate_reports_marker_dictionary_inconsistency() {
         id_to_marker: BTreeMap::new(),
         next_id: 2,
     };
-    fs::write(&markers_path, rmp_serde::to_vec_named(&broken).unwrap()).unwrap();
+    binary::write_messagepack_file(&markers_path, FileKind::MarkerDictionary, &broken).unwrap();
     let engine = MemoryEngine::open_at(dir.path()).unwrap();
 
     let report = engine.validate().unwrap();
@@ -1342,6 +1422,34 @@ fn synthetic_binary_fuse_candidates_cover_exact_candidates() {
             );
         }
     }
+}
+
+fn assert_page_storage_error_after_corruption(
+    mutate: impl FnOnce(&mut Vec<u8>),
+    expected_message: &str,
+) {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let page_file = engine.inspect().unwrap().page_catalog.pages[0].file.clone();
+    let page_path = dir.path().join("pages").join(page_file);
+    let mut bytes = fs::read(&page_path).unwrap();
+    mutate(&mut bytes);
+    fs::write(&page_path, bytes).unwrap();
+
+    let report = engine.validate().unwrap();
+
+    assert!(!report.ok);
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|error| error.contains(expected_message)),
+        "expected validation error containing {expected_message:?}, got {:?}",
+        report.errors
+    );
 }
 
 fn remember_answer_style(engine: &mut MemoryEngine) -> mge_core::MemoryCell {

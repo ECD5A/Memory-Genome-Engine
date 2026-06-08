@@ -20,6 +20,7 @@
 - zstd compression. Сделано как foundation.
 - Store config show/set для future page defaults. Сделано.
 - Binary runtime storage layout. Сделано: `manifest.mgm`, `dictionary/markers.mgd`, `hot/hot.mgl`, `pages/*.mgp` и `indexes/*.mgi`.
+- Binary file headers, payload checksums и atomic writes. Сделано.
 - JSON runtime storage removal. Сделано для текущего storage path; JSON остаётся только как явный debug output/API parsing.
 - Fast storage profile. Сделано как opt-in `mge init --profile fast`.
 - Markdown human-readable export. Сделано как `.memory-genome/exports/memory.md`.

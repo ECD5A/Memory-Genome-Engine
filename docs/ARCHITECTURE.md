@@ -91,6 +91,10 @@ Current direction:
 - human-readable export: Markdown at `.memory-genome/exports/memory.md`;
 - debug output: JSON may be emitted explicitly by CLI flags such as `--json` or `export --format json`.
 
+Binary runtime files carry fixed headers with magic bytes, file kind, format version, codec identifier, payload length, and a SHA-256 payload checksum. This applies to `manifest.mgm`, `dictionary/markers.mgd`, `hot/hot.mgl` frames, `pages/*.mgp`, and `indexes/*.mgi`.
+
+Full-file storage writes use a temporary file, flush/sync, and same-directory rename where practical. Hot memory remains a binary log format: `hot/hot.mgl` has a `hot_log` frame followed by `hot_record` frames.
+
 Page files use codecs hidden behind the `PageCodec` trait:
 
 - `MessagePackPageCodec` for runtime page storage;
@@ -107,7 +111,7 @@ The manifest stores the default codec/compression for newly sealed pages. Each `
 
 `mge config set` updates manifest defaults and lightweight derived indexes. It does not rewrite existing page files or mutate existing page catalog entries. Changing `--index-kind` rebuilds only the candidate index from existing sealed pages.
 
-`mge validate` is a read-only storage consistency check. It verifies manifest/catalog/index kind alignment, page file readability, page metadata, marker summaries, page checksums, marker dictionary consistency and references, cell links, candidate-index coverage, and orphan storage files. It does not repair or rewrite store data.
+`mge validate` is a read-only storage consistency check. It verifies manifest/catalog/index kind alignment, page file readability, binary headers, payload checksums, page metadata, marker summaries, page checksums, marker dictionary consistency and references, cell links, candidate-index coverage, and orphan storage files. It reports wrong magic, wrong file kind, unsupported version, truncated payload, and corrupted payload errors. It does not repair or rewrite store data.
 
 ## Page Clustering
 

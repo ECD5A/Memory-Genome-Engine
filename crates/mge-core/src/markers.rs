@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, HashSet};
-use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::binary::{self, FileKind};
 use crate::errors::{MgeError, Result};
 use crate::models::{
     MarkerId, MemoryKind, MemoryStatus, MemoryValue, SensitivityLevel, TrustLevel,
@@ -141,20 +141,14 @@ impl MarkerDictionary {
     }
 
     pub fn save_to_path(&self, path: impl AsRef<Path>) -> Result<()> {
-        if let Some(parent) = path.as_ref().parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let bytes = rmp_serde::to_vec_named(self)?;
-        fs::write(path, bytes)?;
-        Ok(())
+        binary::write_messagepack_file(path, FileKind::MarkerDictionary, self)
     }
 
     pub fn load_from_path(path: impl AsRef<Path>) -> Result<Self> {
         if !path.as_ref().exists() {
             return Ok(Self::new());
         }
-        let bytes = fs::read(path)?;
-        let mut dictionary: Self = rmp_serde::from_slice(&bytes)?;
+        let mut dictionary: Self = binary::read_messagepack_file(path, FileKind::MarkerDictionary)?;
         if dictionary.next_id == 0 {
             dictionary.next_id = dictionary
                 .id_to_marker
