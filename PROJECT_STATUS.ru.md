@@ -100,6 +100,7 @@ JSON policy:
 - Добавлен `ZstdCompression` за существующим trait `Compressor`.
 - Store manifest теперь хранит default `page_codec` и `compression` для новых sealed pages.
 - Page catalog entries теперь хранят per-page codec/compression для mixed-store и backward-compatible reads.
+- Page catalog entries теперь также хранят lightweight pre-decode summaries: scope marker summary, kind marker summary, direct status summary, direct sensitivity summary, trust summary и encoded page size.
 - Internal store files теперь используют final binary layout:
   - `manifest.mgm`
   - `dictionary/markers.mgd`
@@ -159,11 +160,11 @@ JSON policy:
 - CLI `init` и `config set` теперь поддерживают `--index-kind exact_marker_page|binary_fuse_page`.
 - При смене `index_kind` пересобирается только candidate index по существующим sealed pages; sealed page files не переписываются.
 - Recall debug теперь показывает index kind, page filters scanned, candidate pages returned, loaded pages, sealed cells scanned и post-load false-positive candidate pages.
-- Recall debug теперь также показывает pages considered, pruned candidate pages, cells decoded, cells filtered и cells ranked.
+- Recall debug теперь также показывает pages considered, pruned candidate pages, pages pruned by metadata, cells decoded, cells filtered и cells ranked.
 - Tests теперь проверяют `exact_candidates ⊆ binary_fuse_candidates` на тех же sealed pages и проверяют смену index kind без rewrite page files.
 - Добавлен synthetic benchmark tool: `cargo run -p mge-cli --bin mge-synthetic-bench`.
 - Synthetic benchmark сравнивает `exact_marker_page` и opt-in `binary_fuse_page` на одинаковых generated stores и проверяет `exact_candidates ⊆ binary_fuse_candidates`.
-- Synthetic benchmark harness теперь показывает remember, seal, hot focused/broad/full-scope recall до seal, sealed focused/broad/full-scope recall после seal, index lookup, page decode, ContextPacket build, candidate pages, hot total/candidate/scanned cells, cells scanned, returned items, storage size, seal hot-clear correctness и p50/p95/avg metrics where practical.
+- Synthetic benchmark harness теперь показывает remember, seal, hot focused/broad/full-scope recall до seal, sealed focused/broad/full-scope recall после seal, index lookup, page decode, ContextPacket build, candidate pages, pages pruned by metadata, hot total/candidate/scanned cells, cells scanned, returned items, storage size, seal hot-clear correctness и p50/p95/avg metrics where practical.
 - Index/filter minimalism задокументирован: L1 Hot RAM использует только exact mutable indexes; L2 использует `ExactMarkerPageIndex` по умолчанию и `BinaryFusePageIndex` как единственный optional static probabilistic filter backend.
 - Hot log archiving теперь использует уникальные archive names, если несколько seals попадают в одно timestamp window.
 - Добавлены `ValidationReport` и CLI `validate` как read-only consistency checks для manifest, catalog, pages, page checksums, marker references и candidate index coverage.
@@ -228,7 +229,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 92 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 73 core integration tests).
+- `cargo test`: passed, 96 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 77 core integration tests).
 - Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.
 - Benchmark harness integration smoke test: passed для exact + Binary Fuse modes и required metrics.
@@ -257,6 +258,16 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - Broad cell filtering улучшился на benchmark: exact 7094 -> 2427 us, binary_fuse 6908 -> 2407 us; broad ranked cells снизились с 90 до 30, returned items остались 20.
   - Page pruning smoke command: passed with pages considered 2, loaded 1, pruned 1, returned 1.
   - Remaining broad bottleneck: page decode теперь самый стабильный крупный расход на этом dataset; index lookup остается маленьким.
+- Sealed page metadata/catalog pruning package: passed.
+  - Page catalog теперь хранит lightweight pre-decode summaries для scope markers, kind markers, status, sensitivity, trust и encoded page size.
+  - Recall теперь prune candidate pages по metadata до full page read/decode, когда решение детерминированное: missing required scope/kind markers, missing explicit query markers, only disallowed statuses или only disallowed sensitivities.
+  - CLI smoke command passed with pages considered 2, loaded 1, pages pruned by metadata 1, returned 1.
+  - Benchmark before/after на 240 cells, 24 sealed pages, 6 marker groups, 6 targeted + 2 noise queries, 3 repeats, seed 11:
+    - exact broad avg: 17077 -> 12919 us; broad pages loaded avg: 21 -> 11; broad cells decoded avg: 210 -> 117; broad page decode avg: 7689 -> 4264 us.
+    - binary_fuse broad avg: 16559 -> 12976 us; broad pages loaded avg: 21 -> 11; broad cells decoded avg: 210 -> 117; broad page decode avg: 7508 -> 4229 us.
+    - focused exact остался page-limited на 11 loaded pages; full-scope остается scope-limited и correctness-preserving.
+  - New tests покрывают explicit-marker metadata pruning, status-summary pruning, sensitivity-summary pruning, catalog metadata summaries, no false negatives for broad pruning, full-scope correctness, default status exclusion и no JSON/JSONL runtime storage regression.
+  - Remaining broad bottleneck: page decode и cell filtering всё еще доминируют, когда candidate set реально пересекается; index lookup остается маленьким.
 - L1 Hot RAM layer package: passed.
   - `HotMemoryLayer` индексирует hot cells в RAM по cell id, marker id, canonical scope, kind и status.
   - Correctness tests прошли для immediate recall после remember, reopen recovery из `hot/hot.mgl`, очистки hot после seal, sealed recall после seal, full-scope hot+sealed recall и default status exclusion before scoring.

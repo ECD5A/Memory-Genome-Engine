@@ -81,6 +81,8 @@ pub struct ContextDebugInfo {
     pub loaded_pages: usize,
     #[serde(default)]
     pub pruned_candidate_pages: usize,
+    #[serde(default)]
+    pub pages_pruned_by_metadata: usize,
     pub sealed_cells_scanned: usize,
     #[serde(default)]
     pub cells_decoded: usize,

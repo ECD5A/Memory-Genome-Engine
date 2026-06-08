@@ -103,6 +103,7 @@ JSON policy:
 - `ZstdCompression` added behind the existing `Compressor` trait.
 - Store manifest now records default `page_codec` and `compression` for newly sealed pages.
 - Page catalog entries now record per-page codec/compression for mixed-store and backward-compatible reads.
+- Page catalog entries now also record lightweight pre-decode summaries: scope marker summary, kind marker summary, direct status summary, direct sensitivity summary, trust summary, and encoded page size.
 - Internal store files now use the final binary layout:
   - `manifest.mgm`
   - `dictionary/markers.mgd`
@@ -162,11 +163,11 @@ JSON policy:
 - CLI `init` and `config set` now support `--index-kind exact_marker_page|binary_fuse_page`.
 - Changing `index_kind` rebuilds only the candidate index from existing sealed pages; sealed page files are not rewritten.
 - Recall debug now reports index kind, page filters scanned, candidate pages returned, loaded pages, sealed cells scanned, and post-load false-positive candidate pages.
-- Recall debug now also reports pages considered, pruned candidate pages, cells decoded, cells filtered, and cells ranked.
+- Recall debug now also reports pages considered, pruned candidate pages, pages pruned by metadata, cells decoded, cells filtered, and cells ranked.
 - Tests now assert `exact_candidates ⊆ binary_fuse_candidates` for the same sealed pages and verify index-kind switching without page rewrites.
 - Synthetic benchmark tool added as `cargo run -p mge-cli --bin mge-synthetic-bench`.
 - Synthetic benchmark compares `exact_marker_page` and opt-in `binary_fuse_page` on identical generated stores and checks `exact_candidates ⊆ binary_fuse_candidates`.
-- Synthetic benchmark harness now reports remember, seal, hot focused/broad/full-scope recall before seal, sealed focused/broad/full-scope recall after seal, index lookup, page decode, ContextPacket build, candidate pages, hot total/candidate/scanned cells, cells scanned, returned items, storage size, seal hot-clear correctness, and p50/p95/avg metrics where practical.
+- Synthetic benchmark harness now reports remember, seal, hot focused/broad/full-scope recall before seal, sealed focused/broad/full-scope recall after seal, index lookup, page decode, ContextPacket build, candidate pages, pages pruned by metadata, hot total/candidate/scanned cells, cells scanned, returned items, storage size, seal hot-clear correctness, and p50/p95/avg metrics where practical.
 - Index/filter minimalism is documented: L1 Hot RAM uses exact mutable indexes only; L2 uses `ExactMarkerPageIndex` by default and `BinaryFusePageIndex` as the only optional static probabilistic filter backend.
 - Hot log archiving now uses unique archive names when multiple seals happen within the same timestamp window.
 - `ValidationReport` and CLI `validate` added as read-only consistency checks for manifest, catalog, pages, page checksums, marker references, and candidate index coverage.
@@ -231,7 +232,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 92 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 73 core integration tests).
+- `cargo test`: passed, 96 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 77 core integration tests).
 - Recall modes tests: passed for focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering, and no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed for `--mode broad`, `--mode full-scope --scope`, and full-scope missing-scope failure.
 - Benchmark harness integration smoke test: passed for exact + Binary Fuse modes and required metrics.
@@ -260,6 +261,16 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - Broad cell filtering improved on the benchmark: exact 7094 -> 2427 us, binary_fuse 6908 -> 2407 us; broad ranked cells dropped from 90 to 30 while returned items stayed 20.
   - Page pruning smoke command: passed with pages considered 2, loaded 1, pruned 1, returned 1.
   - Remaining broad bottleneck: page decode is now the largest stable cost on this dataset; index lookup remains small.
+- Sealed page metadata/catalog pruning package: passed.
+  - Page catalog now stores lightweight pre-decode summaries for scope markers, kind markers, status, sensitivity, trust, and encoded page size.
+  - Recall now prunes candidate pages by metadata before full page read/decode when the decision is deterministic: missing required scope/kind markers, missing explicit query markers, only disallowed statuses, or only disallowed sensitivities.
+  - CLI smoke command passed with pages considered 2, loaded 1, pages pruned by metadata 1, returned 1.
+  - Benchmark before/after on 240 cells, 24 sealed pages, 6 marker groups, 6 targeted + 2 noise queries, 3 repeats, seed 11:
+    - exact broad avg: 17077 -> 12919 us; broad pages loaded avg: 21 -> 11; broad cells decoded avg: 210 -> 117; broad page decode avg: 7689 -> 4264 us.
+    - binary_fuse broad avg: 16559 -> 12976 us; broad pages loaded avg: 21 -> 11; broad cells decoded avg: 210 -> 117; broad page decode avg: 7508 -> 4229 us.
+    - focused exact remained page-limited at 11 loaded pages; full-scope remains scope-limited and correctness-preserving.
+  - New tests cover explicit-marker metadata pruning, status-summary pruning, sensitivity-summary pruning, catalog metadata summaries, no false negatives for broad pruning, full-scope correctness, default status exclusion, and no JSON/JSONL runtime storage regression.
+  - Remaining broad bottleneck: page decode and cell filtering still dominate when the candidate set genuinely overlaps; index lookup is still small.
 - L1 Hot RAM layer package: passed.
   - `HotMemoryLayer` indexes hot cells in RAM by cell id, marker id, canonical scope, kind, and status.
   - Correctness tests passed for immediate recall after remember, reopen recovery from `hot/hot.mgl`, hot clearing after seal, sealed recall after seal, full-scope hot+sealed recall, and default status exclusion before scoring.

@@ -8,7 +8,9 @@ use sha2::{Digest, Sha256};
 use crate::compression::CompressionKind;
 use crate::errors::{MgeError, Result};
 use crate::indexes::IndexKind;
-use crate::models::{current_timestamp, MarkerId, MemoryCell, PageId};
+use crate::models::{
+    current_timestamp, MarkerId, MemoryCell, MemoryStatus, PageId, SensitivityLevel, TrustLevel,
+};
 
 pub const DEFAULT_TARGET_PAGE_BYTES: usize = 64 * 1024;
 pub const DEFAULT_MAX_CELLS_PER_PAGE: usize = 512;
@@ -44,6 +46,18 @@ pub struct PageCatalogEntry {
     pub created_at: i64,
     pub cell_count: usize,
     pub marker_summary: Vec<MarkerId>,
+    #[serde(default)]
+    pub scope_marker_summary: Vec<MarkerId>,
+    #[serde(default)]
+    pub kind_marker_summary: Vec<MarkerId>,
+    #[serde(default)]
+    pub status_summary: Vec<MemoryStatus>,
+    #[serde(default)]
+    pub sensitivity_summary: Vec<SensitivityLevel>,
+    #[serde(default)]
+    pub trust_summary: Vec<TrustLevel>,
+    #[serde(default)]
+    pub encoded_size_bytes: u64,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

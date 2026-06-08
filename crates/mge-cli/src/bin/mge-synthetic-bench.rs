@@ -97,6 +97,7 @@ struct RecallBenchRun {
     pages_considered: MetricSamples,
     pages_loaded: MetricSamples,
     pruned_candidate_pages: MetricSamples,
+    pages_pruned_by_metadata: MetricSamples,
     cells_scanned: MetricSamples,
     cells_decoded: MetricSamples,
     cells_filtered: MetricSamples,
@@ -428,6 +429,7 @@ fn run_recall_bench(
         pages_considered: MetricSamples::default(),
         pages_loaded: MetricSamples::default(),
         pruned_candidate_pages: MetricSamples::default(),
+        pages_pruned_by_metadata: MetricSamples::default(),
         cells_scanned: MetricSamples::default(),
         cells_decoded: MetricSamples::default(),
         cells_filtered: MetricSamples::default(),
@@ -488,6 +490,8 @@ fn run_recall_bench(
             run.pages_loaded.record_usize(packet.debug.loaded_pages);
             run.pruned_candidate_pages
                 .record_usize(packet.debug.pruned_candidate_pages);
+            run.pages_pruned_by_metadata
+                .record_usize(packet.debug.pages_pruned_by_metadata);
             run.cells_scanned.record_usize(packet.debug.cells_scanned);
             run.cells_decoded.record_usize(packet.debug.cells_decoded);
             run.cells_filtered.record_usize(packet.debug.cells_filtered);
@@ -751,6 +755,7 @@ fn recall_to_json(run: &RecallBenchRun) -> serde_json::Value {
         "pages_considered": run.pages_considered.to_json(),
         "pages_loaded": run.pages_loaded.to_json(),
         "pruned_candidate_pages": run.pruned_candidate_pages.to_json(),
+        "pages_pruned_by_metadata": run.pages_pruned_by_metadata.to_json(),
         "cells_scanned": run.cells_scanned.to_json(),
         "cells_decoded": run.cells_decoded.to_json(),
         "cells_filtered": run.cells_filtered.to_json(),

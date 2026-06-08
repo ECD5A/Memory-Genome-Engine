@@ -735,6 +735,44 @@ fn broad_page_pruning_does_not_create_false_negatives() {
     assert_eq!(packet.debug.candidate_pages_returned, 2);
     assert_eq!(packet.debug.loaded_pages, 1);
     assert_eq!(packet.debug.pruned_candidate_pages, 1);
+    assert_eq!(packet.debug.pages_pruned_by_metadata, 1);
+    assert_eq!(packet.debug.cells_decoded, 1);
+}
+
+#[test]
+fn metadata_pruning_skips_pages_missing_explicit_markers() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "explicit-alpha",
+        MemoryStatus::Active,
+        TrustLevel::ToolObserved,
+        "shared alpha memory",
+        &["tag:wanted".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "explicit-beta",
+        MemoryStatus::Active,
+        TrustLevel::ToolObserved,
+        "shared beta memory",
+        &["tag:other".to_string()],
+    );
+    engine.seal().unwrap();
+
+    let mut request = RecallRequest::new("shared memory");
+    request.mode = RecallMode::Broad;
+    request.markers = vec!["tag:wanted".to_string()];
+    let packet = engine.recall(request).unwrap();
+
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert!(packet.relevant_memory[0].content.contains("alpha"));
+    assert_eq!(packet.debug.candidate_pages_returned, 2);
+    assert_eq!(packet.debug.loaded_pages, 1);
+    assert_eq!(packet.debug.pruned_candidate_pages, 1);
+    assert_eq!(packet.debug.pages_pruned_by_metadata, 1);
+    assert_eq!(packet.debug.cells_decoded, 1);
 }
 
 #[test]
@@ -950,6 +988,47 @@ fn recall_from_messagepack_zstd_sealed_pages() {
 
     assert_eq!(packet.relevant_memory.len(), 1);
     assert_eq!(packet.debug.candidate_pages.len(), 1);
+}
+
+#[test]
+fn page_catalog_stores_lightweight_metadata_summaries() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "catalog-meta",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "catalog metadata active memory",
+        &["tag:metadata".to_string()],
+    );
+    engine.seal().unwrap();
+
+    let inspect = engine.inspect().unwrap();
+    let entry = inspect.page_catalog.pages.first().unwrap();
+    let scope_marker_name = canonicalize_marker("scope:catalog-meta").unwrap();
+    let kind_marker_name = canonicalize_marker("kind:project_fact").unwrap();
+    let scope_marker = inspect
+        .markers
+        .iter()
+        .find(|marker| marker.marker == scope_marker_name)
+        .unwrap()
+        .id;
+    let kind_marker = inspect
+        .markers
+        .iter()
+        .find(|marker| marker.marker == kind_marker_name)
+        .unwrap()
+        .id;
+
+    assert_eq!(entry.cell_count, 1);
+    assert!(entry.marker_summary.contains(&scope_marker));
+    assert!(entry.scope_marker_summary.contains(&scope_marker));
+    assert!(entry.kind_marker_summary.contains(&kind_marker));
+    assert_eq!(entry.status_summary, vec![MemoryStatus::Active]);
+    assert_eq!(entry.sensitivity_summary, vec![SensitivityLevel::Public]);
+    assert_eq!(entry.trust_summary, vec![TrustLevel::UserConfirmed]);
+    assert!(entry.encoded_size_bytes > 0);
 }
 
 #[test]
@@ -1304,6 +1383,12 @@ fn page_catalog_entries_default_to_binary_without_compression() {
     assert_eq!(entry.page_codec, PageCodecKind::MessagePack);
     assert_eq!(entry.compression, CompressionKind::None);
     assert_eq!(entry.page_clusterer, PageClustererKind::ScopeKind);
+    assert!(entry.scope_marker_summary.is_empty());
+    assert!(entry.kind_marker_summary.is_empty());
+    assert!(entry.status_summary.is_empty());
+    assert!(entry.sensitivity_summary.is_empty());
+    assert!(entry.trust_summary.is_empty());
+    assert_eq!(entry.encoded_size_bytes, 0);
 }
 
 #[test]
@@ -1441,6 +1526,80 @@ fn deprecated_rejected_and_superseded_are_excluded_before_scoring() {
     assert_eq!(packet.debug.cells_ranked, 1);
     assert_eq!(packet.debug.score_details.len(), 1);
     assert!(packet.debug.cells_filtered >= 3);
+}
+
+#[test]
+fn metadata_status_summary_prunes_disallowed_status_pages() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "status-active",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "status active style",
+        &["tag:style".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "status-deprecated",
+        MemoryStatus::Deprecated,
+        TrustLevel::UserConfirmed,
+        "status deprecated style",
+        &["tag:style".to_string()],
+    );
+    engine.seal().unwrap();
+
+    let mut request = RecallRequest::new("style");
+    request.mode = RecallMode::Broad;
+    request.markers = vec!["tag:style".to_string()];
+    let packet = engine.recall(request).unwrap();
+
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert!(packet.relevant_memory[0].content.contains("active style"));
+    assert_eq!(packet.debug.candidate_pages_returned, 2);
+    assert_eq!(packet.debug.loaded_pages, 1);
+    assert_eq!(packet.debug.pruned_candidate_pages, 1);
+    assert_eq!(packet.debug.pages_pruned_by_metadata, 1);
+    assert_eq!(packet.debug.cells_ranked, 1);
+}
+
+#[test]
+fn metadata_sensitivity_summary_prunes_disallowed_sensitivity_pages() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "sensitivity-public",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "sensitivity public style",
+        &["tag:style".to_string()],
+    );
+    let mut secret = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Reference("vault://style-secret".to_string()),
+    );
+    secret.scope = "sensitivity-secret".to_string();
+    secret.status = MemoryStatus::Active;
+    secret.trust = TrustLevel::UserConfirmed;
+    secret.sensitivity = SensitivityLevel::SecretReference;
+    secret.markers = vec!["tag:style".to_string()];
+    engine.remember(secret).unwrap();
+    engine.seal().unwrap();
+
+    let mut request = RecallRequest::new("style");
+    request.mode = RecallMode::Broad;
+    request.markers = vec!["tag:style".to_string()];
+    let packet = engine.recall(request).unwrap();
+
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert!(packet.relevant_memory[0].content.contains("public style"));
+    assert_eq!(packet.debug.candidate_pages_returned, 2);
+    assert_eq!(packet.debug.loaded_pages, 1);
+    assert_eq!(packet.debug.pruned_candidate_pages, 1);
+    assert_eq!(packet.debug.pages_pruned_by_metadata, 1);
+    assert_eq!(packet.debug.cells_ranked, 1);
 }
 
 #[test]

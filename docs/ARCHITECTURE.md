@@ -267,7 +267,7 @@ Detailed recall timing is also reported for performance diagnosis:
 - ContextPacket build;
 - total recall time.
 
-Recall may prune candidate pages before decode only when catalog `marker_summary` makes the decision deterministic: missing required scope/kind markers, impossible query marker overlap, or a page summary containing only policy-disallowed status/sensitivity markers. This uses existing page metadata and does not change storage layout.
+Recall may prune candidate pages before decode only when catalog metadata makes the decision deterministic: missing required scope/kind markers, missing explicit query markers, impossible query marker overlap, or direct status/sensitivity summaries containing only policy-disallowed values. Page catalog entries carry lightweight pre-decode summaries for scope markers, kind markers, status, sensitivity, trust, and encoded page size. This does not change the storage layout or the `CandidatePageIndex` API.
 
 ## Extension Traits
 

@@ -348,9 +348,12 @@ struct TimedPageRead {
 #[derive(Clone, Debug)]
 struct PagePruneContext {
     query_marker_ids: Vec<MarkerId>,
+    explicit_marker_ids: Vec<MarkerId>,
     required_page_marker_ids: Vec<MarkerId>,
+    allowed_statuses: Vec<MemoryStatus>,
     all_status_marker_ids: Vec<MarkerId>,
     allowed_status_marker_ids: Vec<MarkerId>,
+    allowed_sensitivities: Vec<SensitivityLevel>,
     all_sensitivity_marker_ids: Vec<MarkerId>,
     allowed_sensitivity_marker_ids: Vec<MarkerId>,
 }
@@ -359,6 +362,7 @@ impl PagePruneContext {
     fn new(
         dictionary: &MarkerDictionary,
         query_marker_ids: &[MarkerId],
+        explicit_marker_ids: &[MarkerId],
         required_page_marker_ids: &[MarkerId],
         policy: &crate::security::RecallPolicy,
     ) -> Self {
@@ -402,9 +406,12 @@ impl PagePruneContext {
 
         Self {
             query_marker_ids: query_marker_ids.to_vec(),
+            explicit_marker_ids: explicit_marker_ids.to_vec(),
             required_page_marker_ids: required_page_marker_ids.to_vec(),
+            allowed_statuses: allowed_statuses.clone(),
             all_status_marker_ids: status_marker_ids(dictionary, &all_statuses),
             allowed_status_marker_ids: status_marker_ids(dictionary, &allowed_statuses),
+            allowed_sensitivities: allowed_sensitivities.clone(),
             all_sensitivity_marker_ids: sensitivity_marker_ids(dictionary, &all_sensitivities),
             allowed_sensitivity_marker_ids: sensitivity_marker_ids(
                 dictionary,
@@ -685,7 +692,7 @@ impl MemoryEngine {
         let filter_context = RecallFilterContext::new_with_marker_filters(
             &request,
             scope_marker_id,
-            explicit_marker_ids,
+            explicit_marker_ids.clone(),
         );
         let scoring_context = ScoringContext::new_with_filter(
             &request,
@@ -696,6 +703,7 @@ impl MemoryEngine {
         let page_prune_context = PagePruneContext::new(
             &self.dictionary,
             &query_marker_ids,
+            &explicit_marker_ids,
             &required_page_marker_ids,
             &request.effective_policy(),
         );
@@ -846,6 +854,7 @@ impl MemoryEngine {
             candidate_pages_returned: candidate_query.candidate_pages_returned,
             loaded_pages,
             pruned_candidate_pages,
+            pages_pruned_by_metadata: pruned_candidate_pages,
             sealed_cells_scanned,
             cells_decoded,
             cells_filtered,
@@ -918,17 +927,10 @@ impl MemoryEngine {
         }
         let mut catalog = self.load_page_catalog()?;
         for page in &pages {
-            self.write_page(page)?;
-            catalog.pages.push(PageCatalogEntry {
-                page_id: page.page_id,
-                file: page_file_name(page.page_id),
-                page_codec: self.manifest.page_codec,
-                compression: self.manifest.compression,
-                page_clusterer: self.manifest.page_clusterer,
-                created_at: page.created_at,
-                cell_count: page.cell_count,
-                marker_summary: page.marker_summary.clone(),
-            });
+            let encoded_size_bytes = self.write_page(page)?;
+            catalog
+                .pages
+                .push(self.page_catalog_entry_for_page(page, encoded_size_bytes)?);
             self.manifest.next_page_id = self.manifest.next_page_id.max(page.page_id + 1);
         }
         self.save_page_catalog(&catalog)?;
@@ -1147,6 +1149,23 @@ impl MemoryEngine {
                 ));
                 continue;
             }
+            if entry.encoded_size_bytes > 0 {
+                match fs::metadata(&page_path) {
+                    Ok(metadata) if metadata.len() != entry.encoded_size_bytes => {
+                        report.error(format!(
+                            "catalog page {} encoded_size_bytes {} does not match file size {}",
+                            entry.page_id,
+                            entry.encoded_size_bytes,
+                            metadata.len()
+                        ));
+                    }
+                    Ok(_) => {}
+                    Err(err) => report.error(format!(
+                        "page file metadata failed for page {}: {err}",
+                        entry.page_id
+                    )),
+                }
+            }
 
             match self.read_page(entry) {
                 Ok(page) => {
@@ -1332,7 +1351,7 @@ impl MemoryEngine {
         })
     }
 
-    fn write_page(&self, page: &MemoryPage) -> Result<()> {
+    fn write_page(&self, page: &MemoryPage) -> Result<u64> {
         let security = NoSecurity;
 
         let encoded = encode_page_with(self.manifest.page_codec, page)?;
@@ -1344,8 +1363,41 @@ impl MemoryEngine {
             &stored,
         )?;
         // Future order remains: encode page -> compress page -> encrypt page -> write page.
+        let encoded_size_bytes = u64::try_from(stored.len())
+            .map_err(|_| MgeError::InvalidInput("page frame size overflow".to_string()))?;
         binary::atomic_write_bytes(self.pages_dir().join(page_file_name(page.page_id)), &stored)?;
-        Ok(())
+        Ok(encoded_size_bytes)
+    }
+
+    fn page_catalog_entry_for_page(
+        &self,
+        page: &MemoryPage,
+        encoded_size_bytes: u64,
+    ) -> Result<PageCatalogEntry> {
+        Ok(PageCatalogEntry {
+            page_id: page.page_id,
+            file: page_file_name(page.page_id),
+            page_codec: self.manifest.page_codec,
+            compression: self.manifest.compression,
+            page_clusterer: self.manifest.page_clusterer,
+            created_at: page.created_at,
+            cell_count: page.cell_count,
+            marker_summary: page.marker_summary.clone(),
+            scope_marker_summary: category_marker_summary(
+                &page.cells,
+                |cell| canonicalize_marker(&format!("scope:{}", cell.scope)),
+                &self.dictionary,
+            )?,
+            kind_marker_summary: category_marker_summary(
+                &page.cells,
+                |cell| canonicalize_marker(&format!("kind:{}", cell.kind.as_str())),
+                &self.dictionary,
+            )?,
+            status_summary: enum_summary(page.cells.iter().map(|cell| cell.status)),
+            sensitivity_summary: enum_summary(page.cells.iter().map(|cell| cell.sensitivity)),
+            trust_summary: enum_summary(page.cells.iter().map(|cell| cell.trust)),
+            encoded_size_bytes,
+        })
     }
 
     fn build_candidate_index(&self, pages: &[MemoryPage]) -> Result<CandidateIndexData> {
@@ -1418,6 +1470,61 @@ impl MemoryEngine {
                 entry.page_id
             ));
         }
+        match category_marker_summary(
+            &page.cells,
+            |cell| canonicalize_marker(&format!("scope:{}", cell.scope)),
+            &self.dictionary,
+        ) {
+            Ok(expected) => validate_optional_catalog_summary(
+                "scope_marker_summary",
+                entry.page_id,
+                &entry.scope_marker_summary,
+                &expected,
+                report,
+            ),
+            Err(err) => report.error(format!(
+                "page {} scope marker summary validation failed: {err}",
+                entry.page_id
+            )),
+        }
+        match category_marker_summary(
+            &page.cells,
+            |cell| canonicalize_marker(&format!("kind:{}", cell.kind.as_str())),
+            &self.dictionary,
+        ) {
+            Ok(expected) => validate_optional_catalog_summary(
+                "kind_marker_summary",
+                entry.page_id,
+                &entry.kind_marker_summary,
+                &expected,
+                report,
+            ),
+            Err(err) => report.error(format!(
+                "page {} kind marker summary validation failed: {err}",
+                entry.page_id
+            )),
+        }
+        validate_optional_catalog_summary(
+            "status_summary",
+            entry.page_id,
+            &entry.status_summary,
+            &enum_summary(page.cells.iter().map(|cell| cell.status)),
+            report,
+        );
+        validate_optional_catalog_summary(
+            "sensitivity_summary",
+            entry.page_id,
+            &entry.sensitivity_summary,
+            &enum_summary(page.cells.iter().map(|cell| cell.sensitivity)),
+            report,
+        );
+        validate_optional_catalog_summary(
+            "trust_summary",
+            entry.page_id,
+            &entry.trust_summary,
+            &enum_summary(page.cells.iter().map(|cell| cell.trust)),
+            report,
+        );
 
         let computed_marker_summary = marker_summary_for_cells(&page.cells);
         if computed_marker_summary != page.marker_summary {
@@ -1728,6 +1835,22 @@ fn validate_cell_links(
     }
 }
 
+fn validate_optional_catalog_summary<T>(
+    label: &str,
+    page_id: PageId,
+    actual: &[T],
+    expected: &[T],
+    report: &mut ValidationReport,
+) where
+    T: Eq + std::fmt::Debug,
+{
+    if !actual.is_empty() && actual != expected {
+        report.error(format!(
+            "catalog {label} differs from page cells for page {page_id}: expected {expected:?}, found {actual:?}"
+        ));
+    }
+}
+
 fn should_prune_candidate_page(entry: &PageCatalogEntry, context: &PagePruneContext) -> bool {
     for required_marker in &context.required_page_marker_ids {
         if !entry.marker_summary.contains(required_marker) {
@@ -1735,19 +1858,50 @@ fn should_prune_candidate_page(entry: &PageCatalogEntry, context: &PagePruneCont
         }
     }
 
-    if summary_has_known_without_allowed(
-        &entry.marker_summary,
-        &context.all_status_marker_ids,
-        &context.allowed_status_marker_ids,
-    ) {
+    if !context.explicit_marker_ids.is_empty()
+        && !entry
+            .marker_summary
+            .iter()
+            .any(|marker| context.explicit_marker_ids.contains(marker))
+    {
         return true;
     }
 
-    if summary_has_known_without_allowed(
-        &entry.marker_summary,
-        &context.all_sensitivity_marker_ids,
-        &context.allowed_sensitivity_marker_ids,
-    ) {
+    if !entry.status_summary.is_empty()
+        && entry
+            .status_summary
+            .iter()
+            .all(|status| !context.allowed_statuses.contains(status))
+    {
+        return true;
+    }
+
+    if entry.status_summary.is_empty()
+        && summary_has_known_without_allowed(
+            &entry.marker_summary,
+            &context.all_status_marker_ids,
+            &context.allowed_status_marker_ids,
+        )
+    {
+        return true;
+    }
+
+    if !entry.sensitivity_summary.is_empty()
+        && entry
+            .sensitivity_summary
+            .iter()
+            .all(|sensitivity| !context.allowed_sensitivities.contains(sensitivity))
+    {
+        return true;
+    }
+
+    if entry.sensitivity_summary.is_empty()
+        && summary_has_known_without_allowed(
+            &entry.marker_summary,
+            &context.all_sensitivity_marker_ids,
+            &context.allowed_sensitivity_marker_ids,
+        )
+    {
         return true;
     }
 
@@ -1787,6 +1941,31 @@ fn sensitivity_marker_ids(
         .filter_map(|sensitivity| {
             dictionary.lookup(&format!("sensitivity:{}", sensitivity.as_str()))
         })
+        .collect()
+}
+
+fn category_marker_summary<F>(
+    cells: &[MemoryCell],
+    mut marker_for_cell: F,
+    dictionary: &MarkerDictionary,
+) -> Result<Vec<MarkerId>>
+where
+    F: FnMut(&MemoryCell) -> Result<String>,
+{
+    let mut summary = BTreeSet::new();
+    for cell in cells {
+        if let Some(marker_id) = dictionary.lookup(&marker_for_cell(cell)?) {
+            summary.insert(marker_id);
+        }
+    }
+    Ok(summary.into_iter().collect())
+}
+
+fn enum_summary<T: Copy + Ord>(values: impl IntoIterator<Item = T>) -> Vec<T> {
+    values
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
         .collect()
 }
 
