@@ -2136,6 +2136,36 @@ fn validate_reports_corrupted_page_file_payload() {
 }
 
 #[test]
+fn validate_deep_reads_page_files_not_decoded_page_cache() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let packet = engine
+        .recall(RecallRequest::new(
+            "How should the agent answer technical questions?",
+        ))
+        .unwrap();
+    assert_eq!(packet.debug.loaded_pages, 1);
+
+    let page_file = engine.inspect().unwrap().page_catalog.pages[0].file.clone();
+    let page_path = dir.path().join("pages").join(page_file);
+    let mut bytes = fs::read(&page_path).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    fs::write(&page_path, bytes).unwrap();
+
+    let report = engine.validate_deep().unwrap();
+
+    assert!(!report.ok);
+    assert!(report
+        .errors
+        .iter()
+        .any(|error| error.contains("corrupted page payload checksum")));
+}
+
+#[test]
 fn validate_reports_wrong_hot_log_magic() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();

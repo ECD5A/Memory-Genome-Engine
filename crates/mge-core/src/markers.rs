@@ -286,7 +286,6 @@ pub fn extract_query_marker_strings(query: &str) -> Vec<String> {
 }
 
 pub fn tokenize_keywords(text: &str) -> Vec<String> {
-    let stopwords = stopwords();
     let mut seen = HashSet::new();
     let mut tokens = Vec::new();
     let mut current = String::new();
@@ -295,27 +294,22 @@ pub fn tokenize_keywords(text: &str) -> Vec<String> {
         if ch.is_ascii_alphanumeric() {
             current.push(ch);
         } else {
-            push_token(&mut tokens, &mut seen, &stopwords, &current);
+            push_token(&mut tokens, &mut seen, &current);
             current.clear();
         }
     }
-    push_token(&mut tokens, &mut seen, &stopwords, &current);
+    push_token(&mut tokens, &mut seen, &current);
 
     tokens
 }
 
-fn push_token(
-    tokens: &mut Vec<String>,
-    seen: &mut HashSet<String>,
-    stopwords: &HashSet<&'static str>,
-    raw: &str,
-) {
-    if raw.len() < 2 || stopwords.contains(raw) {
+fn push_token(tokens: &mut Vec<String>, seen: &mut HashSet<String>, raw: &str) {
+    if raw.len() < 2 || is_stopword(raw) {
         return;
     }
 
     let token = singularize(raw);
-    if token.len() < 2 || stopwords.contains(token.as_str()) {
+    if token.len() < 2 || is_stopword(token.as_str()) {
         return;
     }
 
@@ -412,12 +406,12 @@ fn push_limited_tag_tokens(
     Ok(())
 }
 
-fn stopwords() -> HashSet<&'static str> {
-    [
-        "a", "an", "and", "are", "as", "at", "be", "by", "can", "do", "for", "from", "has", "have",
-        "how", "i", "in", "is", "it", "of", "on", "or", "should", "that", "the", "this", "to",
-        "was", "what", "when", "where", "which", "who", "why", "with", "you", "your",
-    ]
-    .into_iter()
-    .collect()
+const STOPWORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "at", "be", "by", "can", "do", "for", "from", "has", "have",
+    "how", "i", "in", "is", "it", "of", "on", "or", "should", "that", "the", "this", "to", "was",
+    "what", "when", "where", "which", "who", "why", "with", "you", "your",
+];
+
+fn is_stopword(value: &str) -> bool {
+    STOPWORDS.contains(&value)
 }

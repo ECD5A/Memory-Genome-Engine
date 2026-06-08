@@ -1,8 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
@@ -42,6 +44,7 @@ const HOT_LOG_FILE: &str = "hot.mgl";
 const PAGE_CATALOG_FILE: &str = "page_index.mgi";
 const EXACT_MARKER_INDEX_FILE: &str = "marker_index.mgi";
 const BINARY_FUSE_INDEX_FILE: &str = "fuse_index.mgi";
+const DECODED_PAGE_CACHE_CAPACITY: usize = 64;
 
 pub trait Store {
     fn remember(&mut self, request: RememberRequest) -> Result<MemoryCell>;
@@ -60,6 +63,7 @@ pub struct MemoryEngine {
     hot_metadata_dirty: bool,
     hot_unsynced_events: u64,
     last_hot_sync: Instant,
+    page_cache: RefCell<DecodedPageCache>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -378,9 +382,54 @@ hot cells unchanged: {}
 
 #[derive(Clone, Debug)]
 struct TimedPageRead {
-    page: MemoryPage,
+    page: Arc<MemoryPage>,
     file_read_micros: u64,
     decode_micros: u64,
+}
+
+#[derive(Debug)]
+struct DecodedPageCache {
+    capacity: usize,
+    pages: BTreeMap<PageId, Arc<MemoryPage>>,
+    order: VecDeque<PageId>,
+}
+
+impl DecodedPageCache {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            pages: BTreeMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+
+    fn get(&mut self, page_id: PageId) -> Option<Arc<MemoryPage>> {
+        let page = Arc::clone(self.pages.get(&page_id)?);
+        self.touch(page_id);
+        Some(page)
+    }
+
+    fn insert(&mut self, page: Arc<MemoryPage>) {
+        if self.capacity == 0 {
+            return;
+        }
+
+        let page_id = page.page_id;
+        self.pages.insert(page_id, page);
+        self.touch(page_id);
+
+        while self.pages.len() > self.capacity {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            self.pages.remove(&oldest);
+        }
+    }
+
+    fn touch(&mut self, page_id: PageId) {
+        self.order.retain(|existing| *existing != page_id);
+        self.order.push_back(page_id);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -559,6 +608,7 @@ impl MemoryEngine {
             hot_metadata_dirty: false,
             hot_unsynced_events: 0,
             last_hot_sync: Instant::now(),
+            page_cache: RefCell::new(DecodedPageCache::new(DECODED_PAGE_CACHE_CAPACITY)),
         })
     }
 
@@ -842,7 +892,7 @@ impl MemoryEngine {
                 continue;
             }
 
-            let timed_page = self.read_page_with_timing(entry)?;
+            let timed_page = self.read_page_with_timing_cached(entry)?;
             page_file_read_load_micros =
                 page_file_read_load_micros.saturating_add(timed_page.file_read_micros);
             page_decode_micros = page_decode_micros.saturating_add(timed_page.decode_micros);
@@ -1446,7 +1496,7 @@ impl MemoryEngine {
     }
 
     fn read_page(&self, entry: &PageCatalogEntry) -> Result<MemoryPage> {
-        Ok(self.read_page_with_timing(entry)?.page)
+        Ok((*self.read_page_with_timing(entry)?.page).clone())
     }
 
     fn read_page_with_timing(&self, entry: &PageCatalogEntry) -> Result<TimedPageRead> {
@@ -1472,10 +1522,26 @@ impl MemoryEngine {
         let decode_micros = elapsed_micros(decode_started);
 
         Ok(TimedPageRead {
-            page,
+            page: Arc::new(page),
             file_read_micros,
             decode_micros,
         })
+    }
+
+    fn read_page_with_timing_cached(&self, entry: &PageCatalogEntry) -> Result<TimedPageRead> {
+        if let Some(page) = self.page_cache.borrow_mut().get(entry.page_id) {
+            return Ok(TimedPageRead {
+                page,
+                file_read_micros: 0,
+                decode_micros: 0,
+            });
+        }
+
+        let timed_page = self.read_page_with_timing(entry)?;
+        self.page_cache
+            .borrow_mut()
+            .insert(Arc::clone(&timed_page.page));
+        Ok(timed_page)
     }
 
     fn write_page(&self, page: &MemoryPage) -> Result<u64> {

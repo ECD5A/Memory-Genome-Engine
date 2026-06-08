@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
 use std::fmt;
 use std::str::FromStr;
@@ -352,12 +353,18 @@ pub enum MemoryValue {
 
 impl MemoryValue {
     pub fn to_plain_text(&self) -> String {
+        self.to_plain_text_cow().into_owned()
+    }
+
+    pub fn to_plain_text_cow(&self) -> Cow<'_, str> {
         match self {
-            Self::Text(value) | Self::Symbol(value) | Self::Reference(value) => value.clone(),
-            Self::Number(value) => value.to_string(),
-            Self::Boolean(value) => value.to_string(),
-            Self::Timestamp(value) => value.to_string(),
-            Self::Structured(value) => value.to_string(),
+            Self::Text(value) | Self::Symbol(value) | Self::Reference(value) => {
+                Cow::Borrowed(value.as_str())
+            }
+            Self::Number(value) => Cow::Owned(value.to_string()),
+            Self::Boolean(value) => Cow::Owned(value.to_string()),
+            Self::Timestamp(value) => Cow::Owned(value.to_string()),
+            Self::Structured(value) => Cow::Owned(value.to_string()),
         }
     }
 }

@@ -87,6 +87,7 @@ JSON policy:
 - `MarkerGenome` разделяет scope, kind, status, trust, sensitivity, subject, value/domain и custom marker IDs.
 - `MarkerGenome` отдаёт all marker IDs, system marker IDs, custom marker IDs, ключевые system markers, page-summary markers и deterministic fingerprint.
 - L1 Hot RAM indexes, page grouping, page summaries, recall filtering/scoring, markdown export и validation теперь используют genome-compatible marker access, сохраняя старые vec-style records.
+- Recall hot path теперь использует borrowed `MemoryValue` text где возможно, static stopword lookup для tokenization, более дешёвую scope filtering и single-pass ContextPacket assembly, чтобы уменьшить allocations и temporary rebuilds.
 - Добавлена документация:
   - `README.md`
   - `README.ru.md`
@@ -106,6 +107,7 @@ JSON policy:
 - Store manifest теперь хранит default `page_codec` и `compression` для новых sealed pages.
 - Page catalog entries теперь хранят per-page codec/compression для mixed-store и backward-compatible reads.
 - Page catalog entries теперь также хранят lightweight pre-decode summaries: scope marker summary, kind marker summary, direct status summary, direct sensitivity summary, trust summary и encoded page size.
+- Sealed recall теперь имеет маленький bounded decoded-page cache для immutable sealed pages; validation и rebuild paths намеренно обходят cache и читают page files напрямую.
 - Internal store files теперь используют final binary layout:
   - `manifest.mgm`
   - `dictionary/markers.mgd`
@@ -242,7 +244,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 106 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 87 core integration tests).
+- `cargo test`: passed, 107 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 88 core integration tests).
 - Validation/rebuild tests: passed для clean deep validation, corrupted/mismatched catalog summaries, missing exact index restore, active Binary Fuse index restore, recall after rebuild, hot memory untouched и no JSON/JSONL runtime storage regression.
 - Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.

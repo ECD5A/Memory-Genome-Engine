@@ -76,6 +76,7 @@ pub struct RankedCell {
 #[derive(Clone, Debug)]
 pub struct RecallFilterContext {
     kind: Option<MemoryKind>,
+    scope_raw: Option<String>,
     scope_canonical: Option<String>,
     scope_marker_id: Option<u32>,
     required_cell_marker_ids: Vec<u32>,
@@ -94,6 +95,7 @@ impl RecallFilterContext {
     ) -> Self {
         Self {
             kind: request.kind,
+            scope_raw: request.scope.clone(),
             scope_canonical: request.scope.as_deref().map(canonicalize_marker_value),
             scope_marker_id,
             required_cell_marker_ids,
@@ -124,7 +126,12 @@ impl RecallFilterContext {
         }
 
         if let Some(scope) = &self.scope_canonical {
-            if canonicalize_marker_value(&cell.scope) != *scope {
+            if self
+                .scope_raw
+                .as_ref()
+                .is_none_or(|raw_scope| cell.scope != *raw_scope)
+                && canonicalize_marker_value(&cell.scope) != *scope
+            {
                 return false;
             }
         }
@@ -195,21 +202,30 @@ pub fn score_cell_debug_with_context(
 
     let marker_overlap = cell.marker_overlap_count(&context.query_marker_set) as i64;
 
-    let value_text = cell.value.to_plain_text();
-    let value_tokens = tokenize_keywords(&value_text);
-    let value_overlap = value_tokens
-        .iter()
-        .filter(|token| context.query_token_set.contains(token.as_str()))
-        .count() as i64;
-    let exact_value_match = exact_canonical_match(&value_text, &context.query_canonical);
-
-    let exact_subject_match = cell.subject.as_ref().is_some_and(|subject| {
-        let subject_tokens = tokenize_keywords(subject);
-        !subject_tokens.is_empty()
-            && subject_tokens
+    let mut value_overlap = 0;
+    let mut exact_value_match = false;
+    if !context.query_token_set.is_empty() || !context.query_canonical.is_empty() {
+        let value_text = cell.value.to_plain_text_cow();
+        if !context.query_token_set.is_empty() {
+            value_overlap = tokenize_keywords(value_text.as_ref())
                 .iter()
-                .all(|token| context.query_token_set.contains(token.as_str()))
-    });
+                .filter(|token| context.query_token_set.contains(token.as_str()))
+                .count() as i64;
+        }
+        if !context.query_canonical.is_empty() {
+            exact_value_match =
+                exact_canonical_match(value_text.as_ref(), &context.query_canonical);
+        }
+    }
+
+    let exact_subject_match = !context.query_token_set.is_empty()
+        && cell.subject.as_ref().is_some_and(|subject| {
+            let subject_tokens = tokenize_keywords(subject);
+            !subject_tokens.is_empty()
+                && subject_tokens
+                    .iter()
+                    .all(|token| context.query_token_set.contains(token.as_str()))
+        });
 
     let marker_overlap_score = marker_overlap * 10;
     let exact_subject_score = if exact_subject_match { 5 } else { 0 };
@@ -288,15 +304,16 @@ pub fn build_context_packet(
     max_items: usize,
 ) -> ContextPacket {
     let mut seen_cell_ids = HashSet::new();
-    let unique_ranked = ranked
-        .iter()
-        .filter(|ranked| seen_cell_ids.insert(ranked.cell.id))
-        .collect::<Vec<_>>();
+    let mut total_candidates = 0;
+    let mut relevant_memory = Vec::with_capacity(max_items.min(ranked.len()));
+    let mut score_details = Vec::with_capacity(max_items.min(ranked.len()));
 
-    let relevant_memory = unique_ranked
-        .iter()
-        .take(max_items)
-        .map(|ranked| {
+    for ranked in ranked {
+        if !seen_cell_ids.insert(ranked.cell.id) {
+            continue;
+        }
+        total_candidates += 1;
+        if relevant_memory.len() < max_items {
             let mut seen_marker_ids = std::collections::BTreeSet::new();
             let mut markers = Vec::new();
             ranked.cell.for_each_marker_id_for_indexing(|marker_id| {
@@ -307,7 +324,7 @@ pub fn build_context_packet(
                 }
             });
 
-            ContextMemoryItem {
+            relevant_memory.push(ContextMemoryItem {
                 kind: ranked.cell.kind,
                 content: ranked.cell.value.to_plain_text(),
                 trust: ranked.cell.trust,
@@ -315,15 +332,10 @@ pub fn build_context_packet(
                 scope: ranked.cell.scope.clone(),
                 sensitivity: ranked.cell.sensitivity,
                 markers,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let score_details = unique_ranked
-        .iter()
-        .take(max_items)
-        .map(|ranked| ranked.score_detail.clone())
-        .collect::<Vec<_>>();
+            });
+            score_details.push(ranked.score_detail.clone());
+        }
+    }
 
     let includes_deprecated_or_rejected = relevant_memory.iter().any(|item| {
         matches!(
@@ -361,7 +373,7 @@ pub fn build_context_packet(
         constraints,
         warnings,
         debug: ContextDebugInfo {
-            total_candidates: unique_ranked.len(),
+            total_candidates,
             returned_items,
             score_details,
             ..debug
