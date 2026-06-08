@@ -173,9 +173,15 @@ JSON policy:
 - Index/filter minimalism задокументирован: L1 Hot RAM использует только exact mutable indexes; L2 использует `ExactMarkerPageIndex` по умолчанию и `BinaryFusePageIndex` как единственный optional static probabilistic filter backend.
 - Hot log archiving теперь использует уникальные archive names, если несколько seals попадают в одно timestamp window.
 - Добавлены `ValidationReport` и CLI `validate` как read-only consistency checks для manifest, catalog, pages, page checksums, marker references и candidate index coverage.
+- Добавлены `validate_deep()` и CLI `validate --deep` для более строгих проверок sealed page/catalog/index.
 - Store validation теперь проверяет cell links на unknown targets и self-links.
 - Store validation теперь предупреждает об orphan page files и unknown unmanaged index files.
+- Deep validation считает orphan `pages/*.mgp`, missing page catalog и missing active candidate index files ошибками.
 - Store validation теперь проверяет marker dictionary forward/reverse consistency, canonical markers и `next_id`.
+- Добавлен `rebuild_catalog_and_indexes()` как safe rebuild tooling для L2 sealed memory metadata.
+- CLI `rebuild-indexes` пересобирает `indexes/page_index.mgi`, `indexes/marker_index.mgi` и active `indexes/fuse_index.mgi`, если включён `binary_fuse_page`.
+- Catalog/index rebuild читает existing `pages/*.mgp` как source of truth, декодирует binary page frames по header codec, atomically writes rebuilt `.mgi` files и не переписывает sealed page payloads, memory cells или hot memory.
+- Seal/config index rebuild paths теперь держат `ExactMarkerPageIndex` как reliable baseline, а `BinaryFusePageIndex` остаётся opt-in.
 - Добавлен `RecallPolicy` как центральная recall filtering policy.
 - Добавлен `AgentCapabilities` для explicit future access grants.
 - CLI recall теперь имеет `--mode focused|broad|full-scope`, а также opt-in flags `--include-deprecated` и `--include-secret-references`.
@@ -223,6 +229,8 @@ cargo run -p mge-cli -- recall "How should the agent answer technical questions?
 cargo run -p mge-cli -- stats
 cargo run -p mge-cli -- stats --json
 cargo run -p mge-cli -- validate
+cargo run -p mge-cli -- validate --deep
+cargo run -p mge-cli -- rebuild-indexes
 cargo run -p mge-cli -- export
 cargo run -p mge-cli -- config set durability safe
 cargo run -p mge-cli -- checkpoint
@@ -234,7 +242,8 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 100 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 81 core integration tests).
+- `cargo test`: passed, 106 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 87 core integration tests).
+- Validation/rebuild tests: passed для clean deep validation, corrupted/mismatched catalog summaries, missing exact index restore, active Binary Fuse index restore, recall after rebuild, hot memory untouched и no JSON/JSONL runtime storage regression.
 - Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.
 - Benchmark harness integration smoke test: passed для exact + Binary Fuse modes и required metrics.

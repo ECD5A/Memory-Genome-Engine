@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -51,6 +52,44 @@ fn cli_milestone_flow_outputs_context_stats_and_validation_json() {
     let validation = run_mge_json(&store, &["validate", "--json"]);
     assert_eq!(validation["ok"], true);
     assert_eq!(validation["errors"].as_array().unwrap().len(), 0);
+
+    fs::remove_file(store.join("indexes").join("marker_index.mgi")).unwrap();
+    let failed_validation = run_mge_failure(&store, &["validate", "--deep", "--json"]);
+    let failed_report: Value = serde_json::from_slice(&failed_validation.stdout).unwrap();
+    assert_eq!(failed_report["ok"], false);
+    assert!(failed_report["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|error| error
+            .as_str()
+            .unwrap()
+            .contains("active candidate index file missing")));
+
+    let rebuild = run_mge_json(&store, &["rebuild-indexes", "--json"]);
+    assert_eq!(rebuild["index_kind"], "exact_marker_page");
+    assert_eq!(rebuild["pages_scanned"], 1);
+    assert_eq!(rebuild["exact_index_written"], true);
+    assert_eq!(rebuild["binary_fuse_index_written"], false);
+    assert_eq!(rebuild["pages_unchanged"], true);
+
+    let validation = run_mge_json(&store, &["validate", "--deep", "--json"]);
+    assert_eq!(validation["ok"], true);
+    let recall_after_rebuild = run_mge_json(
+        &store,
+        &[
+            "recall",
+            "How should the agent answer technical questions?",
+            "--json",
+        ],
+    );
+    assert_eq!(
+        recall_after_rebuild["relevant_memory"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 
     run_mge(&store, &["export"]);
     assert!(store.join("manifest.mgm").is_file());

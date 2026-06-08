@@ -338,11 +338,55 @@ warnings: {}
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RebuildIndexesReport {
+    pub index_kind: IndexKind,
+    pub pages_scanned: usize,
+    pub catalog_entries_written: usize,
+    pub exact_index_written: bool,
+    pub binary_fuse_index_written: bool,
+    pub active_index_file: String,
+    pub pages_unchanged: bool,
+    pub hot_cells_unchanged: usize,
+}
+
+impl RebuildIndexesReport {
+    pub fn to_human_text(&self) -> String {
+        format!(
+            "\
+rebuild indexes: ok
+index kind: {}
+pages scanned: {}
+catalog entries written: {}
+exact index written: {}
+binary fuse index written: {}
+active index file: {}
+pages unchanged: {}
+hot cells unchanged: {}
+",
+            self.index_kind,
+            self.pages_scanned,
+            self.catalog_entries_written,
+            self.exact_index_written,
+            self.binary_fuse_index_written,
+            self.active_index_file,
+            self.pages_unchanged,
+            self.hot_cells_unchanged
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 struct TimedPageRead {
     page: MemoryPage,
     file_read_micros: u64,
     decode_micros: u64,
+}
+
+#[derive(Clone, Debug)]
+struct RebuildPageRead {
+    page: MemoryPage,
+    entry: PageCatalogEntry,
 }
 
 #[derive(Clone, Debug)]
@@ -581,8 +625,7 @@ impl MemoryEngine {
 
         if previous.index_kind != current.index_kind {
             let pages = self.load_all_pages()?;
-            let index = self.build_candidate_index(&pages)?;
-            self.save_candidate_index(&index)?;
+            self.rebuild_candidate_indexes_for_pages(&pages)?;
             let catalog = self.load_page_catalog()?;
             self.save_page_catalog(&catalog)?;
         }
@@ -948,8 +991,7 @@ impl MemoryEngine {
         self.save_page_catalog(&catalog)?;
 
         let all_pages = self.load_all_pages()?;
-        let index = self.build_candidate_index(&all_pages)?;
-        self.save_candidate_index(&index)?;
+        self.rebuild_candidate_indexes_for_pages(&all_pages)?;
 
         let archived_hot_log = hot_store.archive_and_clear()?;
         self.hot.clear();
@@ -1008,6 +1050,47 @@ impl MemoryEngine {
             markers: self.dictionary.debug_view(),
             page_catalog: self.load_page_catalog()?,
             index: self.load_candidate_index()?,
+        })
+    }
+
+    pub fn rebuild_catalog_and_indexes(&self) -> Result<RebuildIndexesReport> {
+        let hot_cells_unchanged = self.hot.len();
+        let mut reads = self.read_all_page_files_for_rebuild()?;
+        reads.sort_by_key(|read| (read.page.page_id, read.entry.file.clone()));
+
+        let mut seen_page_ids = BTreeSet::new();
+        for read in &reads {
+            if !seen_page_ids.insert(read.page.page_id) {
+                return Err(MgeError::InvalidInput(format!(
+                    "duplicate sealed page id {} while rebuilding catalog/indexes",
+                    read.page.page_id
+                )));
+            }
+        }
+
+        let pages = reads
+            .iter()
+            .map(|read| read.page.clone())
+            .collect::<Vec<_>>();
+        let catalog = PageCatalog {
+            index_kind: self.manifest.index_kind,
+            pages: reads.into_iter().map(|read| read.entry).collect(),
+        };
+
+        self.save_page_catalog(&catalog)?;
+        let active_index = self.rebuild_candidate_indexes_for_pages(&pages)?;
+
+        Ok(RebuildIndexesReport {
+            index_kind: self.manifest.index_kind,
+            pages_scanned: pages.len(),
+            catalog_entries_written: catalog.pages.len(),
+            exact_index_written: true,
+            binary_fuse_index_written: self.manifest.index_kind == IndexKind::BinaryFusePage,
+            active_index_file: self
+                .candidate_index_file_name(active_index.kind())
+                .to_string(),
+            pages_unchanged: true,
+            hot_cells_unchanged,
         })
     }
 
@@ -1080,7 +1163,25 @@ impl MemoryEngine {
     }
 
     pub fn validate(&self) -> Result<ValidationReport> {
+        self.validate_with_options(false)
+    }
+
+    pub fn validate_deep(&self) -> Result<ValidationReport> {
+        self.validate_with_options(true)
+    }
+
+    fn validate_with_options(&self, deep: bool) -> Result<ValidationReport> {
         let mut report = ValidationReport::new(self.manifest.index_kind);
+        let page_catalog_path = self.page_catalog_path();
+        if !page_catalog_path.exists() {
+            let message = format!("page catalog file missing: {}", page_catalog_path.display());
+            if deep {
+                report.error(message);
+            } else {
+                report.warning(message);
+            }
+        }
+
         let catalog = match self.load_page_catalog() {
             Ok(catalog) => catalog,
             Err(err) => {
@@ -1100,11 +1201,20 @@ impl MemoryEngine {
             ));
         }
 
-        let index = match self.load_candidate_index() {
-            Ok(index) => Some(index),
-            Err(err) => {
-                report.error(format!("candidate index load failed: {err}"));
-                None
+        let active_index_path = self.candidate_index_path(self.manifest.index_kind);
+        let index = if !active_index_path.exists() {
+            report.error(format!(
+                "active candidate index file missing: {}",
+                active_index_path.display()
+            ));
+            None
+        } else {
+            match self.load_candidate_index() {
+                Ok(index) => Some(index),
+                Err(err) => {
+                    report.error(format!("candidate index load failed: {err}"));
+                    None
+                }
             }
         };
         if let Some(index) = &index {
@@ -1197,7 +1307,7 @@ impl MemoryEngine {
             }
         }
 
-        self.validate_orphan_storage_files(&page_files, &mut report)?;
+        self.validate_orphan_storage_files(&page_files, deep, &mut report)?;
 
         if !catalog.pages.is_empty() && self.manifest.next_page_id <= max_page_id {
             report.error(format!(
@@ -1227,6 +1337,7 @@ impl MemoryEngine {
     fn validate_orphan_storage_files(
         &self,
         catalog_page_files: &BTreeSet<String>,
+        deep: bool,
         report: &mut ValidationReport,
     ) -> Result<()> {
         let pages_dir = self.pages_dir();
@@ -1238,9 +1349,13 @@ impl MemoryEngine {
                 }
                 let file_name = entry.file_name().to_string_lossy().to_string();
                 if !catalog_page_files.contains(&file_name) {
-                    report.warning(format!(
-                        "orphan page file not referenced by catalog: {file_name}"
-                    ));
+                    let message =
+                        format!("orphan page file not referenced by catalog: {file_name}");
+                    if deep && file_name.ends_with(".mgp") {
+                        report.error(message);
+                    } else {
+                        report.warning(message);
+                    }
                 }
             }
         }
@@ -1381,16 +1496,83 @@ impl MemoryEngine {
         Ok(encoded_size_bytes)
     }
 
+    fn read_all_page_files_for_rebuild(&self) -> Result<Vec<RebuildPageRead>> {
+        let pages_dir = self.pages_dir();
+        if !pages_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut reads = Vec::new();
+        for entry in fs::read_dir(pages_dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if !file_name.ends_with(".mgp") {
+                continue;
+            }
+
+            let read = self.read_page_file_for_rebuild(&file_name).map_err(|err| {
+                MgeError::StorageFormat(format!(
+                    "failed to rebuild from page file {file_name}: {err}"
+                ))
+            })?;
+            reads.push(read);
+        }
+
+        Ok(reads)
+    }
+
+    fn read_page_file_for_rebuild(&self, file_name: &str) -> Result<RebuildPageRead> {
+        let path = self.pages_dir().join(file_name);
+        let bytes = fs::read(&path)?;
+        let encoded_size_bytes = u64::try_from(bytes.len())
+            .map_err(|_| MgeError::InvalidInput("page frame size overflow".to_string()))?;
+        let frame = binary::decode_frame(&bytes, FileKind::Page)?;
+        let (page_codec, compression) = page_storage_details_from_codec(frame.codec)?;
+        let security = NoSecurity;
+        let opened = security.open_page_bytes(&frame.payload)?;
+        let decoded = decompress_with(compression, &opened)?;
+        let page = decode_page_with(page_codec, &decoded)?;
+        let entry = self.page_catalog_entry_for_existing_page(
+            &page,
+            file_name.to_string(),
+            page_codec,
+            compression,
+            encoded_size_bytes,
+        )?;
+
+        Ok(RebuildPageRead { page, entry })
+    }
+
     fn page_catalog_entry_for_page(
         &self,
         page: &MemoryPage,
         encoded_size_bytes: u64,
     ) -> Result<PageCatalogEntry> {
+        self.page_catalog_entry_for_existing_page(
+            page,
+            page_file_name(page.page_id),
+            self.manifest.page_codec,
+            self.manifest.compression,
+            encoded_size_bytes,
+        )
+    }
+
+    fn page_catalog_entry_for_existing_page(
+        &self,
+        page: &MemoryPage,
+        file: String,
+        page_codec: PageCodecKind,
+        compression: CompressionKind,
+        encoded_size_bytes: u64,
+    ) -> Result<PageCatalogEntry> {
         Ok(PageCatalogEntry {
             page_id: page.page_id,
-            file: page_file_name(page.page_id),
-            page_codec: self.manifest.page_codec,
-            compression: self.manifest.compression,
+            file,
+            page_codec,
+            compression,
             page_clusterer: self.manifest.page_clusterer,
             created_at: page.created_at,
             cell_count: page.cell_count,
@@ -1414,17 +1596,6 @@ impl MemoryEngine {
         })
     }
 
-    fn build_candidate_index(&self, pages: &[MemoryPage]) -> Result<CandidateIndexData> {
-        match self.manifest.index_kind {
-            IndexKind::ExactMarkerPage => Ok(CandidateIndexData::ExactMarkerPage(
-                ExactMarkerPageIndex::build(pages)?,
-            )),
-            IndexKind::BinaryFusePage => Ok(CandidateIndexData::BinaryFusePage(
-                BinaryFusePageIndex::build(pages)?,
-            )),
-        }
-    }
-
     fn load_candidate_index(&self) -> Result<CandidateIndexData> {
         match self.manifest.index_kind {
             IndexKind::ExactMarkerPage => Ok(CandidateIndexData::ExactMarkerPage(
@@ -1436,13 +1607,19 @@ impl MemoryEngine {
         }
     }
 
-    fn save_candidate_index(&self, index: &CandidateIndexData) -> Result<()> {
-        match index {
-            CandidateIndexData::ExactMarkerPage(index) => {
-                index.save_to_path(self.marker_index_path())
-            }
-            CandidateIndexData::BinaryFusePage(index) => {
-                index.save_to_path(self.binary_fuse_index_path())
+    fn rebuild_candidate_indexes_for_pages(
+        &self,
+        pages: &[MemoryPage],
+    ) -> Result<CandidateIndexData> {
+        let exact = ExactMarkerPageIndex::build(pages)?;
+        exact.save_to_path(self.marker_index_path())?;
+
+        match self.manifest.index_kind {
+            IndexKind::ExactMarkerPage => Ok(CandidateIndexData::ExactMarkerPage(exact)),
+            IndexKind::BinaryFusePage => {
+                let binary = BinaryFusePageIndex::build(pages)?;
+                binary.save_to_path(self.binary_fuse_index_path())?;
+                Ok(CandidateIndexData::BinaryFusePage(binary))
             }
         }
     }
@@ -1719,6 +1896,20 @@ impl MemoryEngine {
     fn binary_fuse_index_path(&self) -> PathBuf {
         self.root.join("indexes").join(BINARY_FUSE_INDEX_FILE)
     }
+
+    fn candidate_index_path(&self, kind: IndexKind) -> PathBuf {
+        match kind {
+            IndexKind::ExactMarkerPage => self.marker_index_path(),
+            IndexKind::BinaryFusePage => self.binary_fuse_index_path(),
+        }
+    }
+
+    fn candidate_index_file_name(&self, kind: IndexKind) -> &'static str {
+        match kind {
+            IndexKind::ExactMarkerPage => EXACT_MARKER_INDEX_FILE,
+            IndexKind::BinaryFusePage => BINARY_FUSE_INDEX_FILE,
+        }
+    }
 }
 
 impl Store for MemoryEngine {
@@ -1789,6 +1980,16 @@ fn page_storage_codec(page_codec: PageCodecKind, compression: CompressionKind) -
         (PageCodecKind::Json, _) => Err(MgeError::InvalidInput(
             "json page codec is only allowed for optional debug/export paths, not runtime storage"
                 .to_string(),
+        )),
+    }
+}
+
+fn page_storage_details_from_codec(codec: CodecId) -> Result<(PageCodecKind, CompressionKind)> {
+    match codec {
+        CodecId::MessagePack => Ok((PageCodecKind::MessagePack, CompressionKind::None)),
+        CodecId::MessagePackZstd => Ok((PageCodecKind::MessagePack, CompressionKind::Zstd)),
+        CodecId::None => Err(MgeError::StorageFormat(
+            "page frame codec none is not valid for runtime page storage".to_string(),
         )),
     }
 }

@@ -124,6 +124,13 @@ enum Commands {
     Inspect,
     Validate {
         #[arg(long)]
+        deep: bool,
+
+        #[arg(long)]
+        json: bool,
+    },
+    RebuildIndexes {
+        #[arg(long)]
         json: bool,
     },
     Stats {
@@ -381,9 +388,13 @@ fn main() -> Result<()> {
             let engine = open_engine(&cli.store)?;
             println!("{}", serde_json::to_string_pretty(&engine.inspect()?)?);
         }
-        Commands::Validate { json } => {
+        Commands::Validate { deep, json } => {
             let engine = open_engine(&cli.store)?;
-            let report = engine.validate()?;
+            let report = if deep {
+                engine.validate_deep()?
+            } else {
+                engine.validate()?
+            };
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -391,6 +402,15 @@ fn main() -> Result<()> {
             }
             if !report.ok {
                 bail!("store validation failed");
+            }
+        }
+        Commands::RebuildIndexes { json } => {
+            let engine = open_engine(&cli.store)?;
+            let report = engine.rebuild_catalog_and_indexes()?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", report.to_human_text());
             }
         }
         Commands::Stats { json } => {

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::path::Path;
 
 use mge_core::binary::{self, CodecId, FileKind};
 use mge_core::{
@@ -10,9 +11,10 @@ use mge_core::{
     CompressionKind, Compressor, ContextDebugInfo, DurabilityPolicy, ExactMarkerPageIndex,
     HotCandidateQuery, HotMemoryLayer, IndexKind, InitOptions, MarkerGenome,
     MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
-    MessagePackPageCodec, NoopAuditLogger, PageBuildOptions, PageCatalogEntry, PageClustererKind,
-    PageCodec, PageCodecKind, QueryMode, RecallMode, RecallPolicy, RecallRequest, RememberRequest,
-    ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate, TrustLevel, ZstdCompression,
+    MessagePackPageCodec, NoopAuditLogger, PageBuildOptions, PageCatalog, PageCatalogEntry,
+    PageClustererKind, PageCodec, PageCodecKind, QueryMode, RecallMode, RecallPolicy,
+    RecallRequest, RememberRequest, ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate,
+    TrustLevel, ZstdCompression,
 };
 use serde::Serialize;
 use tempfile::tempdir;
@@ -2012,9 +2014,12 @@ fn validate_clean_exact_store_passes() {
     engine.seal().unwrap();
 
     let report = engine.validate().unwrap();
+    let deep_report = engine.validate_deep().unwrap();
 
     assert!(report.ok);
     assert!(report.errors.is_empty());
+    assert!(deep_report.ok);
+    assert!(deep_report.errors.is_empty());
     assert_eq!(report.index_kind, IndexKind::ExactMarkerPage);
     assert_eq!(report.checked_sealed_pages, 1);
     assert_eq!(report.checked_sealed_cells, 1);
@@ -2168,6 +2173,23 @@ fn validate_reports_wrong_index_magic() {
 }
 
 #[test]
+fn validate_deep_reports_orphan_page_file_as_error() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+    fs::write(dir.path().join("pages").join("999999.mgp"), b"orphan").unwrap();
+
+    let report = engine.validate_deep().unwrap();
+
+    assert!(!report.ok);
+    assert!(report
+        .errors
+        .iter()
+        .any(|error| error.contains("orphan page file")));
+}
+
+#[test]
 fn validate_warns_about_orphan_page_file() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
@@ -2273,6 +2295,205 @@ fn validate_reports_unknown_cell_link() {
 }
 
 #[test]
+fn rebuild_indexes_restores_missing_exact_index_and_preserves_pages() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let before_catalog = engine.inspect().unwrap().page_catalog;
+    let before_pages = page_file_bytes(dir.path(), &before_catalog);
+    fs::remove_file(dir.path().join("indexes").join("marker_index.mgi")).unwrap();
+
+    let broken = engine.validate_deep().unwrap();
+    assert!(!broken.ok);
+    assert!(broken
+        .errors
+        .iter()
+        .any(|error| error.contains("active candidate index file missing")));
+
+    let report = engine.rebuild_catalog_and_indexes().unwrap();
+
+    assert_eq!(report.index_kind, IndexKind::ExactMarkerPage);
+    assert_eq!(report.pages_scanned, 1);
+    assert!(report.exact_index_written);
+    assert!(!report.binary_fuse_index_written);
+    assert!(report.pages_unchanged);
+    assert_eq!(
+        page_file_bytes(dir.path(), &engine.inspect().unwrap().page_catalog),
+        before_pages
+    );
+    assert!(dir
+        .path()
+        .join("indexes")
+        .join("marker_index.mgi")
+        .is_file());
+    assert!(engine.validate_deep().unwrap().ok);
+
+    let packet = engine
+        .recall(RecallRequest::new(
+            "How should the agent answer technical questions?",
+        ))
+        .unwrap();
+    assert_eq!(packet.relevant_memory.len(), 1);
+}
+
+#[test]
+fn rebuild_indexes_restores_outdated_catalog_summaries() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let mut catalog = engine.inspect().unwrap().page_catalog;
+    catalog.pages[0].marker_summary.clear();
+    catalog.pages[0].scope_marker_summary.clear();
+    catalog.pages[0].kind_marker_summary.clear();
+    catalog.pages[0].status_summary.clear();
+    catalog.pages[0].sensitivity_summary.clear();
+    catalog.pages[0].trust_summary.clear();
+    catalog.pages[0].encoded_size_bytes = 1;
+    binary::write_messagepack_file(
+        dir.path().join("indexes").join("page_index.mgi"),
+        FileKind::PageIndex,
+        &catalog,
+    )
+    .unwrap();
+
+    let broken = engine.validate_deep().unwrap();
+    assert!(!broken.ok);
+    assert!(broken
+        .errors
+        .iter()
+        .any(|error| error.contains("marker_summary differs")));
+    assert!(broken
+        .errors
+        .iter()
+        .any(|error| error.contains("encoded_size_bytes")));
+
+    let report = engine.rebuild_catalog_and_indexes().unwrap();
+    let rebuilt = engine.inspect().unwrap().page_catalog;
+
+    assert_eq!(report.catalog_entries_written, 1);
+    assert!(!rebuilt.pages[0].marker_summary.is_empty());
+    assert!(!rebuilt.pages[0].scope_marker_summary.is_empty());
+    assert!(!rebuilt.pages[0].kind_marker_summary.is_empty());
+    assert!(!rebuilt.pages[0].status_summary.is_empty());
+    assert!(!rebuilt.pages[0].sensitivity_summary.is_empty());
+    assert!(!rebuilt.pages[0].trust_summary.is_empty());
+    assert!(rebuilt.pages[0].encoded_size_bytes > 1);
+    assert!(engine.validate_deep().unwrap().ok);
+}
+
+#[test]
+fn rebuild_indexes_restores_binary_fuse_index_when_configured() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_with_options(
+        dir.path(),
+        InitOptions {
+            page_codec: PageCodecKind::MessagePack,
+            compression: CompressionKind::None,
+            index_kind: IndexKind::BinaryFusePage,
+            page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
+        },
+    )
+    .unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let before_catalog = engine.inspect().unwrap().page_catalog;
+    let before_pages = page_file_bytes(dir.path(), &before_catalog);
+    fs::remove_file(dir.path().join("indexes").join("fuse_index.mgi")).unwrap();
+    let broken = engine.validate_deep().unwrap();
+    assert!(!broken.ok);
+    assert!(broken
+        .errors
+        .iter()
+        .any(|error| error.contains("active candidate index file missing")));
+
+    let report = engine.rebuild_catalog_and_indexes().unwrap();
+
+    assert_eq!(report.index_kind, IndexKind::BinaryFusePage);
+    assert!(report.exact_index_written);
+    assert!(report.binary_fuse_index_written);
+    assert_eq!(report.active_index_file, "fuse_index.mgi");
+    assert_eq!(
+        page_file_bytes(dir.path(), &engine.inspect().unwrap().page_catalog),
+        before_pages
+    );
+    assert!(matches!(
+        engine.inspect().unwrap().index,
+        CandidateIndexData::BinaryFusePage(_)
+    ));
+    assert!(engine.validate_deep().unwrap().ok);
+
+    let packet = engine
+        .recall(RecallRequest::new(
+            "How should the agent answer technical questions?",
+        ))
+        .unwrap();
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert_eq!(packet.debug.index_kind, IndexKind::BinaryFusePage);
+}
+
+#[test]
+fn rebuild_indexes_leaves_hot_memory_unaffected() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+    remember_text_cell(
+        &mut engine,
+        "hot-rebuild",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "hot memory survives index rebuild",
+        &["tag:hot_rebuild".to_string()],
+    );
+    let hot_log_path = dir.path().join("hot").join("hot.mgl");
+    let hot_log_len_before = fs::metadata(&hot_log_path).unwrap().len();
+
+    let report = engine.rebuild_catalog_and_indexes().unwrap();
+
+    assert_eq!(report.hot_cells_unchanged, 1);
+    assert_eq!(engine.stats().unwrap().hot_cells, 1);
+    assert_eq!(
+        fs::metadata(&hot_log_path).unwrap().len(),
+        hot_log_len_before
+    );
+    let mut request = RecallRequest::new("hot memory survives");
+    request.markers = vec!["tag:hot_rebuild".to_string()];
+    let packet = engine.recall(request).unwrap();
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert_eq!(packet.debug.hot_total_cells, 1);
+}
+
+#[test]
+fn rebuild_indexes_does_not_create_json_runtime_storage() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    engine.rebuild_catalog_and_indexes().unwrap();
+
+    assert!(!dir.path().join("manifest.json").exists());
+    assert!(!dir.path().join("markers.json").exists());
+    assert!(!dir.path().join("hot").join("hot_cells.jsonl").exists());
+    assert!(!dir
+        .path()
+        .join("indexes")
+        .join("page_catalog.json")
+        .exists());
+    assert!(!dir
+        .path()
+        .join("indexes")
+        .join("marker_to_pages.json")
+        .exists());
+}
+
+#[test]
 fn synthetic_binary_fuse_candidates_cover_exact_candidates() {
     let exact_dir = tempdir().unwrap();
     let binary_dir = tempdir().unwrap();
@@ -2356,6 +2577,19 @@ fn assert_page_storage_error_after_corruption(
         "expected validation error containing {expected_message:?}, got {:?}",
         report.errors
     );
+}
+
+fn page_file_bytes(root: &Path, catalog: &PageCatalog) -> BTreeMap<String, Vec<u8>> {
+    catalog
+        .pages
+        .iter()
+        .map(|entry| {
+            (
+                entry.file.clone(),
+                fs::read(root.join("pages").join(&entry.file)).unwrap(),
+            )
+        })
+        .collect()
 }
 
 fn remember_answer_style(engine: &mut MemoryEngine) -> mge_core::MemoryCell {
