@@ -130,6 +130,9 @@ JSON policy:
 - Reranking теперь записывает marker, subject, value overlap, exact value match, trust, status и sensitivity score components.
 - Context packet building теперь deduplicate ranked cells по `cell_id` перед возвратом memory агентам.
 - Prompt text output остается компактным и не раскрывает score internals.
+- Добавлены явные recall modes: `focused` по умолчанию, `broad` и `full_scope`.
+- `ContextPacket` считается task-relevant и size-controlled, а не искусственно маленьким.
+- `ContextDebugInfo` теперь показывает recall mode, effective max items, scanned cells, returned items и full-scope usage.
 - Добавлен `IndexKind` с реализованным kind `exact_marker_page`.
 - Manifest, page catalog, stats и exact index files теперь несут index kind metadata.
 - `CandidatePageIndex` теперь раскрывает `kind()` и query statistics для static index implementations.
@@ -148,7 +151,8 @@ JSON policy:
 - Store validation теперь проверяет marker dictionary forward/reverse consistency, canonical markers и `next_id`.
 - Добавлен `RecallPolicy` как центральная recall filtering policy.
 - Добавлен `AgentCapabilities` для explicit future access grants.
-- CLI recall теперь имеет opt-in flags `--include-deprecated` и `--include-secret-references`.
+- CLI recall теперь имеет `--mode focused|broad|full-scope`, а также opt-in flags `--include-deprecated` и `--include-secret-references`.
+- Full-scope recall требует явный `--scope`; deprecated/rejected/superseded memories фильтруются по умолчанию.
 - Добавлены `AuditLogger` interface и `NoopAuditLogger` recall hook.
 - Добавлен `PageClustererKind` в manifest/config.
 - CLI `init` и `config set` теперь поддерживают `--page-clusterer scope_kind|marker_overlap`.
@@ -184,6 +188,8 @@ cargo run -p mge-cli -- remember --kind project_fact --reference-value vault://r
 cargo run -p mge-cli -- remember --kind task_state --timestamp-value 1760000000
 cargo run -p mge-cli -- remember "Decision recorded" --kind decision --source-type issue --source-ref MGE-1 --link 1
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
+cargo run -p mge-cli -- recall "How should the agent answer technical questions?" --mode broad
+cargo run -p mge-cli -- recall --mode full-scope --scope global
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 cargo run -p mge-cli -- stats
@@ -198,7 +204,9 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --mar
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 73 tests total (12 CLI unit tests + 2 CLI integration tests + 1 core unit test + 58 core integration tests).
+- `cargo test`: passed, 79 tests total (12 CLI unit tests + 3 CLI integration tests + 1 core unit test + 63 core integration tests).
+- Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
+- Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.

@@ -117,6 +117,8 @@ mge remember --kind user_preference --subject answer_style --json-value '{"style
 mge remember --kind project_fact --reference-value vault://references/api-key --sensitivity secret_reference
 mge remember "Decision recorded" --kind decision --source-type issue --source-ref MGE-1 --link 1
 mge recall "technical answer style"
+mge recall "technical answer style" --mode broad
+mge recall --mode full-scope --scope global
 mge recall "api key" --include-secret-references
 mge seal
 mge config show
@@ -135,6 +137,8 @@ Use `--marker` on recall for explicit marker search:
 ```bash
 mge recall "technical answer style" --marker kind:user_preference --marker scope:global
 ```
+
+Recall modes are explicit: `focused` is the default, `broad` returns a wider task-relevant packet, and `full-scope` requires `--scope` to return all default-allowed memory inside that scope.
 
 Use `--json-value` on remember when the value should be stored as `MemoryValue::Structured` instead of text or a scalar:
 
@@ -159,7 +163,7 @@ Use `--source-type` and `--source-ref` together to record provenance. Use repeat
 
 `BinaryFusePageIndex` is a probabilistic candidate page filter, not an inverted `marker -> pages` map. It builds one real `xorf::BinaryFuse16` static filter per sealed page from that page's `marker_summary`, scans page filters on query, and may return extra candidate pages. `ExactMarkerPageIndex` remains the default for stable debugging.
 
-Deprecated/rejected memories and `SecretReference` cells are filtered by default. Use recall opt-in flags only when the caller has an explicit reason and capability.
+Deprecated/rejected/superseded memories and `SecretReference` cells are filtered by default. Use recall opt-in flags only when the caller has an explicit reason and capability.
 
 ## Repository Layout
 

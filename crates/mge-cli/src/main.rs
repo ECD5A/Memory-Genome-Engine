@@ -5,8 +5,8 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use mge_core::{
     CellId, CompressionKind, IndexKind, InitOptions, MemoryEngine, MemoryKind, MemorySource,
-    MemoryStatus, MemoryValue, PageClustererKind, PageCodecKind, RecallRequest, RememberRequest,
-    SensitivityLevel, TrustLevel, DEFAULT_STORE_DIR,
+    MemoryStatus, MemoryValue, PageClustererKind, PageCodecKind, RecallMode, RecallRequest,
+    RememberRequest, SensitivityLevel, TrustLevel, DEFAULT_STORE_DIR,
 };
 
 #[derive(Debug, Parser)]
@@ -83,7 +83,10 @@ enum Commands {
         links: Vec<CellId>,
     },
     Recall {
-        query: String,
+        query: Option<String>,
+
+        #[arg(long, default_value = "focused")]
+        mode: String,
 
         #[arg(long, default_value_t = 5)]
         max_items: usize,
@@ -220,6 +223,7 @@ fn main() -> Result<()> {
         }
         Commands::Recall {
             query,
+            mode,
             max_items,
             markers,
             scope,
@@ -229,7 +233,19 @@ fn main() -> Result<()> {
             include_secret_references,
         } => {
             let engine = open_engine(&cli.store)?;
+            let parsed_mode = RecallMode::from_str(&mode)?;
+            let query = match (query, parsed_mode) {
+                (Some(query), _) => query,
+                (None, RecallMode::FullScope) => String::new(),
+                (None, RecallMode::Focused | RecallMode::Broad) => {
+                    bail!("recall query is required unless --mode full-scope is used")
+                }
+            };
+            if parsed_mode == RecallMode::FullScope && scope.is_none() {
+                bail!("full-scope recall requires --scope <scope>");
+            }
             let mut request = RecallRequest::new(query);
+            request.mode = parsed_mode;
             request.max_items = max_items;
             request.markers = markers;
             request.scope = scope;

@@ -117,6 +117,8 @@ mge remember --kind user_preference --subject answer_style --json-value '{"style
 mge remember --kind project_fact --reference-value vault://references/api-key --sensitivity secret_reference
 mge remember "Decision recorded" --kind decision --source-type issue --source-ref MGE-1 --link 1
 mge recall "technical answer style"
+mge recall "technical answer style" --mode broad
+mge recall --mode full-scope --scope global
 mge recall "api key" --include-secret-references
 mge seal
 mge config show
@@ -135,6 +137,8 @@ mge export --format json # explicit debug export
 ```bash
 mge recall "technical answer style" --marker kind:user_preference --marker scope:global
 ```
+
+Recall modes заданы явно: `focused` используется по умолчанию, `broad` возвращает более широкий task-relevant packet, а `full-scope` требует `--scope`, чтобы вернуть всю default-allowed память внутри этого scope.
 
 Используйте `--json-value` в `remember`, если значение нужно сохранить как `MemoryValue::Structured`, а не как текст или scalar:
 
@@ -159,7 +163,7 @@ mge remember --kind task_state --timestamp-value 1760000000
 
 `BinaryFusePageIndex` - probabilistic candidate page filter, а не inverted `marker -> pages` map. Он строит один реальный `xorf::BinaryFuse16` static filter на каждую sealed page по ее `marker_summary`, сканирует page filters при query и может вернуть extra candidate pages. `ExactMarkerPageIndex` остается default для стабильного дебага.
 
-Deprecated/rejected memories и `SecretReference` cells фильтруются по умолчанию. Recall opt-in flags стоит использовать только если у caller есть явная причина и capability.
+Deprecated/rejected/superseded memories и `SecretReference` cells фильтруются по умолчанию. Recall opt-in flags стоит использовать только если у caller есть явная причина и capability.
 
 ## Структура Репозитория
 

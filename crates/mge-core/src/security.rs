@@ -78,7 +78,12 @@ impl RecallPolicy {
     }
 
     pub fn permits_cell(&self, cell: &MemoryCell) -> bool {
-        if !self.include_deprecated && cell.status == MemoryStatus::Deprecated {
+        if !self.include_deprecated
+            && matches!(
+                cell.status,
+                MemoryStatus::Deprecated | MemoryStatus::Superseded
+            )
+        {
             return false;
         }
         if !self.include_rejected && cell.status == MemoryStatus::Rejected {

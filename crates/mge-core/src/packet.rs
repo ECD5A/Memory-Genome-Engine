@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::indexes::IndexKind;
-use crate::models::{CellId, MemoryKind, MemoryStatus, PageId, SensitivityLevel, TrustLevel};
+use crate::models::{
+    CellId, MemoryKind, MemoryStatus, PageId, RecallMode, SensitivityLevel, TrustLevel,
+};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ContextPacket {
@@ -59,8 +61,14 @@ pub struct ContextMemoryItem {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ContextDebugInfo {
     #[serde(default)]
+    pub recall_mode: RecallMode,
+    #[serde(default)]
+    pub max_items: usize,
+    #[serde(default)]
     pub index_kind: IndexKind,
     pub hot_cells_scanned: usize,
+    #[serde(default)]
+    pub cells_scanned: usize,
     pub candidate_pages: Vec<PageId>,
     pub page_filters_scanned: usize,
     pub candidate_pages_returned: usize,
@@ -68,6 +76,10 @@ pub struct ContextDebugInfo {
     pub sealed_cells_scanned: usize,
     pub false_positive_candidate_pages: usize,
     pub total_candidates: usize,
+    #[serde(default)]
+    pub returned_items: usize,
+    #[serde(default)]
+    pub full_scope_used: bool,
     #[serde(default)]
     pub score_details: Vec<ContextScoreDebugItem>,
 }

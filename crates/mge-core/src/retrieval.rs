@@ -2,7 +2,9 @@ use std::collections::HashSet;
 
 use crate::errors::Result;
 use crate::markers::{canonicalize_marker_value, tokenize_keywords, MarkerDictionary};
-use crate::models::{MemoryCell, MemoryKind, MemoryStatus, SensitivityLevel, TrustLevel};
+use crate::models::{
+    MemoryCell, MemoryKind, MemoryStatus, RecallMode, SensitivityLevel, TrustLevel,
+};
 use crate::packet::{ContextDebugInfo, ContextMemoryItem, ContextPacket, ContextScoreDebugItem};
 use crate::security::{AgentCapabilities, RecallPolicy};
 
@@ -13,6 +15,7 @@ pub trait Retriever {
 #[derive(Clone, Debug)]
 pub struct RecallRequest {
     pub query: String,
+    pub mode: RecallMode,
     pub markers: Vec<String>,
     pub scope: Option<String>,
     pub kind: Option<MemoryKind>,
@@ -27,6 +30,7 @@ impl RecallRequest {
     pub fn new(query: impl Into<String>) -> Self {
         Self {
             query: query.into(),
+            mode: RecallMode::Focused,
             markers: Vec::new(),
             scope: None,
             kind: None,
@@ -35,6 +39,14 @@ impl RecallRequest {
             include_secret_references: false,
             policy: RecallPolicy::default(),
             capabilities: AgentCapabilities::default(),
+        }
+    }
+
+    pub fn effective_max_items(&self, total_candidates: usize) -> usize {
+        match self.mode {
+            RecallMode::Focused => self.max_items,
+            RecallMode::Broad => self.max_items.max(20),
+            RecallMode::FullScope => total_candidates,
         }
     }
 
@@ -76,19 +88,7 @@ pub fn score_cell_debug(
     query_marker_ids: &[u32],
     query_tokens: &[String],
 ) -> Option<ContextScoreDebugItem> {
-    if let Some(kind) = request.kind {
-        if cell.kind != kind {
-            return None;
-        }
-    }
-
-    if let Some(scope) = &request.scope {
-        if canonicalize_marker_value(&cell.scope) != canonicalize_marker_value(scope) {
-            return None;
-        }
-    }
-
-    if !request.effective_policy().permits_cell(cell) {
+    if !request_filters_permit_cell(cell, request) {
         return None;
     }
 
@@ -153,6 +153,29 @@ pub fn score_cell_debug(
     })
 }
 
+pub fn full_scope_cell_debug(
+    cell: &MemoryCell,
+    request: &RecallRequest,
+) -> Option<ContextScoreDebugItem> {
+    if !request_filters_permit_cell(cell, request) {
+        return None;
+    }
+
+    let trust_bonus = trust_bonus(cell.trust);
+    let status_bonus = status_bonus(cell.status);
+    let sensitivity_penalty = sensitivity_penalty(cell.sensitivity);
+    let score = trust_bonus + status_bonus - sensitivity_penalty;
+
+    Some(ContextScoreDebugItem {
+        cell_id: cell.id,
+        score,
+        trust_bonus,
+        status_bonus,
+        sensitivity_penalty,
+        ..Default::default()
+    })
+}
+
 pub fn build_context_packet(
     query: String,
     ranked: &[RankedCell],
@@ -198,7 +221,7 @@ pub fn build_context_packet(
     let includes_deprecated_or_rejected = relevant_memory.iter().any(|item| {
         matches!(
             item.status,
-            MemoryStatus::Deprecated | MemoryStatus::Rejected
+            MemoryStatus::Deprecated | MemoryStatus::Rejected | MemoryStatus::Superseded
         )
     });
     let includes_secret_references = relevant_memory
@@ -211,16 +234,19 @@ pub fn build_context_packet(
         warnings.push("No relevant memory matched the query.".to_string());
     }
     if includes_deprecated_or_rejected {
-        warnings
-            .push("Deprecated or rejected memories were included by explicit policy.".to_string());
+        warnings.push(
+            "Deprecated, rejected, or superseded memories were included by explicit policy."
+                .to_string(),
+        );
     } else {
-        constraints.push("Do not use deprecated or rejected memories.".to_string());
+        constraints.push("Do not use deprecated, rejected, or superseded memories.".to_string());
     }
     if includes_secret_references {
         warnings.push("SecretReference cells were included by explicit policy.".to_string());
     } else {
         constraints.push("Do not expose secret_reference cells.".to_string());
     }
+    let returned_items = relevant_memory.len();
 
     ContextPacket {
         query,
@@ -229,10 +255,27 @@ pub fn build_context_packet(
         warnings,
         debug: ContextDebugInfo {
             total_candidates: unique_ranked.len(),
+            returned_items,
             score_details,
             ..debug
         },
     }
+}
+
+fn request_filters_permit_cell(cell: &MemoryCell, request: &RecallRequest) -> bool {
+    if let Some(kind) = request.kind {
+        if cell.kind != kind {
+            return false;
+        }
+    }
+
+    if let Some(scope) = &request.scope {
+        if canonicalize_marker_value(&cell.scope) != canonicalize_marker_value(scope) {
+            return false;
+        }
+    }
+
+    request.effective_policy().permits_cell(cell)
 }
 
 fn trust_bonus(trust: TrustLevel) -> i64 {

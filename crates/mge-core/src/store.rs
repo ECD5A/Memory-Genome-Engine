@@ -10,6 +10,7 @@ use crate::errors::{MgeError, Result};
 use crate::hot::HotStore;
 use crate::indexes::{
     BinaryFusePageIndex, CandidateIndexData, CandidatePageIndex, ExactMarkerPageIndex, IndexKind,
+    QueryMode,
 };
 use crate::markers::{
     canonicalize_marker, extract_query_marker_strings, marker_strings_for_cell_fields,
@@ -17,7 +18,7 @@ use crate::markers::{
 };
 use crate::models::{
     current_timestamp, CellId, MarkerId, MemoryCell, MemoryKind, MemorySource, MemoryStatus,
-    MemoryValue, PageId, SensitivityLevel, TrustLevel,
+    MemoryValue, PageId, RecallMode, SensitivityLevel, TrustLevel,
 };
 use crate::packet::{ContextDebugInfo, ContextPacket};
 use crate::pages::{
@@ -26,7 +27,8 @@ use crate::pages::{
     PageCatalogEntry, PageClustererKind, PageCodecKind,
 };
 use crate::retrieval::{
-    build_context_packet, score_cell_debug, RankedCell, RecallRequest, Retriever,
+    build_context_packet, full_scope_cell_debug, score_cell_debug, RankedCell, RecallRequest,
+    Retriever,
 };
 use crate::security::{AuditEvent, AuditLogger, NoSecurity, NoopAuditLogger, SecurityProvider};
 
@@ -462,6 +464,12 @@ impl MemoryEngine {
     }
 
     pub fn recall(&self, request: RecallRequest) -> Result<ContextPacket> {
+        if request.mode == RecallMode::FullScope && request.scope.is_none() {
+            return Err(MgeError::InvalidInput(
+                "full-scope recall requires an explicit scope (--scope <scope>)".to_string(),
+            ));
+        }
+
         let mut marker_strings = extract_query_marker_strings(&request.query);
         for explicit in &request.markers {
             marker_strings.push(canonicalize_marker(explicit)?);
@@ -484,9 +492,12 @@ impl MemoryEngine {
         let hot_cells = HotStore::new(self.hot_cells_path()).load_cells()?;
         let mut ranked = Vec::new();
         for cell in &hot_cells {
-            if let Some(score_detail) =
-                score_cell_debug(cell, &request, &query_marker_ids, &query_tokens)
-            {
+            if let Some(score_detail) = match request.mode {
+                RecallMode::FullScope => full_scope_cell_debug(cell, &request),
+                RecallMode::Focused | RecallMode::Broad => {
+                    score_cell_debug(cell, &request, &query_marker_ids, &query_tokens)
+                }
+            } {
                 ranked.push(RankedCell {
                     cell: cell.clone(),
                     score: score_detail.score,
@@ -499,7 +510,11 @@ impl MemoryEngine {
         let candidate_query = if query_marker_ids.is_empty() {
             Default::default()
         } else {
-            index.query_with_stats(&query_marker_ids)?
+            let query_mode = match request.mode {
+                RecallMode::Focused => QueryMode::PreferIntersection,
+                RecallMode::Broad | RecallMode::FullScope => QueryMode::Union,
+            };
+            index.query_with_mode_stats(&query_marker_ids, query_mode)?
         };
         let candidate_pages = candidate_query.page_ids;
 
@@ -522,9 +537,12 @@ impl MemoryEngine {
             sealed_cells_scanned += page.cells.len();
             let before_page_candidates = ranked.len();
             for cell in &page.cells {
-                if let Some(score_detail) =
-                    score_cell_debug(cell, &request, &query_marker_ids, &query_tokens)
-                {
+                if let Some(score_detail) = match request.mode {
+                    RecallMode::FullScope => full_scope_cell_debug(cell, &request),
+                    RecallMode::Focused | RecallMode::Broad => {
+                        score_cell_debug(cell, &request, &query_marker_ids, &query_tokens)
+                    }
+                } {
                     ranked.push(RankedCell {
                         cell: cell.clone(),
                         score: score_detail.score,
@@ -545,9 +563,13 @@ impl MemoryEngine {
                 .then_with(|| left.cell.id.cmp(&right.cell.id))
         });
 
+        let max_items = request.effective_max_items(ranked.len());
         let debug = ContextDebugInfo {
+            recall_mode: request.mode,
+            max_items,
             index_kind: self.manifest.index_kind,
             hot_cells_scanned: hot_cells.len(),
+            cells_scanned: hot_cells.len() + sealed_cells_scanned,
             candidate_pages,
             page_filters_scanned: candidate_query.page_filters_scanned,
             candidate_pages_returned: candidate_query.candidate_pages_returned,
@@ -555,6 +577,8 @@ impl MemoryEngine {
             sealed_cells_scanned,
             false_positive_candidate_pages,
             total_candidates: ranked.len(),
+            returned_items: 0,
+            full_scope_used: request.mode == RecallMode::FullScope,
             score_details: Vec::new(),
         };
 
@@ -572,7 +596,7 @@ impl MemoryEngine {
             &ranked,
             &self.dictionary,
             debug,
-            request.max_items,
+            max_items,
         ))
     }
 

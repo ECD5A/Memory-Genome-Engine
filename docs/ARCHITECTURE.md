@@ -175,6 +175,14 @@ Recall does the following:
 8. Deduplicate ranked cells by `cell_id`.
 9. Emit a `ContextPacket`.
 
+Recall modes are explicit:
+
+- `focused` is the default point-query mode. It uses normal scoring/reranking and `max_items`.
+- `broad` is for wider tasks, projects, modules, or themes. It expands candidate page selection and raises the effective result limit when the caller did not request a larger one.
+- `full_scope` is for an explicit request for all active memory inside a scope. It requires a scope, does not require text relevance, and still excludes deprecated/rejected/superseded memory by default.
+
+The `ContextPacket` is task-relevant and size-controlled. It is not treated as inherently tiny; `max_items`, recall mode, and scope define the practical size boundary.
+
 Reranking is transparent in JSON/debug output. `ContextDebugInfo.score_details` reports the score components for returned items:
 
 - marker overlap score;
@@ -189,12 +197,17 @@ The prompt text output intentionally stays compact and does not include scores.
 
 Recall debug/statistics output also exposes the candidate-index path:
 
+- recall mode;
+- effective max items;
 - index kind;
+- hot/sealed/total cells scanned;
 - page filters scanned;
 - candidate pages returned;
 - loaded pages;
 - sealed cells scanned;
-- false-positive candidate pages after page load.
+- false-positive candidate pages after page load;
+- returned items;
+- whether full-scope was used.
 
 ## Extension Traits
 
@@ -241,6 +254,7 @@ Recall uses `RecallPolicy` as the central filtering policy. Defaults are restric
 
 - deprecated memories are excluded;
 - rejected memories are excluded;
+- superseded memories are excluded;
 - `SecretReference` cells are excluded.
 
 `AgentCapabilities` provides an API boundary for explicit future access grants such as `ReadSecretReferences`. CLI recall exposes opt-in flags for compatibility and testing:
@@ -248,6 +262,8 @@ Recall uses `RecallPolicy` as the central filtering policy. Defaults are restric
 ```bash
 mge recall "api key" --include-secret-references
 mge recall "old decision" --include-deprecated
+mge recall "module work" --mode broad
+mge recall --mode full-scope --scope project-alpha
 ```
 
 `AuditLogger` is defined as an interface and wired through a `NoopAuditLogger` hook in recall. Durable audit storage is intentionally left for a later security package.

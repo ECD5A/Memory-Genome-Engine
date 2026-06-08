@@ -9,8 +9,8 @@ use mge_core::{
     CompressionKind, Compressor, ContextDebugInfo, ExactMarkerPageIndex, IndexKind, InitOptions,
     MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
     MessagePackPageCodec, NoopAuditLogger, PageBuildOptions, PageCatalogEntry, PageClustererKind,
-    PageCodec, PageCodecKind, RecallPolicy, RecallRequest, RememberRequest, ScopeKindClusterer,
-    SensitivityLevel, StorageConfigUpdate, TrustLevel, ZstdCompression,
+    PageCodec, PageCodecKind, RecallMode, RecallPolicy, RecallRequest, RememberRequest,
+    ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate, TrustLevel, ZstdCompression,
 };
 use tempfile::tempdir;
 
@@ -188,6 +188,45 @@ fn init_creates_binary_storage_layout() {
 }
 
 #[test]
+fn recall_modes_do_not_create_json_runtime_storage() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "runtime-check",
+        MemoryStatus::Active,
+        TrustLevel::ToolObserved,
+        "runtime storage recall mode memory",
+        &["tag:runtime".to_string()],
+    );
+    engine.seal().unwrap();
+
+    let focused = RecallRequest::new("runtime storage");
+    engine.recall(focused).unwrap();
+    let mut broad = RecallRequest::new("runtime storage");
+    broad.mode = RecallMode::Broad;
+    engine.recall(broad).unwrap();
+    let mut full_scope = RecallRequest::new("");
+    full_scope.mode = RecallMode::FullScope;
+    full_scope.scope = Some("runtime-check".to_string());
+    engine.recall(full_scope).unwrap();
+
+    assert!(!dir.path().join("manifest.json").exists());
+    assert!(!dir.path().join("markers.json").exists());
+    assert!(!dir.path().join("hot").join("hot_cells.jsonl").exists());
+    assert!(!dir
+        .path()
+        .join("indexes")
+        .join("page_catalog.json")
+        .exists());
+    assert!(!dir
+        .path()
+        .join("indexes")
+        .join("marker_to_pages.json")
+        .exists());
+}
+
+#[test]
 fn init_rejects_json_runtime_page_codec() {
     let dir = tempdir().unwrap();
     let err = MemoryEngine::init_with_options(
@@ -284,6 +323,129 @@ fn recall_from_structured_value_markers() {
     assert!(packet.relevant_memory[0]
         .markers
         .contains(&"tag:concise".to_string()));
+}
+
+#[test]
+fn focused_recall_returns_top_relevant_items() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "global",
+        MemoryStatus::Active,
+        TrustLevel::ExternalUntrusted,
+        "critical topic lower trust background memory",
+        &["tag:critical".to_string(), "tag:topic".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "global",
+        MemoryStatus::Verified,
+        TrustLevel::UserConfirmed,
+        "critical topic high signal memory",
+        &["tag:critical".to_string(), "tag:topic".to_string()],
+    );
+
+    let mut request = RecallRequest::new("critical topic");
+    request.max_items = 1;
+    let packet = engine.recall(request).unwrap();
+
+    assert_eq!(packet.debug.recall_mode, RecallMode::Focused);
+    assert_eq!(packet.debug.max_items, 1);
+    assert_eq!(packet.debug.returned_items, 1);
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert!(packet.relevant_memory[0].content.contains("high signal"));
+}
+
+#[test]
+fn broad_recall_returns_more_relevant_items_than_focused() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    for index in 0..8 {
+        remember_text_cell(
+            &mut engine,
+            "global",
+            MemoryStatus::Active,
+            TrustLevel::ToolObserved,
+            &format!("broad recall topic item {index}"),
+            &["tag:broad".to_string(), "tag:recall".to_string()],
+        );
+    }
+
+    let focused = engine
+        .recall(RecallRequest::new("broad recall topic"))
+        .unwrap();
+    let mut broad_request = RecallRequest::new("broad recall topic");
+    broad_request.mode = RecallMode::Broad;
+    let broad = engine.recall(broad_request).unwrap();
+
+    assert_eq!(focused.debug.recall_mode, RecallMode::Focused);
+    assert_eq!(broad.debug.recall_mode, RecallMode::Broad);
+    assert_eq!(focused.relevant_memory.len(), 5);
+    assert!(broad.relevant_memory.len() > focused.relevant_memory.len());
+    assert_eq!(broad.relevant_memory.len(), 8);
+    assert_eq!(broad.debug.max_items, 20);
+}
+
+#[test]
+fn full_scope_returns_all_active_memory_inside_scope() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "project-alpha",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "alpha active memory",
+        &["tag:alpha".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "project-alpha",
+        MemoryStatus::Verified,
+        TrustLevel::ToolObserved,
+        "alpha verified memory",
+        &["tag:alpha".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "project-beta",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "beta active memory",
+        &["tag:alpha".to_string()],
+    );
+    engine.seal().unwrap();
+
+    let mut request = RecallRequest::new("");
+    request.mode = RecallMode::FullScope;
+    request.scope = Some("project-alpha".to_string());
+    let packet = engine.recall(request).unwrap();
+
+    let contents = packet
+        .relevant_memory
+        .iter()
+        .map(|item| item.content.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(packet.debug.recall_mode, RecallMode::FullScope);
+    assert!(packet.debug.full_scope_used);
+    assert_eq!(packet.debug.returned_items, 2);
+    assert_eq!(packet.relevant_memory.len(), 2);
+    assert!(contents.contains(&"alpha active memory"));
+    assert!(contents.contains(&"alpha verified memory"));
+    assert!(!contents.contains(&"beta active memory"));
+}
+
+#[test]
+fn full_scope_without_scope_fails() {
+    let dir = tempdir().unwrap();
+    let engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let mut request = RecallRequest::new("");
+    request.mode = RecallMode::FullScope;
+
+    let err = engine.recall(request).unwrap_err();
+
+    assert!(err.to_string().contains("full-scope recall requires"));
 }
 
 #[test]
@@ -834,19 +996,26 @@ fn page_checksum_is_independent_of_page_codec() {
 }
 
 #[test]
-fn deprecated_and_rejected_memories_are_filtered() {
+fn deprecated_rejected_and_superseded_memories_are_filtered_by_default() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_with_status(&mut engine, MemoryStatus::Active, "Use active style");
     remember_with_status(
         &mut engine,
         MemoryStatus::Deprecated,
         "Use deprecated style",
     );
     remember_with_status(&mut engine, MemoryStatus::Rejected, "Use rejected style");
+    remember_with_status(
+        &mut engine,
+        MemoryStatus::Superseded,
+        "Use superseded style",
+    );
 
     let packet = engine.recall(RecallRequest::new("style")).unwrap();
 
-    assert!(packet.relevant_memory.is_empty());
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert!(packet.relevant_memory[0].content.contains("active style"));
 }
 
 #[test]
@@ -947,7 +1116,7 @@ fn context_packet_prompt_text() {
     let text = packet.to_prompt_text();
 
     assert!(text.contains("Relevant memory:"));
-    assert!(text.contains("Do not use deprecated or rejected memories."));
+    assert!(text.contains("Do not use deprecated, rejected, or superseded memories."));
     assert!(!text.contains("score"));
 }
 
@@ -1460,6 +1629,26 @@ fn remember_answer_style(engine: &mut MemoryEngine) -> mge_core::MemoryCell {
     request.scope = "global".to_string();
     request.trust = TrustLevel::UserConfirmed;
     request.status = MemoryStatus::Active;
+    engine.remember(request).unwrap()
+}
+
+fn remember_text_cell(
+    engine: &mut MemoryEngine,
+    scope: &str,
+    status: MemoryStatus,
+    trust: TrustLevel,
+    content: &str,
+    markers: &[String],
+) -> mge_core::MemoryCell {
+    let mut request = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text(content.to_string()),
+    );
+    request.scope = scope.to_string();
+    request.status = status;
+    request.trust = trust;
+    request.sensitivity = SensitivityLevel::Public;
+    request.markers = markers.to_vec();
     engine.remember(request).unwrap()
 }
 

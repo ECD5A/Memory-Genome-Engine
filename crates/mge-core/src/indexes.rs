@@ -118,6 +118,38 @@ impl CandidatePageIndex for CandidateIndexData {
     }
 }
 
+impl CandidateIndexData {
+    pub fn query_with_mode_stats(
+        &self,
+        markers: &[MarkerId],
+        mode: QueryMode,
+    ) -> Result<CandidatePageQueryResult> {
+        match self {
+            Self::ExactMarkerPage(index) => {
+                let page_ids = index.query_with_mode(markers, mode);
+                Ok(CandidatePageQueryResult {
+                    page_filters_scanned: 0,
+                    candidate_pages_returned: page_ids.len(),
+                    page_ids,
+                })
+            }
+            Self::BinaryFusePage(index) => {
+                let page_filters_scanned = if markers.is_empty() {
+                    0
+                } else {
+                    index.page_filters.len()
+                };
+                let page_ids = index.query_with_mode(markers, mode);
+                Ok(CandidatePageQueryResult {
+                    page_filters_scanned,
+                    candidate_pages_returned: page_ids.len(),
+                    page_ids,
+                })
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryMode {
