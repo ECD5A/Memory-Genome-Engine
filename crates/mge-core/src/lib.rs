@@ -13,6 +13,7 @@ pub mod store;
 
 pub use compression::{CompressionKind, Compressor, NoCompression, ZstdCompression};
 pub use errors::{MgeError, Result};
+pub use hot::{allowed_statuses_for_policy, HotCandidateQuery, HotMemoryLayer, HotStore};
 pub use indexes::{
     BinaryFusePageFilter, BinaryFusePageIndex, CandidateIndexData, CandidatePageIndex,
     CandidatePageQueryResult, ExactMarkerPageIndex, IndexKind, QueryMode,

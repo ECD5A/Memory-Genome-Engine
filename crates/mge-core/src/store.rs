@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::binary::{self, CodecId, FileKind};
 use crate::compression::{compress_with, decompress_with, CompressionKind};
 use crate::errors::{MgeError, Result};
-use crate::hot::HotStore;
+use crate::hot::{allowed_statuses_for_policy, HotCandidateQuery, HotMemoryLayer, HotStore};
 use crate::indexes::{
     BinaryFusePageIndex, CandidateIndexData, CandidatePageIndex, ExactMarkerPageIndex, IndexKind,
     QueryMode,
@@ -53,6 +53,7 @@ pub struct MemoryEngine {
     root: PathBuf,
     manifest: Manifest,
     dictionary: MarkerDictionary,
+    hot: HotMemoryLayer,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -414,11 +415,14 @@ impl MemoryEngine {
         ensure_runtime_page_codec(manifest.page_codec)?;
         let dictionary =
             MarkerDictionary::load_from_path(root.join("dictionary").join(MARKER_DICTIONARY_FILE))?;
+        let hot_cells = HotStore::new(root.join("hot").join(HOT_LOG_FILE)).load_cells()?;
+        let hot = HotMemoryLayer::from_cells(hot_cells);
 
         Ok(Self {
             root,
             manifest,
             dictionary,
+            hot,
         })
     }
 
@@ -533,6 +537,7 @@ impl MemoryEngine {
         );
 
         HotStore::new(self.hot_cells_path()).append_cell(&cell)?;
+        self.hot.insert(cell.clone());
         self.manifest.updated_at = current_timestamp();
         self.save_manifest()?;
         self.dictionary.save_to_path(self.markers_path())?;
@@ -608,13 +613,29 @@ impl MemoryEngine {
         let query_marker_extraction_micros = elapsed_micros(query_marker_started);
 
         let hot_memory_started = Instant::now();
-        let hot_cells = HotStore::new(self.hot_cells_path()).load_cells()?;
+        let hot_query_mode = match request.mode {
+            RecallMode::Focused => QueryMode::PreferIntersection,
+            RecallMode::Broad | RecallMode::FullScope => QueryMode::Union,
+        };
+        let allowed_hot_statuses = allowed_statuses_for_policy(&request.effective_policy());
+        let hot_candidate_ids = self.hot.candidate_ids(HotCandidateQuery {
+            marker_ids: &query_marker_ids,
+            marker_mode: hot_query_mode,
+            scope: request.scope.as_deref(),
+            kind: request.kind,
+            allowed_statuses: &allowed_hot_statuses,
+        });
+        let hot_total_cells = self.hot.len();
+        let hot_candidate_cells = hot_candidate_ids.len();
         let hot_memory_lookup_micros = elapsed_micros(hot_memory_started);
 
         let mut ranked = Vec::new();
         let mut cells_evaluated = 0usize;
         let filtering_started = Instant::now();
-        for cell in &hot_cells {
+        for cell_id in hot_candidate_ids {
+            let Some(cell) = self.hot.cell(cell_id) else {
+                continue;
+            };
             if let Some(score_detail) = match request.mode {
                 RecallMode::FullScope => full_scope_cell_debug_with_filter(cell, &filter_context),
                 RecallMode::Focused | RecallMode::Broad => {
@@ -631,21 +652,26 @@ impl MemoryEngine {
         }
         let mut cell_filtering_micros = elapsed_micros(filtering_started);
 
+        let catalog = if self.manifest.next_page_id == 1 {
+            PageCatalog::default()
+        } else {
+            self.load_page_catalog()?
+        };
+
         let candidate_page_index_started = Instant::now();
-        let index = self.load_candidate_index()?;
-        let candidate_query = if query_marker_ids.is_empty() {
+        let candidate_query = if query_marker_ids.is_empty() || catalog.pages.is_empty() {
             Default::default()
         } else {
             let query_mode = match request.mode {
                 RecallMode::Focused => QueryMode::PreferIntersection,
                 RecallMode::Broad | RecallMode::FullScope => QueryMode::Union,
             };
+            let index = self.load_candidate_index()?;
             index.query_with_mode_stats(&query_marker_ids, query_mode)?
         };
         let candidate_page_index_lookup_micros = elapsed_micros(candidate_page_index_started);
         let candidate_pages = candidate_query.page_ids;
 
-        let catalog = self.load_page_catalog()?;
         let entries_by_id = catalog
             .pages
             .iter()
@@ -703,7 +729,7 @@ impl MemoryEngine {
         }
 
         let cells_ranked = ranked.len();
-        let cells_scanned = hot_cells.len() + sealed_cells_scanned;
+        let cells_scanned = hot_candidate_cells + sealed_cells_scanned;
         let cells_filtered = cells_evaluated.saturating_sub(cells_ranked);
 
         let reranking_started = Instant::now();
@@ -721,7 +747,9 @@ impl MemoryEngine {
             recall_mode: request.mode,
             max_items,
             index_kind: self.manifest.index_kind,
-            hot_cells_scanned: hot_cells.len(),
+            hot_total_cells,
+            hot_candidate_cells,
+            hot_cells_scanned: hot_candidate_cells,
             cells_scanned,
             candidate_pages,
             pages_considered: candidate_query.candidate_pages_returned,
@@ -769,7 +797,7 @@ impl MemoryEngine {
 
     pub fn seal(&mut self) -> Result<SealReport> {
         let hot_store = HotStore::new(self.hot_cells_path());
-        let hot_cells = hot_store.load_cells()?;
+        let hot_cells = self.hot.all_cells();
         if hot_cells.is_empty() {
             return Ok(SealReport {
                 hot_cells_sealed: 0,
@@ -820,6 +848,7 @@ impl MemoryEngine {
         self.save_candidate_index(&index)?;
 
         let archived_hot_log = hot_store.archive_and_clear()?;
+        self.hot.clear();
         self.manifest.last_seal_time = Some(current_timestamp());
         self.manifest.updated_at = current_timestamp();
         self.save_manifest()?;
@@ -832,7 +861,7 @@ impl MemoryEngine {
     }
 
     pub fn stats(&self) -> Result<StoreStats> {
-        let hot_cells = HotStore::new(self.hot_cells_path()).load_cells()?.len();
+        let hot_cells = self.hot.len();
         let catalog = self.load_page_catalog()?;
         let sealed_cells = catalog.pages.iter().map(|entry| entry.cell_count).sum();
 
@@ -862,7 +891,7 @@ impl MemoryEngine {
     }
 
     pub fn export_json(&self) -> Result<serde_json::Value> {
-        let hot_cells = HotStore::new(self.hot_cells_path()).load_cells()?;
+        let hot_cells = self.hot.all_cells();
         let page_catalog = self.load_page_catalog()?;
         let pages = self.load_all_pages()?;
         let index = self.load_candidate_index()?;
@@ -878,7 +907,7 @@ impl MemoryEngine {
     }
 
     pub fn export_markdown(&self) -> Result<String> {
-        let hot_cells = HotStore::new(self.hot_cells_path()).load_cells()?;
+        let hot_cells = self.hot.all_cells();
         let catalog = self.load_page_catalog()?;
         let pages = self.load_all_pages()?;
 

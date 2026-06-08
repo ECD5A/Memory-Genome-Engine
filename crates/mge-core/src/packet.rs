@@ -66,6 +66,10 @@ pub struct ContextDebugInfo {
     pub max_items: usize,
     #[serde(default)]
     pub index_kind: IndexKind,
+    #[serde(default)]
+    pub hot_total_cells: usize,
+    #[serde(default)]
+    pub hot_candidate_cells: usize,
     pub hot_cells_scanned: usize,
     #[serde(default)]
     pub cells_scanned: usize,

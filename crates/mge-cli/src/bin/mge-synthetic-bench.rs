@@ -90,6 +90,9 @@ struct RecallBenchRun {
     reranking_micros: MetricSamples,
     context_packet_build_micros: MetricSamples,
     total_recall_micros: MetricSamples,
+    hot_total_cells: MetricSamples,
+    hot_candidate_cells: MetricSamples,
+    hot_cells_scanned: MetricSamples,
     candidate_pages: MetricSamples,
     pages_considered: MetricSamples,
     pages_loaded: MetricSamples,
@@ -128,8 +131,12 @@ struct ModeRun {
     total_sealed_pages: usize,
     total_cells: usize,
     storage_size_bytes: u64,
+    post_seal_hot_cells: usize,
     remember_latency_micros: MetricSamples,
     seal_latency_micros: MetricSamples,
+    hot_focused_recall: RecallBenchRun,
+    hot_broad_recall: RecallBenchRun,
+    hot_full_scope_recall: RecallBenchRun,
     focused_recall: RecallBenchRun,
     broad_recall: RecallBenchRun,
     full_scope_recall: RecallBenchRun,
@@ -319,12 +326,24 @@ fn run_mode(
         remembered_cells.push(cell);
     }
 
+    let hot_focused_recall = run_recall_bench(&engine, RecallMode::Focused, args, queries)?;
+    let hot_broad_recall = run_recall_bench(&engine, RecallMode::Broad, args, queries)?;
+    let hot_full_scope_recall = run_recall_bench(&engine, RecallMode::FullScope, args, queries)?;
+
     let mut seal_latency_micros = MetricSamples::default();
     let started = Instant::now();
     engine.seal()?;
     seal_latency_micros.record_elapsed(started);
 
     let stats = engine.stats()?;
+    let post_seal_hot_cells = stats.hot_cells;
+    if post_seal_hot_cells != 0 {
+        bail!(
+            "{} left {} hot cells after seal; expected RAM hot layer to be clear",
+            index_kind,
+            post_seal_hot_cells
+        );
+    }
     if stats.sealed_pages != args.pages {
         bail!(
             "{} produced {} sealed pages, expected {}",
@@ -354,8 +373,12 @@ fn run_mode(
         total_sealed_pages: stats.sealed_pages,
         total_cells: stats.sealed_cells,
         storage_size_bytes: stats.store_size_bytes,
+        post_seal_hot_cells,
         remember_latency_micros,
         seal_latency_micros,
+        hot_focused_recall,
+        hot_broad_recall,
+        hot_full_scope_recall,
         focused_recall,
         broad_recall,
         full_scope_recall,
@@ -397,6 +420,9 @@ fn run_recall_bench(
         reranking_micros: MetricSamples::default(),
         context_packet_build_micros: MetricSamples::default(),
         total_recall_micros: MetricSamples::default(),
+        hot_total_cells: MetricSamples::default(),
+        hot_candidate_cells: MetricSamples::default(),
+        hot_cells_scanned: MetricSamples::default(),
         candidate_pages: MetricSamples::default(),
         pages_considered: MetricSamples::default(),
         pages_loaded: MetricSamples::default(),
@@ -450,6 +476,12 @@ fn run_recall_bench(
                 .record_u64(packet.debug.context_packet_build_micros);
             run.total_recall_micros
                 .record_u64(packet.debug.total_recall_micros);
+            run.hot_total_cells
+                .record_usize(packet.debug.hot_total_cells);
+            run.hot_candidate_cells
+                .record_usize(packet.debug.hot_candidate_cells);
+            run.hot_cells_scanned
+                .record_usize(packet.debug.hot_cells_scanned);
             run.pages_considered
                 .record_usize(packet.debug.pages_considered);
             run.pages_loaded.record_usize(packet.debug.loaded_pages);
@@ -622,9 +654,16 @@ fn comparison_to_json(exact: &ModeRun, binary: &ModeRun) -> serde_json::Value {
     json!({
         "remember_avg_micros": pair_json(&exact.remember_latency_micros, &binary.remember_latency_micros),
         "seal_avg_micros": pair_json(&exact.seal_latency_micros, &binary.seal_latency_micros),
+        "hot_focused_recall_avg_micros": pair_json(&exact.hot_focused_recall.latency_micros, &binary.hot_focused_recall.latency_micros),
+        "hot_broad_recall_avg_micros": pair_json(&exact.hot_broad_recall.latency_micros, &binary.hot_broad_recall.latency_micros),
+        "hot_full_scope_recall_avg_micros": pair_json(&exact.hot_full_scope_recall.latency_micros, &binary.hot_full_scope_recall.latency_micros),
         "focused_recall_avg_micros": pair_json(&exact.focused_recall.latency_micros, &binary.focused_recall.latency_micros),
         "broad_recall_avg_micros": pair_json(&exact.broad_recall.latency_micros, &binary.broad_recall.latency_micros),
         "full_scope_recall_avg_micros": pair_json(&exact.full_scope_recall.latency_micros, &binary.full_scope_recall.latency_micros),
+        "hot_vs_sealed_recall_avg_micros": {
+            "exact_marker_page": hot_vs_sealed_json(exact),
+            "binary_fuse_page": hot_vs_sealed_json(binary),
+        },
         "index_lookup_avg_micros": pair_json(&exact.index_lookup.latency_micros, &binary.index_lookup.latency_micros),
         "page_decode_avg_micros": pair_json(&exact.page_decode.latency_micros, &binary.page_decode.latency_micros),
         "context_packet_build_avg_micros": pair_json(&exact.context_packet_build.latency_micros, &binary.context_packet_build.latency_micros),
@@ -642,15 +681,41 @@ fn pair_json(exact: &MetricSamples, binary: &MetricSamples) -> serde_json::Value
     })
 }
 
+fn hot_vs_sealed_json(mode: &ModeRun) -> serde_json::Value {
+    json!({
+        "focused": {
+            "hot": mode.hot_focused_recall.latency_micros.avg(),
+            "sealed": mode.focused_recall.latency_micros.avg(),
+        },
+        "broad": {
+            "hot": mode.hot_broad_recall.latency_micros.avg(),
+            "sealed": mode.broad_recall.latency_micros.avg(),
+        },
+        "full_scope": {
+            "hot": mode.hot_full_scope_recall.latency_micros.avg(),
+            "sealed": mode.full_scope_recall.latency_micros.avg(),
+        },
+    })
+}
+
 fn mode_to_json(mode: &ModeRun) -> serde_json::Value {
     json!({
         "index_kind": mode.index_kind,
         "total_sealed_pages": mode.total_sealed_pages,
         "total_cells": mode.total_cells,
         "storage_size_bytes": mode.storage_size_bytes,
+        "seal_correctness": {
+            "post_seal_hot_cells": mode.post_seal_hot_cells,
+            "hot_cleared_after_seal": mode.post_seal_hot_cells == 0,
+        },
         "build": {
             "remember_latency_micros": mode.remember_latency_micros.to_json(),
             "seal_latency_micros": mode.seal_latency_micros.to_json(),
+        },
+        "hot_recall_modes": {
+            "focused": recall_to_json(&mode.hot_focused_recall),
+            "broad": recall_to_json(&mode.hot_broad_recall),
+            "full_scope": recall_to_json(&mode.hot_full_scope_recall),
         },
         "recall_modes": {
             "focused": recall_to_json(&mode.focused_recall),
@@ -678,6 +743,9 @@ fn recall_to_json(run: &RecallBenchRun) -> serde_json::Value {
             "context_packet_build": run.context_packet_build_micros.to_json(),
             "total_recall": run.total_recall_micros.to_json(),
         },
+        "hot_total_cells": run.hot_total_cells.to_json(),
+        "hot_candidate_cells": run.hot_candidate_cells.to_json(),
+        "hot_cells_scanned": run.hot_cells_scanned.to_json(),
         "candidate_pages": run.candidate_pages.to_json(),
         "pages_considered": run.pages_considered.to_json(),
         "pages_loaded": run.pages_loaded.to_json(),

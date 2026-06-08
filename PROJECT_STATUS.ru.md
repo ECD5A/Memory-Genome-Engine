@@ -113,6 +113,18 @@ JSON policy:
 - Binary runtime files теперь имеют fixed headers с magic bytes, file kind, format version, codec identifier, payload length и SHA-256 payload checksum.
 - Full-file storage writes теперь используют temp-file writes, flush/sync и same-directory rename where practical.
 - Hot memory теперь хранит `hot_log` frame, затем `hot_record` frames.
+- Добавлен `HotMemoryLayer` как L1 RAM layer для mutable hot memory.
+- `HotMemoryLayer` держит exact in-memory indexes:
+  - `cells_by_id: CellId -> MemoryCell`
+  - `marker_to_cells: MarkerId -> Vec<CellId>`
+  - `scope_to_cells: ScopeId -> Vec<CellId>`
+  - `kind_to_cells: KindId -> Vec<CellId>`
+  - `status_to_cells: Status -> Vec<CellId>`
+- `MemoryEngine::open_at` / `init_at` теперь один раз читают `hot/hot.mgl` и восстанавливают L1 RAM layer из durable binary log.
+- `remember` добавляет запись в `hot/hot.mgl` и сразу обновляет `HotMemoryLayer`; recall внутри того же engine instance не перечитывает hot log.
+- Hot recall теперь берёт candidates из `HotMemoryLayer` через marker/scope/kind/status indexes до существующего filtering/scoring path.
+- `seal` теперь использует текущие hot cells из `HotMemoryLayer`, архивирует/очищает `hot/hot.mgl` и очищает RAM indexes после успешного seal.
+- `stats` и exports используют текущий RAM hot view там, где это безопасно; `validate` всё ещё читает durable hot storage для проверки recovery/integrity.
 - Новые sealed pages теперь хранят codec-independent SHA-256 content checksums.
 - Canonical bytes для page checksum и logical page-size estimates теперь используют MessagePack вместо JSON.
 - CLI `init` теперь использует binary runtime storage by default; JSON page codec отклоняется для runtime store initialization/config.
@@ -146,7 +158,7 @@ JSON policy:
 - Tests теперь проверяют `exact_candidates ⊆ binary_fuse_candidates` на тех же sealed pages и проверяют смену index kind без rewrite page files.
 - Добавлен synthetic benchmark tool: `cargo run -p mge-cli --bin mge-synthetic-bench`.
 - Synthetic benchmark сравнивает `exact_marker_page` и opt-in `binary_fuse_page` на одинаковых generated stores и проверяет `exact_candidates ⊆ binary_fuse_candidates`.
-- Synthetic benchmark harness теперь показывает remember, seal, focused recall, broad recall, full-scope recall, index lookup, page decode, ContextPacket build, candidate pages, cells scanned, returned items, storage size и p50/p95/avg metrics where practical.
+- Synthetic benchmark harness теперь показывает remember, seal, hot focused/broad/full-scope recall до seal, sealed focused/broad/full-scope recall после seal, index lookup, page decode, ContextPacket build, candidate pages, hot total/candidate/scanned cells, cells scanned, returned items, storage size, seal hot-clear correctness и p50/p95/avg metrics where practical.
 - Hot log archiving теперь использует уникальные archive names, если несколько seals попадают в одно timestamp window.
 - Добавлены `ValidationReport` и CLI `validate` как read-only consistency checks для manifest, catalog, pages, page checksums, marker references и candidate index coverage.
 - Store validation теперь проверяет cell links на unknown targets и self-links.
@@ -207,7 +219,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 83 tests total (12 CLI unit tests + 4 CLI integration tests + 1 core unit test + 66 core integration tests).
+- `cargo test`: passed, 86 tests total (12 CLI unit tests + 4 CLI integration tests + 1 core unit test + 69 core integration tests).
 - Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.
 - Benchmark harness integration smoke test: passed для exact + Binary Fuse modes и required metrics.
@@ -236,6 +248,16 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - Broad cell filtering улучшился на benchmark: exact 7094 -> 2427 us, binary_fuse 6908 -> 2407 us; broad ranked cells снизились с 90 до 30, returned items остались 20.
   - Page pruning smoke command: passed with pages considered 2, loaded 1, pruned 1, returned 1.
   - Remaining broad bottleneck: page decode теперь самый стабильный крупный расход на этом dataset; index lookup остается маленьким.
+- L1 Hot RAM layer package: passed.
+  - `HotMemoryLayer` индексирует hot cells в RAM по cell id, marker id, canonical scope, kind и status.
+  - Correctness tests прошли для immediate recall после remember, reopen recovery из `hot/hot.mgl`, очистки hot после seal, sealed recall после seal, full-scope hot+sealed recall и default status exclusion before scoring.
+  - Hot-only broad recall smoke before/after на 80 hot cells:
+    - before: total 3970 us, hot lookup 2568 us, hot scanned 80.
+    - after: total 1345 us, hot lookup 189 us, hot scanned 80, sealed index lookup 0 us.
+  - Latest benchmark smoke config: 120 cells, 12 pages, 4 scopes, 4 markers per cell, 4 marker groups, 4 targeted queries, 2 noise queries, 3 repeats, seed 7.
+  - exact_marker_page: hot focused avg 2890 us, hot lookup avg 144 us, hot candidates avg 30, sealed focused avg 11256 us, sealed page decode avg 4103 us, broad avg 11155 us, full-scope avg 1791 us, post-seal hot cells 0.
+  - binary_fuse_page: hot focused avg 2888 us, hot lookup avg 140 us, hot candidates avg 30, sealed focused avg 11461 us, sealed page decode avg 4153 us, broad avg 11227 us, full-scope avg 1927 us, post-seal hot cells 0.
+  - Benchmark subset check: focused exact candidates subset of binary_fuse candidates passed.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.

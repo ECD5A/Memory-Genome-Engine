@@ -299,6 +299,147 @@ fn recall_from_hot_memory() {
 }
 
 #[test]
+fn hot_ram_layer_indexes_candidates_and_recovers_from_log() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "hot-ram",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "alpha hot memory",
+        &["tag:alpha".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "hot-ram",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "beta hot memory",
+        &["tag:beta".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "hot-ram",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "gamma hot memory",
+        &["tag:gamma".to_string()],
+    );
+
+    let mut request = RecallRequest::new("alpha");
+    request.markers = vec!["tag:alpha".to_string()];
+    let packet = engine.recall(request.clone()).unwrap();
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert_eq!(packet.debug.hot_total_cells, 3);
+    assert_eq!(packet.debug.hot_candidate_cells, 1);
+    assert_eq!(packet.debug.hot_cells_scanned, 1);
+
+    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    let reopened_packet = reopened.recall(request.clone()).unwrap();
+    assert_eq!(reopened_packet.relevant_memory.len(), 1);
+    assert_eq!(reopened_packet.debug.hot_total_cells, 3);
+    assert_eq!(reopened_packet.debug.hot_candidate_cells, 1);
+
+    engine.seal().unwrap();
+    assert_eq!(engine.stats().unwrap().hot_cells, 0);
+    let sealed_packet = engine.recall(request).unwrap();
+    assert_eq!(sealed_packet.relevant_memory.len(), 1);
+    assert_eq!(sealed_packet.debug.hot_total_cells, 0);
+    assert_eq!(sealed_packet.debug.hot_candidate_cells, 0);
+    assert_eq!(sealed_packet.debug.hot_cells_scanned, 0);
+    assert_eq!(sealed_packet.debug.loaded_pages, 1);
+    assert_eq!(sealed_packet.debug.cells_ranked, 1);
+}
+
+#[test]
+fn full_scope_recall_uses_hot_ram_and_sealed_pages_together() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "hybrid-scope",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "sealed hybrid memory",
+        &["tag:hybrid".to_string()],
+    );
+    engine.seal().unwrap();
+    remember_text_cell(
+        &mut engine,
+        "hybrid-scope",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "hot hybrid memory",
+        &["tag:hybrid".to_string()],
+    );
+
+    let mut request = RecallRequest::new("");
+    request.mode = RecallMode::FullScope;
+    request.scope = Some("hybrid-scope".to_string());
+    let packet = engine.recall(request).unwrap();
+    let contents = packet
+        .relevant_memory
+        .iter()
+        .map(|item| item.content.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(packet.relevant_memory.len(), 2);
+    assert!(contents.contains(&"sealed hybrid memory"));
+    assert!(contents.contains(&"hot hybrid memory"));
+    assert_eq!(packet.debug.hot_total_cells, 1);
+    assert_eq!(packet.debug.hot_candidate_cells, 1);
+    assert_eq!(packet.debug.loaded_pages, 1);
+}
+
+#[test]
+fn hot_ram_status_index_excludes_deprecated_rejected_and_superseded_before_scoring() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "hot-policy",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "hot active style",
+        &["tag:style".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "hot-policy",
+        MemoryStatus::Deprecated,
+        TrustLevel::UserConfirmed,
+        "hot deprecated style",
+        &["tag:style".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "hot-policy",
+        MemoryStatus::Rejected,
+        TrustLevel::UserConfirmed,
+        "hot rejected style",
+        &["tag:style".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "hot-policy",
+        MemoryStatus::Superseded,
+        TrustLevel::UserConfirmed,
+        "hot superseded style",
+        &["tag:style".to_string()],
+    );
+
+    let packet = engine.recall(RecallRequest::new("style")).unwrap();
+
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert!(packet.relevant_memory[0].content.contains("active style"));
+    assert_eq!(packet.debug.hot_total_cells, 4);
+    assert_eq!(packet.debug.hot_candidate_cells, 1);
+    assert_eq!(packet.debug.hot_cells_scanned, 1);
+    assert_eq!(packet.debug.cells_ranked, 1);
+}
+
+#[test]
 fn recall_from_structured_value_markers() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();

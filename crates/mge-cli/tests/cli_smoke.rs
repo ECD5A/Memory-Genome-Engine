@@ -184,11 +184,28 @@ fn synthetic_benchmark_outputs_valid_core_metrics() {
         assert_eq!(mode["total_sealed_pages"], 6);
         assert_eq!(mode["total_cells"], 24);
         assert!(mode["storage_size_bytes"].as_u64().unwrap() > 0);
+        assert_eq!(mode["seal_correctness"]["post_seal_hot_cells"], 0);
+        assert_eq!(mode["seal_correctness"]["hot_cleared_after_seal"], true);
         assert_eq!(mode["build"]["remember_latency_micros"]["count"], 24);
+        assert_eq!(
+            mode["hot_recall_modes"]["focused"]["latency_micros"]["count"],
+            8
+        );
+        assert_eq!(
+            mode["hot_recall_modes"]["focused"]["hot_total_cells"]["avg"],
+            24
+        );
+        assert!(
+            mode["hot_recall_modes"]["focused"]["hot_candidate_cells"]["avg"]
+                .as_u64()
+                .unwrap()
+                <= 24
+        );
         assert_eq!(
             mode["recall_modes"]["focused"]["latency_micros"]["count"],
             8
         );
+        assert_eq!(mode["recall_modes"]["focused"]["hot_total_cells"]["avg"], 0);
         assert_eq!(
             mode["recall_modes"]["focused"]["timing_breakdown_micros"]["total_recall"]["count"],
             8
