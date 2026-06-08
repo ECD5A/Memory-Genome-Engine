@@ -112,7 +112,11 @@ impl HotMemoryLayer {
     }
 
     fn add_to_indexes(&mut self, cell: &MemoryCell) {
-        for marker in cell.markers.iter().copied().collect::<BTreeSet<_>>() {
+        for marker in cell
+            .marker_ids_for_indexing()
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+        {
             push_unique(self.marker_to_cells.entry(marker).or_default(), cell.id);
         }
         let scope = canonicalize_marker_value(&cell.scope);
@@ -125,7 +129,11 @@ impl HotMemoryLayer {
     }
 
     fn remove_from_indexes(&mut self, cell: &MemoryCell) {
-        for marker in cell.markers.iter().copied().collect::<BTreeSet<_>>() {
+        for marker in cell
+            .marker_ids_for_indexing()
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+        {
             remove_cell_id_from_index(&mut self.marker_to_cells, marker, cell.id);
         }
         remove_cell_id_from_index(

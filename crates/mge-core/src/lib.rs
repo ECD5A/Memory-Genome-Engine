@@ -23,8 +23,8 @@ pub use markers::{
     marker_strings_for_cell_fields, tokenize_keywords, MarkerDebugEntry, MarkerDictionary,
 };
 pub use models::{
-    CellId, MemoryCell, MemoryKind, MemorySource, MemoryStatus, MemoryValue, PageId, RecallMode,
-    SensitivityLevel, TrustLevel,
+    CellId, MarkerGenome, MemoryCell, MemoryKind, MemorySource, MemoryStatus, MemoryValue, PageId,
+    RecallMode, SensitivityLevel, TrustLevel,
 };
 pub use packet::{ContextDebugInfo, ContextMemoryItem, ContextPacket};
 pub use pages::{

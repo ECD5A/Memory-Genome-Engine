@@ -8,12 +8,13 @@ use mge_core::{
     marker_strings_for_cell_fields, score_cell_debug, AgentCapabilities, AgentCapability,
     AuditEvent, AuditLogger, BinaryFusePageIndex, CandidateIndexData, CandidatePageIndex,
     CompressionKind, Compressor, ContextDebugInfo, DurabilityPolicy, ExactMarkerPageIndex,
-    IndexKind, InitOptions, MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemorySource,
-    MemoryStatus, MemoryValue, MessagePackPageCodec, NoopAuditLogger, PageBuildOptions,
-    PageCatalogEntry, PageClustererKind, PageCodec, PageCodecKind, RecallMode, RecallPolicy,
-    RecallRequest, RememberRequest, ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate,
-    TrustLevel, ZstdCompression,
+    IndexKind, InitOptions, MarkerGenome, MarkerOverlapClusterer, MemoryEngine, MemoryKind,
+    MemorySource, MemoryStatus, MemoryValue, MessagePackPageCodec, NoopAuditLogger,
+    PageBuildOptions, PageCatalogEntry, PageClustererKind, PageCodec, PageCodecKind, RecallMode,
+    RecallPolicy, RecallRequest, RememberRequest, ScopeKindClusterer, SensitivityLevel,
+    StorageConfigUpdate, TrustLevel, ZstdCompression,
 };
+use serde::Serialize;
 use tempfile::tempdir;
 
 #[test]
@@ -70,6 +71,113 @@ fn memory_cell_creation() {
     assert_eq!(cell.id, 1);
     assert_eq!(cell.kind, MemoryKind::UserPreference);
     assert_eq!(cell.markers, vec![1, 2, 3]);
+    assert_eq!(cell.marker_ids_for_indexing(), vec![1, 2, 3]);
+    assert_eq!(cell.marker_genome.custom_marker_ids(), vec![1, 2, 3]);
+}
+
+#[test]
+fn marker_genome_builds_from_existing_memory_input() {
+    let explicit = vec![canonicalize_marker("tag:custom").unwrap()];
+    let pairs = vec![
+        ("scope:global".to_string(), 1),
+        ("kind:user_preference".to_string(), 2),
+        ("status:active".to_string(), 3),
+        ("trust:user_confirmed".to_string(), 4),
+        ("sensitivity:private".to_string(), 5),
+        ("subject:answer_style".to_string(), 6),
+        ("value:concise_technical".to_string(), 7),
+        ("tag:custom".to_string(), 8),
+        ("tag:technical".to_string(), 9),
+    ];
+
+    let genome = MarkerGenome::from_canonical_markers(pairs, &explicit);
+
+    assert_eq!(genome.scope_marker(), Some(1));
+    assert_eq!(genome.kind_marker(), Some(2));
+    assert_eq!(genome.status_marker(), Some(3));
+    assert_eq!(genome.trust_marker(), Some(4));
+    assert_eq!(genome.sensitivity_marker(), Some(5));
+    assert_eq!(genome.custom_marker_ids(), vec![8]);
+    assert_eq!(genome.system_marker_ids(), vec![1, 2, 3, 4, 5, 6, 7, 9]);
+    assert_eq!(genome.all_marker_ids(), vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert_eq!(genome.fingerprint().len(), 64);
+}
+
+#[test]
+fn marker_genome_separates_system_and_custom_markers_from_memory_input() {
+    let marker_strings = marker_strings_for_cell_fields(
+        &MemoryKind::UserPreference,
+        Some("answer style"),
+        &MemoryValue::Text("concise technical".to_string()),
+        "global",
+        &MemoryStatus::Active,
+        &TrustLevel::UserConfirmed,
+        &SensitivityLevel::Private,
+        &["tag:custom".to_string()],
+    )
+    .unwrap();
+    let mut dictionary = mge_core::MarkerDictionary::new();
+    let pairs = marker_strings
+        .iter()
+        .map(|marker| Ok((marker.clone(), dictionary.get_or_insert(marker)?)))
+        .collect::<mge_core::Result<Vec<_>>>()
+        .unwrap();
+    let explicit = vec![canonicalize_marker("tag:custom").unwrap()];
+    let genome = MarkerGenome::from_canonical_markers(pairs, &explicit);
+    let custom_id = dictionary.lookup("tag:custom").unwrap();
+
+    assert!(genome.scope_marker().is_some());
+    assert!(genome.kind_marker().is_some());
+    assert!(genome.status_marker().is_some());
+    assert!(genome.trust_marker().is_some());
+    assert!(genome.sensitivity_marker().is_some());
+    assert_eq!(genome.custom_marker_ids(), vec![custom_id]);
+    assert!(genome.all_marker_ids().contains(&custom_id));
+}
+
+#[test]
+fn old_vec_marker_cell_records_decode_without_marker_genome() {
+    #[derive(Serialize)]
+    struct OldMemoryCell {
+        id: u64,
+        kind: MemoryKind,
+        subject: Option<String>,
+        value: MemoryValue,
+        scope: String,
+        status: MemoryStatus,
+        trust: TrustLevel,
+        sensitivity: SensitivityLevel,
+        created_at: i64,
+        updated_at: i64,
+        markers: Vec<u32>,
+        source: Option<MemorySource>,
+        links: Vec<u64>,
+    }
+
+    let old = OldMemoryCell {
+        id: 77,
+        kind: MemoryKind::ProjectFact,
+        subject: Some("old style".to_string()),
+        value: MemoryValue::Text("old vec marker cell".to_string()),
+        scope: "compat".to_string(),
+        status: MemoryStatus::Active,
+        trust: TrustLevel::ToolObserved,
+        sensitivity: SensitivityLevel::Public,
+        created_at: 100,
+        updated_at: 100,
+        markers: vec![30, 10, 30],
+        source: None,
+        links: Vec::new(),
+    };
+
+    let bytes = rmp_serde::to_vec_named(&old).unwrap();
+    let decoded: mge_core::MemoryCell = rmp_serde::from_slice(&bytes).unwrap();
+
+    assert!(decoded.marker_genome.is_empty());
+    assert_eq!(decoded.markers, vec![30, 10, 30]);
+    assert_eq!(decoded.marker_ids_for_indexing(), vec![10, 30]);
+    assert!(decoded.contains_marker(10));
+    assert!(decoded.contains_marker(30));
 }
 
 #[test]

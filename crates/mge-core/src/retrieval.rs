@@ -109,16 +109,16 @@ impl RecallFilterContext {
         }
 
         if let Some(scope_marker_id) = self.scope_marker_id {
-            if !cell.markers.contains(&scope_marker_id) {
+            if !cell.contains_marker(scope_marker_id) {
                 return false;
             }
         }
 
         if !self.required_cell_marker_ids.is_empty()
-            && !cell
-                .markers
+            && !self
+                .required_cell_marker_ids
                 .iter()
-                .any(|marker| self.required_cell_marker_ids.contains(marker))
+                .any(|marker| cell.contains_marker(*marker))
         {
             return false;
         }
@@ -194,7 +194,7 @@ pub fn score_cell_debug_with_context(
     }
 
     let marker_overlap = cell
-        .markers
+        .marker_ids_for_indexing()
         .iter()
         .filter(|marker| context.query_marker_set.contains(marker))
         .count() as i64;
@@ -303,7 +303,7 @@ pub fn build_context_packet(
         .map(|ranked| {
             let markers = ranked
                 .cell
-                .markers
+                .marker_ids_for_indexing()
                 .iter()
                 .filter_map(|marker| dictionary.marker(*marker).map(str::to_string))
                 .collect();

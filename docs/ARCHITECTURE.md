@@ -22,7 +22,7 @@ Agent / CLI / SDK
 
 ## Data Model
 
-The atomic unit is `MemoryCell`. A cell stores a typed value, metadata, trust/status/sensitivity, marker IDs, optional source metadata, and links to other cells.
+The atomic unit is `MemoryCell`. A cell stores a typed value, metadata, trust/status/sensitivity, a structured `MarkerGenome`, flattened marker IDs for runtime/index compatibility, optional source metadata, and links to other cells.
 
 Values are not assumed to be raw text. v0.1 supports:
 
@@ -38,7 +38,18 @@ Structured JSON marker extraction is deterministic and shallow: object keys and 
 
 ## Marker Genome
 
-Each cell receives deterministic marker strings, canonicalized into marker IDs by `MarkerDictionary`.
+`MarkerGenome` is the structured marker DNA of a `MemoryCell`. It separates the system dimensions that define a memory item from user/domain custom markers:
+
+- scope;
+- kind;
+- status;
+- trust;
+- sensitivity;
+- subject;
+- value/domain markers where available;
+- custom markers.
+
+Each cell receives deterministic marker strings. `MarkerDictionary` canonicalizes those strings and maps them to stable `MarkerId` values.
 
 Examples:
 
@@ -51,7 +62,9 @@ sensitivity:private
 tag:technical
 ```
 
-The dictionary persists stable integer IDs in `.memory-genome/dictionary/markers.mgd`.
+`MarkerGenome` exposes all marker IDs, system marker IDs, custom marker IDs, key system markers, page-summary marker IDs, and a deterministic fingerprint. `MemoryCell.markers` remains as the flattened runtime/index view for backward compatibility with existing hot records and sealed pages; conceptually it is derived from the genome, not the primary model.
+
+The dictionary persists stable integer IDs in `.memory-genome/dictionary/markers.mgd`. Indexes do not store marker strings; they use `MarkerId` values from the dictionary.
 
 ## Storage Layers
 

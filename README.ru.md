@@ -33,6 +33,7 @@ Cells -> Marker Genome -> Hot Memory -> Sealed Pages -> Candidate Page Index -> 
 - `mge-core`: переиспользуемая библиотека движка памяти.
 - `mge-cli`: первый CLI-интерфейс, бинарник `mge`.
 - `.memory-genome/`: локальное binary-хранилище с `manifest.mgm`, `dictionary/markers.mgd`, `hot/hot.mgl`, `pages/*.mgp` и `indexes/*.mgi`.
+- `MarkerGenome`: structured marker DNA каждой `MemoryCell`; flattened marker IDs остаются runtime/index view.
 - Runtime storage использует MessagePack-oriented binary files; zstd compression доступен для sealed pages.
 - Candidate page search по умолчанию использует `ExactMarkerPageIndex`; `BinaryFusePageIndex` доступен как opt-in probabilistic page filter на реальном `xorf::BinaryFuse16`.
 

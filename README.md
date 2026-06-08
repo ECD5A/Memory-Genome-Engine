@@ -33,6 +33,7 @@ The v0.1 implementation is Rust-first:
 - `mge-core`: reusable memory engine library.
 - `mge-cli`: first command-line interface, binary name `mge`.
 - `.memory-genome/`: local binary store with `manifest.mgm`, `dictionary/markers.mgd`, `hot/hot.mgl`, `pages/*.mgp`, and `indexes/*.mgi`.
+- `MarkerGenome`: structured marker DNA of a `MemoryCell`; flattened marker IDs remain the runtime/index view.
 - Runtime storage uses MessagePack-oriented binary files; zstd compression is available for sealed pages.
 - Candidate page search uses `ExactMarkerPageIndex` by default; `BinaryFusePageIndex` is available as an opt-in probabilistic page filter backed by `xorf::BinaryFuse16`.
 

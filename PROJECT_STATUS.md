@@ -65,6 +65,7 @@ JSON policy:
 - Rust workspace created.
 - `mge-core` implemented with:
   - typed memory models;
+  - explicit `MarkerGenome` model for structured marker DNA;
   - marker canonicalization and persistent dictionary;
   - deterministic marker extraction;
   - deterministic shallow marker extraction for structured JSON keys and short scalar values;
@@ -88,6 +89,10 @@ JSON policy:
 - CLI `remember` supports provenance and graph hints through `--source-type`, `--source-ref`, and repeated `--link`.
 - Sealing preserves cell `source` metadata and `links` in sealed pages.
 - CLI `stats` supports `--json` while keeping the human output as the default.
+- `MemoryCell` now carries explicit `MarkerGenome` plus a flattened `markers: Vec<MarkerId>` runtime/index view for backward compatibility.
+- `MarkerGenome` separates scope, kind, status, trust, sensitivity, subject, value/domain, and custom marker IDs.
+- `MarkerGenome` exposes all marker IDs, system marker IDs, custom marker IDs, key system markers, page-summary markers, and a deterministic fingerprint.
+- L1 Hot RAM indexes, page grouping, page summaries, recall filtering/scoring, markdown export, and validation now use genome-compatible marker access while preserving old vec-style records.
 - Documentation added:
   - `README.md`
   - `docs/ARCHITECTURE.md`
@@ -232,7 +237,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 96 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 77 core integration tests).
+- `cargo test`: passed, 99 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 80 core integration tests).
 - Recall modes tests: passed for focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering, and no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed for `--mode broad`, `--mode full-scope --scope`, and full-scope missing-scope failure.
 - Benchmark harness integration smoke test: passed for exact + Binary Fuse modes and required metrics.
@@ -271,6 +276,15 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
     - focused exact remained page-limited at 11 loaded pages; full-scope remains scope-limited and correctness-preserving.
   - New tests cover explicit-marker metadata pruning, status-summary pruning, sensitivity-summary pruning, catalog metadata summaries, no false negatives for broad pruning, full-scope correctness, default status exclusion, and no JSON/JSONL runtime storage regression.
   - Remaining broad bottleneck: page decode and cell filtering still dominate when the candidate set genuinely overlaps; index lookup is still small.
+- MarkerGenome package: passed.
+  - Added explicit `MarkerGenome` core type without changing storage layout.
+  - `remember` now builds marker IDs through `MarkerDictionary`, then stores structured `MarkerGenome` plus flattened marker IDs in `MemoryCell`.
+  - Old named MessagePack `MemoryCell` records without `marker_genome` still deserialize and remain indexable through flattened `markers`.
+  - Tests cover genome construction, system/custom separation, old vec-style compatibility, and existing hot/sealed/full-scope recall paths.
+  - Benchmark smoke config: 120 cells, 12 pages, 4 scopes, 4 marker groups, 4 targeted queries, 2 noise queries, 3 repeats, seed 7.
+  - exact_marker_page: hot focused avg 3933 us, hot lookup avg 166 us, sealed focused avg 6672 us, broad avg 6955 us, broad pages loaded avg 3, broad pages pruned by metadata avg 6.
+  - binary_fuse_page: hot focused avg 3741 us, hot lookup avg 139 us, sealed focused avg 6746 us, broad avg 6785 us, broad pages loaded avg 3, broad pages pruned by metadata avg 6.
+  - Benchmark subset check passed.
 - L1 Hot RAM layer package: passed.
   - `HotMemoryLayer` indexes hot cells in RAM by cell id, marker id, canonical scope, kind, and status.
   - Correctness tests passed for immediate recall after remember, reopen recovery from `hot/hot.mgl`, hot clearing after seal, sealed recall after seal, full-scope hot+sealed recall, and default status exclusion before scoring.

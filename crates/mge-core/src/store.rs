@@ -20,8 +20,8 @@ use crate::markers::{
     tokenize_keywords, MarkerDebugEntry, MarkerDictionary,
 };
 use crate::models::{
-    current_timestamp, CellId, MarkerId, MemoryCell, MemoryKind, MemorySource, MemoryStatus,
-    MemoryValue, PageId, RecallMode, SensitivityLevel, TrustLevel,
+    current_timestamp, CellId, MarkerGenome, MarkerId, MemoryCell, MemoryKind, MemorySource,
+    MemoryStatus, MemoryValue, PageId, RecallMode, SensitivityLevel, TrustLevel,
 };
 use crate::packet::{ContextDebugInfo, ContextPacket};
 use crate::pages::{
@@ -607,10 +607,18 @@ impl MemoryEngine {
             &request.markers,
         )?;
 
-        let mut marker_ids = Vec::with_capacity(marker_strings.len());
+        let explicit_marker_strings = request
+            .markers
+            .iter()
+            .map(|marker| canonicalize_marker(marker))
+            .collect::<Result<Vec<_>>>()?;
+        let mut marker_pairs = Vec::with_capacity(marker_strings.len());
         for marker in marker_strings {
-            marker_ids.push(self.dictionary.get_or_insert(&marker)?);
+            let marker_id = self.dictionary.get_or_insert(&marker)?;
+            marker_pairs.push((marker, marker_id));
         }
+        let marker_genome =
+            MarkerGenome::from_canonical_markers(marker_pairs, &explicit_marker_strings);
 
         let cell_id = self.manifest.next_cell_id;
         self.manifest.next_cell_id = self
@@ -619,7 +627,7 @@ impl MemoryEngine {
             .checked_add(1)
             .ok_or_else(|| MgeError::InvalidInput("cell id overflow".to_string()))?;
 
-        let cell = MemoryCell::new(
+        let cell = MemoryCell::new_with_marker_genome(
             cell_id,
             request.kind,
             request.subject,
@@ -628,7 +636,7 @@ impl MemoryEngine {
             request.status,
             request.trust,
             request.sensitivity,
-            marker_ids,
+            marker_genome,
             request.source,
             request.links,
         );
@@ -906,8 +914,8 @@ impl MemoryEngine {
         }
 
         for cell in &hot_cells {
-            for marker in &cell.markers {
-                if self.dictionary.marker(*marker).is_none() {
+            for marker in cell.marker_ids_for_indexing() {
+                if self.dictionary.marker(marker).is_none() {
                     return Err(MgeError::InvalidInput(format!(
                         "cell {} references unknown marker {}",
                         cell.id, marker
@@ -1385,11 +1393,13 @@ impl MemoryEngine {
             marker_summary: page.marker_summary.clone(),
             scope_marker_summary: category_marker_summary(
                 &page.cells,
+                |cell| cell.marker_genome.scope_marker(),
                 |cell| canonicalize_marker(&format!("scope:{}", cell.scope)),
                 &self.dictionary,
             )?,
             kind_marker_summary: category_marker_summary(
                 &page.cells,
+                |cell| cell.marker_genome.kind_marker(),
                 |cell| canonicalize_marker(&format!("kind:{}", cell.kind.as_str())),
                 &self.dictionary,
             )?,
@@ -1472,6 +1482,7 @@ impl MemoryEngine {
         }
         match category_marker_summary(
             &page.cells,
+            |cell| cell.marker_genome.scope_marker(),
             |cell| canonicalize_marker(&format!("scope:{}", cell.scope)),
             &self.dictionary,
         ) {
@@ -1489,6 +1500,7 @@ impl MemoryEngine {
         }
         match category_marker_summary(
             &page.cells,
+            |cell| cell.marker_genome.kind_marker(),
             |cell| canonicalize_marker(&format!("kind:{}", cell.kind.as_str())),
             &self.dictionary,
         ) {
@@ -1551,8 +1563,8 @@ impl MemoryEngine {
     }
 
     fn validate_cell_markers(&self, label: &str, cell: &MemoryCell, report: &mut ValidationReport) {
-        for marker in &cell.markers {
-            if self.dictionary.marker(*marker).is_none() {
+        for marker in cell.marker_ids_for_indexing() {
+            if self.dictionary.marker(marker).is_none() {
                 report.error(format!(
                     "{label} {} references unknown marker {}",
                     cell.id, marker
@@ -1750,7 +1762,7 @@ fn append_cell_markdown(output: &mut String, cell: &MemoryCell, dictionary: &Mar
         output.push_str(&format!("- subject: {}\n", subject));
     }
     let markers = cell
-        .markers
+        .marker_ids_for_indexing()
         .iter()
         .filter_map(|marker| dictionary.marker(*marker))
         .collect::<Vec<_>>();
@@ -1944,17 +1956,21 @@ fn sensitivity_marker_ids(
         .collect()
 }
 
-fn category_marker_summary<F>(
+fn category_marker_summary<F, G>(
     cells: &[MemoryCell],
-    mut marker_for_cell: F,
+    mut genome_marker_for_cell: F,
+    mut marker_for_cell: G,
     dictionary: &MarkerDictionary,
 ) -> Result<Vec<MarkerId>>
 where
-    F: FnMut(&MemoryCell) -> Result<String>,
+    F: FnMut(&MemoryCell) -> Option<MarkerId>,
+    G: FnMut(&MemoryCell) -> Result<String>,
 {
     let mut summary = BTreeSet::new();
     for cell in cells {
-        if let Some(marker_id) = dictionary.lookup(&marker_for_cell(cell)?) {
+        if let Some(marker_id) = genome_marker_for_cell(cell) {
+            summary.insert(marker_id);
+        } else if let Some(marker_id) = dictionary.lookup(&marker_for_cell(cell)?) {
             summary.insert(marker_id);
         }
     }
@@ -1981,9 +1997,5 @@ fn is_known_index_file(file_name: &str) -> bool {
 }
 
 fn marker_summary_for_cells(cells: &[MemoryCell]) -> Vec<MarkerId> {
-    let mut summary = BTreeSet::new();
-    for cell in cells {
-        summary.extend(cell.markers.iter().copied());
-    }
-    summary.into_iter().collect()
+    MarkerGenome::marker_summary(cells)
 }

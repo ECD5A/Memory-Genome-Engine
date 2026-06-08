@@ -1,8 +1,10 @@
+use std::collections::BTreeSet;
 use std::fmt;
 use std::str::FromStr;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::errors::MgeError;
 use crate::markers::canonicalize_marker_value;
@@ -10,6 +12,148 @@ use crate::markers::canonicalize_marker_value;
 pub type CellId = u64;
 pub type MarkerId = u32;
 pub type PageId = u64;
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MarkerGenome {
+    pub scope: Option<MarkerId>,
+    pub kind: Option<MarkerId>,
+    pub status: Option<MarkerId>,
+    pub trust: Option<MarkerId>,
+    pub sensitivity: Option<MarkerId>,
+    #[serde(default)]
+    pub subject: Vec<MarkerId>,
+    #[serde(default)]
+    pub value_domain: Vec<MarkerId>,
+    #[serde(default)]
+    pub custom: Vec<MarkerId>,
+}
+
+impl MarkerGenome {
+    pub fn from_flattened(marker_ids: impl IntoIterator<Item = MarkerId>) -> Self {
+        Self {
+            custom: sorted_unique(marker_ids),
+            ..Self::default()
+        }
+    }
+
+    pub fn from_canonical_markers(
+        markers: impl IntoIterator<Item = (String, MarkerId)>,
+        explicit_markers: &[String],
+    ) -> Self {
+        let explicit = explicit_markers
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        let mut genome = Self::default();
+
+        for (marker, marker_id) in markers {
+            if explicit.contains(marker.as_str()) {
+                push_unique_marker(&mut genome.custom, marker_id);
+                continue;
+            }
+
+            match marker.split_once(':').map(|(category, _)| category) {
+                Some("scope") => genome.scope = Some(marker_id),
+                Some("kind") => genome.kind = Some(marker_id),
+                Some("status") => genome.status = Some(marker_id),
+                Some("trust") => genome.trust = Some(marker_id),
+                Some("sensitivity") => genome.sensitivity = Some(marker_id),
+                Some("subject") => push_unique_marker(&mut genome.subject, marker_id),
+                Some("value") => push_unique_marker(&mut genome.value_domain, marker_id),
+                _ => push_unique_marker(&mut genome.value_domain, marker_id),
+            }
+        }
+
+        genome.normalize();
+        genome
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.scope.is_none()
+            && self.kind.is_none()
+            && self.status.is_none()
+            && self.trust.is_none()
+            && self.sensitivity.is_none()
+            && self.subject.is_empty()
+            && self.value_domain.is_empty()
+            && self.custom.is_empty()
+    }
+
+    pub fn all_marker_ids(&self) -> Vec<MarkerId> {
+        let mut markers = self.system_marker_ids();
+        markers.extend(self.custom.iter().copied());
+        sorted_unique(markers)
+    }
+
+    pub fn system_marker_ids(&self) -> Vec<MarkerId> {
+        let mut markers = Vec::new();
+        markers.extend(self.scope);
+        markers.extend(self.kind);
+        markers.extend(self.status);
+        markers.extend(self.trust);
+        markers.extend(self.sensitivity);
+        markers.extend(self.subject.iter().copied());
+        markers.extend(self.value_domain.iter().copied());
+        sorted_unique(markers)
+    }
+
+    pub fn custom_marker_ids(&self) -> Vec<MarkerId> {
+        sorted_unique(self.custom.iter().copied())
+    }
+
+    pub fn scope_marker(&self) -> Option<MarkerId> {
+        self.scope
+    }
+
+    pub fn kind_marker(&self) -> Option<MarkerId> {
+        self.kind
+    }
+
+    pub fn status_marker(&self) -> Option<MarkerId> {
+        self.status
+    }
+
+    pub fn trust_marker(&self) -> Option<MarkerId> {
+        self.trust
+    }
+
+    pub fn sensitivity_marker(&self) -> Option<MarkerId> {
+        self.sensitivity
+    }
+
+    pub fn contains_marker(&self, marker_id: MarkerId) -> bool {
+        self.scope == Some(marker_id)
+            || self.kind == Some(marker_id)
+            || self.status == Some(marker_id)
+            || self.trust == Some(marker_id)
+            || self.sensitivity == Some(marker_id)
+            || self.subject.contains(&marker_id)
+            || self.value_domain.contains(&marker_id)
+            || self.custom.contains(&marker_id)
+    }
+
+    pub fn marker_summary(cells: &[MemoryCell]) -> Vec<MarkerId> {
+        let mut summary = BTreeSet::new();
+        for cell in cells {
+            summary.extend(cell.marker_ids_for_indexing());
+        }
+        summary.into_iter().collect()
+    }
+
+    pub fn fingerprint(&self) -> String {
+        let mut hasher = Sha256::new();
+        for marker_id in self.all_marker_ids() {
+            hasher.update(marker_id.to_le_bytes());
+        }
+        hex_lower(&hasher.finalize())
+    }
+
+    fn normalize(&mut self) {
+        self.subject = sorted_unique(self.subject.iter().copied());
+        self.value_domain = sorted_unique(self.value_domain.iter().copied());
+        self.custom = sorted_unique(self.custom.iter().copied());
+    }
+}
 
 macro_rules! enum_with_snake_names {
     ($ty:ident { $($variant:ident => $name:literal),+ $(,)? }) => {
@@ -192,6 +336,8 @@ pub struct MemoryCell {
     pub created_at: i64,
     pub updated_at: i64,
     pub markers: Vec<MarkerId>,
+    #[serde(default)]
+    pub marker_genome: MarkerGenome,
     pub source: Option<MemorySource>,
     pub links: Vec<CellId>,
 }
@@ -223,13 +369,87 @@ impl MemoryCell {
             sensitivity,
             created_at: now,
             updated_at: now,
+            marker_genome: MarkerGenome::from_flattened(markers.iter().copied()),
             markers,
             source,
             links,
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_marker_genome(
+        id: CellId,
+        kind: MemoryKind,
+        subject: Option<String>,
+        value: MemoryValue,
+        scope: String,
+        status: MemoryStatus,
+        trust: TrustLevel,
+        sensitivity: SensitivityLevel,
+        marker_genome: MarkerGenome,
+        source: Option<MemorySource>,
+        links: Vec<CellId>,
+    ) -> Self {
+        let now = current_timestamp();
+        let markers = marker_genome.all_marker_ids();
+        Self {
+            id,
+            kind,
+            subject,
+            value,
+            scope,
+            status,
+            trust,
+            sensitivity,
+            created_at: now,
+            updated_at: now,
+            markers,
+            marker_genome,
+            source,
+            links,
+        }
+    }
+
+    pub fn marker_ids_for_indexing(&self) -> Vec<MarkerId> {
+        if self.marker_genome.is_empty() {
+            return sorted_unique(self.markers.iter().copied());
+        }
+
+        let mut markers = self.marker_genome.all_marker_ids();
+        markers.extend(self.markers.iter().copied());
+        sorted_unique(markers)
+    }
+
+    pub fn contains_marker(&self, marker_id: MarkerId) -> bool {
+        self.markers.contains(&marker_id)
+            || (!self.marker_genome.is_empty() && self.marker_genome.contains_marker(marker_id))
+    }
 }
 
 pub fn current_timestamp() -> i64 {
     Utc::now().timestamp()
+}
+
+fn sorted_unique(marker_ids: impl IntoIterator<Item = MarkerId>) -> Vec<MarkerId> {
+    marker_ids
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn push_unique_marker(markers: &mut Vec<MarkerId>, marker_id: MarkerId) {
+    if !markers.contains(&marker_id) {
+        markers.push(marker_id);
+    }
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
 }

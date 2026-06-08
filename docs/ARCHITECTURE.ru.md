@@ -22,7 +22,7 @@ Agent / CLI / SDK
 
 ## Модель Данных
 
-Атомарная единица - `MemoryCell`. Cell хранит типизированное значение, metadata, trust/status/sensitivity, marker IDs, optional source metadata и links на другие cells.
+Атомарная единица - `MemoryCell`. Cell хранит типизированное значение, metadata, trust/status/sensitivity, структурированный `MarkerGenome`, flattened marker IDs для runtime/index compatibility, optional source metadata и links на другие cells.
 
 Значения не считаются просто сырым текстом. v0.1 поддерживает:
 
@@ -38,7 +38,18 @@ Structured JSON marker extraction детерминированный и shallow:
 
 ## Marker Genome
 
-Каждая cell получает детерминированные marker strings, которые canonicalize в marker IDs через `MarkerDictionary`.
+`MarkerGenome` - это structured marker DNA каждой `MemoryCell`. Он отделяет системные измерения memory item от пользовательских/domain custom markers:
+
+- scope;
+- kind;
+- status;
+- trust;
+- sensitivity;
+- subject;
+- value/domain markers where available;
+- custom markers.
+
+Каждая cell получает детерминированные marker strings. `MarkerDictionary` canonicalize эти strings и мапит их в стабильные `MarkerId`.
 
 Примеры:
 
@@ -51,7 +62,9 @@ sensitivity:private
 tag:technical
 ```
 
-Dictionary сохраняет стабильные integer IDs в `.memory-genome/dictionary/markers.mgd`.
+`MarkerGenome` отдаёт all marker IDs, system marker IDs, custom marker IDs, ключевые system markers, page-summary marker IDs и deterministic fingerprint. `MemoryCell.markers` остаётся flattened runtime/index view для backward compatibility со старыми hot records и sealed pages; концептуально это derived view из genome, а не primary model.
+
+Dictionary сохраняет стабильные integer IDs в `.memory-genome/dictionary/markers.mgd`. Indexes не хранят marker strings; они работают по `MarkerId` из dictionary.
 
 ## Storage Layers
 

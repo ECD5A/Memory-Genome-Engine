@@ -275,7 +275,10 @@ impl PageClusterer for MarkerOverlapClusterer {
             let mut clusters: Vec<(BTreeSet<MarkerId>, Vec<MemoryCell>)> = Vec::new();
 
             for cell in group {
-                let marker_set = cell.markers.iter().copied().collect::<BTreeSet<_>>();
+                let marker_set = cell
+                    .marker_ids_for_indexing()
+                    .into_iter()
+                    .collect::<BTreeSet<_>>();
                 let best_cluster = clusters
                     .iter()
                     .enumerate()
@@ -376,11 +379,7 @@ pub fn page_file_name(page_id: PageId) -> String {
 }
 
 fn marker_summary_for_cells(cells: &[MemoryCell]) -> Vec<MarkerId> {
-    let mut summary = BTreeSet::new();
-    for cell in cells {
-        summary.extend(cell.markers.iter().copied());
-    }
-    summary.into_iter().collect()
+    crate::models::MarkerGenome::marker_summary(cells)
 }
 
 fn split_group_by_limits(
