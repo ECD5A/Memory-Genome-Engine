@@ -226,6 +226,8 @@ Detailed recall timing также пишется для performance diagnosis:
 - ContextPacket build;
 - total recall time.
 
+Recall может prune candidate pages до decode только когда catalog `marker_summary` дает детерминированное решение: missing required scope/kind markers, impossible query marker overlap или page summary содержит только policy-disallowed status/sensitivity markers. Это использует существующую page metadata и не меняет storage layout.
+
 ## Extension Traits
 
 В коде есть явные interfaces для будущих изменений:

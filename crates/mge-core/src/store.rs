@@ -277,6 +277,75 @@ struct TimedPageRead {
     decode_micros: u64,
 }
 
+#[derive(Clone, Debug)]
+struct PagePruneContext {
+    query_marker_ids: Vec<MarkerId>,
+    required_page_marker_ids: Vec<MarkerId>,
+    all_status_marker_ids: Vec<MarkerId>,
+    allowed_status_marker_ids: Vec<MarkerId>,
+    all_sensitivity_marker_ids: Vec<MarkerId>,
+    allowed_sensitivity_marker_ids: Vec<MarkerId>,
+}
+
+impl PagePruneContext {
+    fn new(
+        dictionary: &MarkerDictionary,
+        query_marker_ids: &[MarkerId],
+        required_page_marker_ids: &[MarkerId],
+        policy: &crate::security::RecallPolicy,
+    ) -> Self {
+        let all_statuses = [
+            MemoryStatus::Active,
+            MemoryStatus::Temporary,
+            MemoryStatus::Deprecated,
+            MemoryStatus::Rejected,
+            MemoryStatus::Superseded,
+            MemoryStatus::Unverified,
+            MemoryStatus::Verified,
+        ];
+        let mut allowed_statuses = vec![
+            MemoryStatus::Active,
+            MemoryStatus::Temporary,
+            MemoryStatus::Unverified,
+            MemoryStatus::Verified,
+        ];
+        if policy.include_deprecated {
+            allowed_statuses.push(MemoryStatus::Deprecated);
+            allowed_statuses.push(MemoryStatus::Superseded);
+        }
+        if policy.include_rejected {
+            allowed_statuses.push(MemoryStatus::Rejected);
+        }
+
+        let all_sensitivities = [
+            SensitivityLevel::Public,
+            SensitivityLevel::Private,
+            SensitivityLevel::Confidential,
+            SensitivityLevel::SecretReference,
+        ];
+        let mut allowed_sensitivities = vec![
+            SensitivityLevel::Public,
+            SensitivityLevel::Private,
+            SensitivityLevel::Confidential,
+        ];
+        if policy.allow_secret_references {
+            allowed_sensitivities.push(SensitivityLevel::SecretReference);
+        }
+
+        Self {
+            query_marker_ids: query_marker_ids.to_vec(),
+            required_page_marker_ids: required_page_marker_ids.to_vec(),
+            all_status_marker_ids: status_marker_ids(dictionary, &all_statuses),
+            allowed_status_marker_ids: status_marker_ids(dictionary, &allowed_statuses),
+            all_sensitivity_marker_ids: sensitivity_marker_ids(dictionary, &all_sensitivities),
+            allowed_sensitivity_marker_ids: sensitivity_marker_ids(
+                dictionary,
+                &allowed_sensitivities,
+            ),
+        }
+    }
+}
+
 impl MemoryEngine {
     pub fn init_at(store_root: impl AsRef<Path>) -> Result<Self> {
         Self::init_with_options(store_root, InitOptions::default())
@@ -482,11 +551,16 @@ impl MemoryEngine {
         let query_marker_started = Instant::now();
         let mut marker_strings = extract_query_marker_strings(&request.query);
         let mut required_page_marker_strings = Vec::new();
+        let mut explicit_marker_strings = Vec::new();
+        let mut scope_marker_string = None;
         for explicit in &request.markers {
-            marker_strings.push(canonicalize_marker(explicit)?);
+            let marker = canonicalize_marker(explicit)?;
+            explicit_marker_strings.push(marker.clone());
+            marker_strings.push(marker);
         }
         if let Some(scope) = &request.scope {
             let marker = canonicalize_marker(&format!("scope:{scope}"))?;
+            scope_marker_string = Some(marker.clone());
             required_page_marker_strings.push(marker.clone());
             marker_strings.push(marker);
         }
@@ -506,9 +580,31 @@ impl MemoryEngine {
             .iter()
             .filter_map(|marker| self.dictionary.lookup(marker))
             .collect::<Vec<_>>();
+        let explicit_marker_ids = explicit_marker_strings
+            .iter()
+            .filter_map(|marker| self.dictionary.lookup(marker))
+            .collect::<Vec<_>>();
+        let scope_marker_id = scope_marker_string
+            .as_ref()
+            .and_then(|marker| self.dictionary.lookup(marker));
         let query_tokens = tokenize_keywords(&request.query);
-        let scoring_context = ScoringContext::new(&request, &query_marker_ids, &query_tokens);
-        let filter_context = RecallFilterContext::new(&request);
+        let filter_context = RecallFilterContext::new_with_marker_filters(
+            &request,
+            scope_marker_id,
+            explicit_marker_ids,
+        );
+        let scoring_context = ScoringContext::new_with_filter(
+            &request,
+            filter_context.clone(),
+            &query_marker_ids,
+            &query_tokens,
+        );
+        let page_prune_context = PagePruneContext::new(
+            &self.dictionary,
+            &query_marker_ids,
+            &required_page_marker_ids,
+            &request.effective_policy(),
+        );
         let query_marker_extraction_micros = elapsed_micros(query_marker_started);
 
         let hot_memory_started = Instant::now();
@@ -567,7 +663,7 @@ impl MemoryEngine {
             let Some(entry) = entries_by_id.get(page_id) else {
                 continue;
             };
-            if should_prune_candidate_page(entry, &query_marker_ids, &required_page_marker_ids) {
+            if should_prune_candidate_page(entry, &page_prune_context) {
                 pruned_candidate_pages += 1;
                 continue;
             }
@@ -1446,22 +1542,66 @@ fn validate_cell_links(
     }
 }
 
-fn should_prune_candidate_page(
-    entry: &PageCatalogEntry,
-    query_marker_ids: &[MarkerId],
-    required_page_marker_ids: &[MarkerId],
-) -> bool {
-    for required_marker in required_page_marker_ids {
+fn should_prune_candidate_page(entry: &PageCatalogEntry, context: &PagePruneContext) -> bool {
+    for required_marker in &context.required_page_marker_ids {
         if !entry.marker_summary.contains(required_marker) {
             return true;
         }
     }
 
-    !query_marker_ids.is_empty()
+    if summary_has_known_without_allowed(
+        &entry.marker_summary,
+        &context.all_status_marker_ids,
+        &context.allowed_status_marker_ids,
+    ) {
+        return true;
+    }
+
+    if summary_has_known_without_allowed(
+        &entry.marker_summary,
+        &context.all_sensitivity_marker_ids,
+        &context.allowed_sensitivity_marker_ids,
+    ) {
+        return true;
+    }
+
+    !context.query_marker_ids.is_empty()
         && !entry
             .marker_summary
             .iter()
-            .any(|marker| query_marker_ids.contains(marker))
+            .any(|marker| context.query_marker_ids.contains(marker))
+}
+
+fn summary_has_known_without_allowed(
+    marker_summary: &[MarkerId],
+    known_marker_ids: &[MarkerId],
+    allowed_marker_ids: &[MarkerId],
+) -> bool {
+    marker_summary
+        .iter()
+        .any(|marker| known_marker_ids.contains(marker))
+        && !marker_summary
+            .iter()
+            .any(|marker| allowed_marker_ids.contains(marker))
+}
+
+fn status_marker_ids(dictionary: &MarkerDictionary, statuses: &[MemoryStatus]) -> Vec<MarkerId> {
+    statuses
+        .iter()
+        .filter_map(|status| dictionary.lookup(&format!("status:{}", status.as_str())))
+        .collect()
+}
+
+fn sensitivity_marker_ids(
+    dictionary: &MarkerDictionary,
+    sensitivities: &[SensitivityLevel],
+) -> Vec<MarkerId> {
+    sensitivities
+        .iter()
+        .filter_map(|sensitivity| {
+            dictionary.lookup(&format!("sensitivity:{}", sensitivity.as_str()))
+        })
+        .collect()
 }
 
 fn elapsed_micros(started: Instant) -> u64 {

@@ -388,6 +388,41 @@ fn broad_recall_returns_more_relevant_items_than_focused() {
 }
 
 #[test]
+fn broad_page_pruning_does_not_create_false_negatives() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "project-alpha",
+        MemoryStatus::Active,
+        TrustLevel::ToolObserved,
+        "shared alpha memory",
+        &["tag:shared".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "project-beta",
+        MemoryStatus::Active,
+        TrustLevel::ToolObserved,
+        "shared beta memory",
+        &["tag:shared".to_string()],
+    );
+    engine.seal().unwrap();
+
+    let mut request = RecallRequest::new("shared memory");
+    request.mode = RecallMode::Broad;
+    request.scope = Some("project-alpha".to_string());
+    request.markers = vec!["tag:shared".to_string()];
+    let packet = engine.recall(request).unwrap();
+
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert!(packet.relevant_memory[0].content.contains("alpha"));
+    assert_eq!(packet.debug.candidate_pages_returned, 2);
+    assert_eq!(packet.debug.loaded_pages, 1);
+    assert_eq!(packet.debug.pruned_candidate_pages, 1);
+}
+
+#[test]
 fn full_scope_returns_all_active_memory_inside_scope() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
@@ -1039,6 +1074,53 @@ fn deprecated_rejected_and_superseded_memories_are_filtered_by_default() {
 
     assert_eq!(packet.relevant_memory.len(), 1);
     assert!(packet.relevant_memory[0].content.contains("active style"));
+}
+
+#[test]
+fn deprecated_rejected_and_superseded_are_excluded_before_scoring() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "policy-check",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "policy active style",
+        &["tag:style".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "policy-check",
+        MemoryStatus::Deprecated,
+        TrustLevel::UserConfirmed,
+        "policy deprecated style",
+        &["tag:style".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "policy-check",
+        MemoryStatus::Rejected,
+        TrustLevel::UserConfirmed,
+        "policy rejected style",
+        &["tag:style".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "policy-check",
+        MemoryStatus::Superseded,
+        TrustLevel::UserConfirmed,
+        "policy superseded style",
+        &["tag:style".to_string()],
+    );
+    engine.seal().unwrap();
+
+    let packet = engine.recall(RecallRequest::new("policy style")).unwrap();
+
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert!(packet.relevant_memory[0].content.contains("active style"));
+    assert_eq!(packet.debug.cells_ranked, 1);
+    assert_eq!(packet.debug.score_details.len(), 1);
+    assert!(packet.debug.cells_filtered >= 3);
 }
 
 #[test]

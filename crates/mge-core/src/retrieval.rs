@@ -77,14 +77,26 @@ pub struct RankedCell {
 pub struct RecallFilterContext {
     kind: Option<MemoryKind>,
     scope_canonical: Option<String>,
+    scope_marker_id: Option<u32>,
+    required_cell_marker_ids: Vec<u32>,
     policy: RecallPolicy,
 }
 
 impl RecallFilterContext {
     pub fn new(request: &RecallRequest) -> Self {
+        Self::new_with_marker_filters(request, None, Vec::new())
+    }
+
+    pub fn new_with_marker_filters(
+        request: &RecallRequest,
+        scope_marker_id: Option<u32>,
+        required_cell_marker_ids: Vec<u32>,
+    ) -> Self {
         Self {
             kind: request.kind,
             scope_canonical: request.scope.as_deref().map(canonicalize_marker_value),
+            scope_marker_id,
+            required_cell_marker_ids,
             policy: request.effective_policy(),
         }
     }
@@ -94,6 +106,21 @@ impl RecallFilterContext {
             if cell.kind != kind {
                 return false;
             }
+        }
+
+        if let Some(scope_marker_id) = self.scope_marker_id {
+            if !cell.markers.contains(&scope_marker_id) {
+                return false;
+            }
+        }
+
+        if !self.required_cell_marker_ids.is_empty()
+            && !cell
+                .markers
+                .iter()
+                .any(|marker| self.required_cell_marker_ids.contains(marker))
+        {
+            return false;
         }
 
         if let Some(scope) = &self.scope_canonical {
@@ -116,8 +143,22 @@ pub struct ScoringContext {
 
 impl ScoringContext {
     pub fn new(request: &RecallRequest, query_marker_ids: &[u32], query_tokens: &[String]) -> Self {
+        Self::new_with_filter(
+            request,
+            RecallFilterContext::new(request),
+            query_marker_ids,
+            query_tokens,
+        )
+    }
+
+    pub fn new_with_filter(
+        request: &RecallRequest,
+        filter: RecallFilterContext,
+        query_marker_ids: &[u32],
+        query_tokens: &[String],
+    ) -> Self {
         Self {
-            filter: RecallFilterContext::new(request),
+            filter,
             query_marker_set: query_marker_ids.iter().copied().collect(),
             query_token_set: query_tokens.iter().cloned().collect(),
             query_canonical: canonicalize_marker_value(&request.query),

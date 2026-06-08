@@ -207,7 +207,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 81 tests total (12 CLI unit tests + 4 CLI integration tests + 1 core unit test + 64 core integration tests).
+- `cargo test`: passed, 83 tests total (12 CLI unit tests + 4 CLI integration tests + 1 core unit test + 66 core integration tests).
 - Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.
 - Benchmark harness integration smoke test: passed для exact + Binary Fuse modes и required metrics.
@@ -225,6 +225,17 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
     - before binary_fuse focused/broad/full-scope avg: 5327 / 13753 / 1913 us.
     - after binary_fuse focused/broad/full-scope avg: 5132 / 12333 / 2100 us.
   - Current broad bottlenecks: cell filtering и page decode; index lookup не главный расход на этом dataset.
+- Recall hot-path optimization package: passed.
+  - Page-level prefiltering теперь использует catalog `marker_summary` для required scope/kind markers, query marker impossibility, status summary и sensitivity summary до page decode, когда summary дает точный вывод.
+  - Cell filtering теперь отбрасывает explicit-marker misses и scope-marker misses до scoring/token work.
+  - Benchmark before/after на той же smoke config:
+    - before exact focused/broad/full-scope avg: 5091 / 12503 / 1750 us.
+    - after exact focused/broad/full-scope avg: 5835 / 7746 / 1788 us.
+    - before binary_fuse focused/broad/full-scope avg: 5089 / 12617 / 1946 us.
+    - after binary_fuse focused/broad/full-scope avg: 5290 / 7814 / 1970 us.
+  - Broad cell filtering улучшился на benchmark: exact 7094 -> 2427 us, binary_fuse 6908 -> 2407 us; broad ranked cells снизились с 90 до 30, returned items остались 20.
+  - Page pruning smoke command: passed with pages considered 2, loaded 1, pruned 1, returned 1.
+  - Remaining broad bottleneck: page decode теперь самый стабильный крупный расход на этом dataset; index lookup остается маленьким.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
