@@ -26,6 +26,7 @@ pub enum FileKind {
     PageIndex = 6,
     MarkerIndex = 7,
     FuseIndex = 8,
+    HotSnapshot = 9,
 }
 
 impl FileKind {
@@ -39,6 +40,7 @@ impl FileKind {
             6 => Ok(Self::PageIndex),
             7 => Ok(Self::MarkerIndex),
             8 => Ok(Self::FuseIndex),
+            9 => Ok(Self::HotSnapshot),
             _ => Err(storage_error(format!("unknown file kind id {value}"))),
         }
     }
@@ -53,6 +55,7 @@ impl FileKind {
             Self::PageIndex => "page_index",
             Self::MarkerIndex => "marker_index",
             Self::FuseIndex => "fuse_index",
+            Self::HotSnapshot => "hot_snapshot",
         }
     }
 }

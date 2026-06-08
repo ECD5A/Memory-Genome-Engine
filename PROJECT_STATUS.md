@@ -26,6 +26,7 @@ Non-negotiable rules:
 - Do not add fake encryption or fake Binary Fuse.
 - Do not break defaults for experiments; new fast/experimental modes start opt-in.
 - Do not bloat the project: small modules, clear traits, tests, separate commits.
+- Do not add Bloom, Counting Bloom, Cuckoo, XOR, Ribbon, or new filter families without benchmark proof and a stable `CandidatePageIndex` boundary.
 
 JSON policy:
 
@@ -124,9 +125,13 @@ JSON policy:
   - `kind_to_cells: KindId -> Vec<CellId>`
   - `status_to_cells: Status -> Vec<CellId>`
 - `MemoryEngine::open_at` / `init_at` now load `hot/hot.mgl` once and rebuild the L1 RAM layer from the durable binary log.
-- `remember` appends to `hot/hot.mgl` and updates `HotMemoryLayer` immediately; recall does not reread the hot log inside the same engine instance.
+- Hot memory now follows a RAM-first model: `remember` updates `HotMemoryLayer` immediately and queues the cell for hot-log persistence; `recall` does not wait for disk.
+- Pending hot events flush through the queued persistence path at `checkpoint`, `seal`, and normal engine drop boundaries.
+- Durability policy is configurable as `fast`, `balanced` default, or `safe`.
+- `mge checkpoint` writes optional binary `hot/snapshot.mgs` after flushing pending hot events.
+- Recovery can load `hot/snapshot.mgs`, replay `hot/hot.mgl` after the snapshot offset, and truncate a corrupted final hot record without losing earlier valid frames.
 - Hot recall now gets candidates from `HotMemoryLayer` using marker/scope/kind/status indexes before the existing filtering/scoring path.
-- `seal` now uses current hot cells from `HotMemoryLayer`, archives/clears `hot/hot.mgl`, and clears RAM indexes after a successful seal.
+- `seal` now flushes pending hot events, uses current hot cells from `HotMemoryLayer`, archives/clears `hot/hot.mgl`, removes stale `hot/snapshot.mgs`, and clears RAM indexes after a successful seal.
 - `stats` and exports use the current RAM hot view where safe; `validate` still reads durable hot storage to check recovery/integrity.
 - New sealed pages now store codec-independent SHA-256 content checksums.
 - Page checksum canonical bytes and logical page-size estimates now use MessagePack instead of JSON.
@@ -162,6 +167,7 @@ JSON policy:
 - Synthetic benchmark tool added as `cargo run -p mge-cli --bin mge-synthetic-bench`.
 - Synthetic benchmark compares `exact_marker_page` and opt-in `binary_fuse_page` on identical generated stores and checks `exact_candidates ⊆ binary_fuse_candidates`.
 - Synthetic benchmark harness now reports remember, seal, hot focused/broad/full-scope recall before seal, sealed focused/broad/full-scope recall after seal, index lookup, page decode, ContextPacket build, candidate pages, hot total/candidate/scanned cells, cells scanned, returned items, storage size, seal hot-clear correctness, and p50/p95/avg metrics where practical.
+- Index/filter minimalism is documented: L1 Hot RAM uses exact mutable indexes only; L2 uses `ExactMarkerPageIndex` by default and `BinaryFusePageIndex` as the only optional static probabilistic filter backend.
 - Hot log archiving now uses unique archive names when multiple seals happen within the same timestamp window.
 - `ValidationReport` and CLI `validate` added as read-only consistency checks for manifest, catalog, pages, page checksums, marker references, and candidate index coverage.
 - Store validation now checks cell links for unknown targets and self-links.
@@ -192,6 +198,7 @@ JSON policy:
 - Do not start with UI, chatbot, cloud service, vector DB, fake encryption, fake Binary Fuse, or Markdown as the internal storage format.
 - Do not store real credentials or secrets. Sensitive values must be represented with `SecretReference` metadata/placeholders.
 - Do not replace the marker/page API with a vector-only retrieval flow.
+- Do not expand the project into a filter zoo. New filter/index families require benchmark evidence, correctness proof, and no public API sprawl.
 
 ## Verification Commands
 
@@ -214,6 +221,8 @@ cargo run -p mge-cli -- stats
 cargo run -p mge-cli -- stats --json
 cargo run -p mge-cli -- validate
 cargo run -p mge-cli -- export
+cargo run -p mge-cli -- config set durability safe
+cargo run -p mge-cli -- checkpoint
 cargo run -p mge-cli -- init --index-kind binary_fuse_page
 cargo run -p mge-cli -- config set --index-kind binary_fuse_page
 cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --scopes 16 --markers-per-cell 5 --marker-groups 12 --targeted-queries 6 --noise-queries 3 --repeats 5 --seed 1
@@ -222,7 +231,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 86 tests total (12 CLI unit tests + 4 CLI integration tests + 1 core unit test + 69 core integration tests).
+- `cargo test`: passed, 92 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 73 core integration tests).
 - Recall modes tests: passed for focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering, and no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed for `--mode broad`, `--mode full-scope --scope`, and full-scope missing-scope failure.
 - Benchmark harness integration smoke test: passed for exact + Binary Fuse modes and required metrics.
@@ -261,6 +270,13 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - exact_marker_page: hot focused avg 2890 us, hot lookup avg 144 us, hot candidates avg 30, sealed focused avg 11256 us, sealed page decode avg 4103 us, broad avg 11155 us, full-scope avg 1791 us, post-seal hot cells 0.
   - binary_fuse_page: hot focused avg 2888 us, hot lookup avg 140 us, hot candidates avg 30, sealed focused avg 11461 us, sealed page decode avg 4153 us, broad avg 11227 us, full-scope avg 1927 us, post-seal hot cells 0.
   - Benchmark subset check: focused exact candidates subset of binary_fuse candidates passed.
+- RAM-first hot durability package: passed.
+  - `remember` is RAM-first and queues hot persistence without waiting for `hot/hot.mgl`.
+  - `checkpoint` and `seal` flush pending hot events first.
+  - `mge config set durability fast|balanced|safe` and `mge checkpoint` are implemented.
+  - `hot/snapshot.mgs` is optional binary checkpoint storage, not a new memory layer.
+  - Crash recovery keeps valid hot frames and truncates only a corrupted final frame.
+  - Tests passed for immediate RAM recall before log flush, checkpoint/reopen recovery, corrupted final frame recovery, safe/balanced flush paths, seal hot-log/snapshot clearing, checkpoint snapshot + replay, and no JSON runtime storage regression.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.

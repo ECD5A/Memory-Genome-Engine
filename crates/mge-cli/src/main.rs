@@ -4,9 +4,9 @@ use std::str::FromStr;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use mge_core::{
-    CellId, CompressionKind, IndexKind, InitOptions, MemoryEngine, MemoryKind, MemorySource,
-    MemoryStatus, MemoryValue, PageClustererKind, PageCodecKind, RecallMode, RecallRequest,
-    RememberRequest, SensitivityLevel, TrustLevel, DEFAULT_STORE_DIR,
+    CellId, CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine, MemoryKind,
+    MemorySource, MemoryStatus, MemoryValue, PageClustererKind, PageCodecKind, RecallMode,
+    RecallRequest, RememberRequest, SensitivityLevel, TrustLevel, DEFAULT_STORE_DIR,
 };
 
 #[derive(Debug, Parser)]
@@ -36,6 +36,9 @@ enum Commands {
 
         #[arg(long)]
         index_kind: Option<String>,
+
+        #[arg(long)]
+        durability: Option<String>,
     },
     Remember {
         text: Option<String>,
@@ -110,6 +113,10 @@ enum Commands {
         include_secret_references: bool,
     },
     Seal,
+    Checkpoint {
+        #[arg(long)]
+        json: bool,
+    },
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
@@ -136,6 +143,10 @@ enum ConfigCommands {
         json: bool,
     },
     Set {
+        key: Option<String>,
+
+        value: Option<String>,
+
         #[arg(long)]
         page_codec: Option<String>,
 
@@ -147,6 +158,9 @@ enum ConfigCommands {
 
         #[arg(long)]
         index_kind: Option<String>,
+
+        #[arg(long)]
+        durability: Option<String>,
 
         #[arg(long)]
         json: bool,
@@ -163,6 +177,7 @@ fn main() -> Result<()> {
             compression,
             page_clusterer,
             index_kind,
+            durability,
         } => {
             let options = init_options_from_args(
                 &profile,
@@ -170,17 +185,19 @@ fn main() -> Result<()> {
                 compression.as_deref(),
                 page_clusterer.as_deref(),
                 index_kind.as_deref(),
+                durability.as_deref(),
             )?;
             let engine = MemoryEngine::init_with_options(&cli.store, options)
                 .with_context(|| format!("failed to initialize {}", cli.store.display()))?;
             println!(
-                "Initialized Memory Genome store at {} (profile={}, page_codec={}, compression={}, page_clusterer={}, index_kind={})",
+                "Initialized Memory Genome store at {} (profile={}, page_codec={}, compression={}, page_clusterer={}, index_kind={}, durability={})",
                 engine.root().display(),
                 profile,
                 options.page_codec,
                 options.compression,
                 options.page_clusterer,
-                options.index_kind
+                options.index_kind,
+                options.durability
             );
         }
         Commands::Remember {
@@ -265,6 +282,21 @@ fn main() -> Result<()> {
             let report = engine.seal()?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::Checkpoint { json } => {
+            let mut engine = open_engine(&cli.store)?;
+            let report = engine.checkpoint()?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "checkpoint: hot_cells={}, snapshot={}, hot_log_offset={}, durability={}",
+                    report.hot_cells,
+                    report.snapshot_path.display(),
+                    report.hot_log_offset,
+                    report.durability
+                );
+            }
+        }
         Commands::Config { command } => match command {
             ConfigCommands::Show { json } => {
                 let engine = open_engine(&cli.store)?;
@@ -276,25 +308,31 @@ fn main() -> Result<()> {
                     println!("compression: {}", config.compression);
                     println!("index kind: {}", config.index_kind);
                     println!("page clusterer: {}", config.page_clusterer);
+                    println!("durability: {}", config.durability);
                 }
             }
             ConfigCommands::Set {
+                key,
+                value,
                 page_codec,
                 compression,
                 page_clusterer,
                 index_kind,
+                durability,
                 json,
             } => {
                 if page_codec.is_none()
                     && compression.is_none()
                     && page_clusterer.is_none()
                     && index_kind.is_none()
+                    && durability.is_none()
+                    && key.is_none()
                 {
-                    bail!("config set requires --page-codec, --compression, --page-clusterer, or --index-kind");
+                    bail!("config set requires durability <fast|balanced|safe>, --durability, --page-codec, --compression, --page-clusterer, or --index-kind");
                 }
 
                 let mut engine = open_engine(&cli.store)?;
-                let report = engine.update_storage_config(mge_core::StorageConfigUpdate {
+                let mut update = mge_core::StorageConfigUpdate {
                     page_codec: page_codec
                         .as_deref()
                         .map(PageCodecKind::from_str)
@@ -308,13 +346,19 @@ fn main() -> Result<()> {
                         .as_deref()
                         .map(PageClustererKind::from_str)
                         .transpose()?,
-                })?;
+                    durability: durability
+                        .as_deref()
+                        .map(DurabilityPolicy::from_str)
+                        .transpose()?,
+                };
+                apply_positional_config_update(&mut update, key, value)?;
+                let report = engine.update_storage_config(update)?;
 
                 if json {
                     println!("{}", serde_json::to_string_pretty(&report)?);
                 } else {
                     println!(
-                        "storage config: page_codec {} -> {}, compression {} -> {}, index_kind {} -> {}, page_clusterer {} -> {}",
+                        "storage config: page_codec {} -> {}, compression {} -> {}, index_kind {} -> {}, page_clusterer {} -> {}, durability {} -> {}",
                         report.previous.page_codec,
                         report.current.page_codec,
                         report.previous.compression,
@@ -322,7 +366,9 @@ fn main() -> Result<()> {
                         report.previous.index_kind,
                         report.current.index_kind,
                         report.previous.page_clusterer,
-                        report.current.page_clusterer
+                        report.current.page_clusterer,
+                        report.previous.durability,
+                        report.current.durability
                     );
                     println!(
                         "existing sealed pages unchanged: {}",
@@ -389,6 +435,7 @@ fn init_options_from_args(
     compression: Option<&str>,
     page_clusterer: Option<&str>,
     index_kind: Option<&str>,
+    durability: Option<&str>,
 ) -> Result<InitOptions> {
     let mut options = init_options_for_profile(profile)?;
     if let Some(page_codec) = page_codec {
@@ -403,6 +450,9 @@ fn init_options_from_args(
     if let Some(index_kind) = index_kind {
         options.index_kind = IndexKind::from_str(index_kind)?;
     }
+    if let Some(durability) = durability {
+        options.durability = DurabilityPolicy::from_str(durability)?;
+    }
     Ok(options)
 }
 
@@ -413,15 +463,41 @@ fn init_options_for_profile(profile: &str) -> Result<InitOptions> {
             compression: CompressionKind::None,
             index_kind: IndexKind::ExactMarkerPage,
             page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
         }),
         "fast" | "compact" => Ok(InitOptions {
             page_codec: PageCodecKind::MessagePack,
             compression: CompressionKind::Zstd,
             index_kind: IndexKind::ExactMarkerPage,
             page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
         }),
         other => bail!("unknown init profile: {other}; supported: debug, fast"),
     }
+}
+
+fn apply_positional_config_update(
+    update: &mut mge_core::StorageConfigUpdate,
+    key: Option<String>,
+    value: Option<String>,
+) -> Result<()> {
+    let Some(key) = key else {
+        if value.is_some() {
+            bail!("config set positional value requires a key");
+        }
+        return Ok(());
+    };
+    let Some(value) = value else {
+        bail!("config set {key} requires a value");
+    };
+
+    match key.replace('-', "_").as_str() {
+        "durability" => update.durability = Some(DurabilityPolicy::from_str(&value)?),
+        other => bail!(
+            "unsupported positional config key: {other}; supported positional key: durability"
+        ),
+    }
+    Ok(())
 }
 
 fn parse_memory_value(
@@ -504,12 +580,13 @@ mod tests {
 
     #[test]
     fn init_fast_profile_uses_compact_storage_defaults() {
-        let options = init_options_from_args("fast", None, None, None, None).unwrap();
+        let options = init_options_from_args("fast", None, None, None, None, None).unwrap();
 
         assert_eq!(options.page_codec, PageCodecKind::MessagePack);
         assert_eq!(options.compression, CompressionKind::Zstd);
         assert_eq!(options.index_kind, IndexKind::ExactMarkerPage);
         assert_eq!(options.page_clusterer, PageClustererKind::ScopeKind);
+        assert_eq!(options.durability, DurabilityPolicy::Balanced);
     }
 
     #[test]
@@ -520,6 +597,7 @@ mod tests {
             Some("none"),
             Some("marker_overlap"),
             Some("binary_fuse_page"),
+            Some("safe"),
         )
         .unwrap();
 
@@ -527,13 +605,28 @@ mod tests {
         assert_eq!(options.compression, CompressionKind::None);
         assert_eq!(options.index_kind, IndexKind::BinaryFusePage);
         assert_eq!(options.page_clusterer, PageClustererKind::MarkerOverlap);
+        assert_eq!(options.durability, DurabilityPolicy::Safe);
     }
 
     #[test]
     fn init_profile_rejects_unknown_profile() {
-        let err = init_options_from_args("unknown", None, None, None, None).unwrap_err();
+        let err = init_options_from_args("unknown", None, None, None, None, None).unwrap_err();
 
         assert!(err.to_string().contains("unknown init profile"));
+    }
+
+    #[test]
+    fn positional_config_update_accepts_durability() {
+        let mut update = mge_core::StorageConfigUpdate::default();
+
+        apply_positional_config_update(
+            &mut update,
+            Some("durability".to_string()),
+            Some("safe".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(update.durability, Some(DurabilityPolicy::Safe));
     }
 
     #[test]

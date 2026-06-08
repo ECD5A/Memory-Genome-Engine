@@ -313,6 +313,7 @@ fn run_mode(
             compression: CompressionKind::None,
             index_kind,
             page_clusterer: PageClustererKind::ScopeKind,
+            durability: mge_core::DurabilityPolicy::Balanced,
         },
     )?;
 

@@ -130,6 +130,57 @@ fn cli_fast_profile_initializes_compact_storage_defaults() {
     assert_eq!(stats["current_compression"], "zstd");
     assert_eq!(stats["current_index_kind"], "exact_marker_page");
     assert_eq!(stats["current_page_clusterer"], "scope_kind");
+    assert_eq!(stats["current_durability"], "balanced");
+}
+
+#[test]
+fn cli_checkpoint_and_durability_config_restore_hot_memory() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+
+    run_mge(&store, &["init"]);
+    run_mge(&store, &["config", "set", "durability", "safe"]);
+    let stats = run_mge_json(&store, &["stats", "--json"]);
+    assert_eq!(stats["current_durability"], "safe");
+
+    run_mge(
+        &store,
+        &[
+            "remember",
+            "checkpoint durability smoke memory",
+            "--kind",
+            "project_fact",
+            "--scope",
+            "checkpoint-smoke",
+            "--trust",
+            "tool_observed",
+            "--marker",
+            "tag:checkpoint_smoke",
+        ],
+    );
+    let checkpoint = run_mge_json(&store, &["checkpoint", "--json"]);
+    assert_eq!(checkpoint["hot_cells"], 1);
+    assert_eq!(checkpoint["durability"], "safe");
+    assert!(store.join("hot").join("snapshot.mgs").is_file());
+
+    let recalled = run_mge_json(
+        &store,
+        &[
+            "recall",
+            "checkpoint durability",
+            "--marker",
+            "tag:checkpoint_smoke",
+            "--json",
+        ],
+    );
+    assert_eq!(recalled["relevant_memory"].as_array().unwrap().len(), 1);
+    assert_eq!(recalled["debug"]["hot_total_cells"], 1);
+
+    run_mge(&store, &["seal"]);
+    assert!(!store.join("hot").join("snapshot.mgs").exists());
+    let stats = run_mge_json(&store, &["stats", "--json"]);
+    assert_eq!(stats["hot_cells"], 0);
+    assert_eq!(stats["sealed_cells"], 1);
 }
 
 #[test]

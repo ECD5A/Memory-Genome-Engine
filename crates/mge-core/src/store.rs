@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
@@ -48,12 +50,61 @@ pub trait Store {
     fn stats(&self) -> Result<StoreStats>;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct MemoryEngine {
     root: PathBuf,
     manifest: Manifest,
     dictionary: MarkerDictionary,
     hot: HotMemoryLayer,
+    pending_hot_cells: Vec<MemoryCell>,
+    hot_metadata_dirty: bool,
+    hot_unsynced_events: u64,
+    last_hot_sync: Instant,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DurabilityPolicy {
+    Fast,
+    Balanced,
+    Safe,
+}
+
+impl DurabilityPolicy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Fast => "fast",
+            Self::Balanced => "balanced",
+            Self::Safe => "safe",
+        }
+    }
+}
+
+impl Default for DurabilityPolicy {
+    fn default() -> Self {
+        Self::Balanced
+    }
+}
+
+impl fmt::Display for DurabilityPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for DurabilityPolicy {
+    type Err = MgeError;
+
+    fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
+        match input.trim().to_ascii_lowercase().as_str() {
+            "fast" => Ok(Self::Fast),
+            "balanced" | "default" => Ok(Self::Balanced),
+            "safe" => Ok(Self::Safe),
+            other => Err(MgeError::InvalidInput(format!(
+                "unknown durability policy: {other}; supported: fast, balanced, safe"
+            ))),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -72,6 +123,8 @@ pub struct Manifest {
     pub index_kind: IndexKind,
     #[serde(default)]
     pub page_clusterer: PageClustererKind,
+    #[serde(default)]
+    pub durability: DurabilityPolicy,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -80,6 +133,7 @@ pub struct InitOptions {
     pub compression: CompressionKind,
     pub index_kind: IndexKind,
     pub page_clusterer: PageClustererKind,
+    pub durability: DurabilityPolicy,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -88,6 +142,7 @@ pub struct StorageConfig {
     pub compression: CompressionKind,
     pub index_kind: IndexKind,
     pub page_clusterer: PageClustererKind,
+    pub durability: DurabilityPolicy,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -96,6 +151,7 @@ pub struct StorageConfigUpdate {
     pub compression: Option<CompressionKind>,
     pub index_kind: Option<IndexKind>,
     pub page_clusterer: Option<PageClustererKind>,
+    pub durability: Option<DurabilityPolicy>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -145,6 +201,14 @@ pub struct SealReport {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HotCheckpointReport {
+    pub hot_cells: usize,
+    pub snapshot_path: PathBuf,
+    pub hot_log_offset: u64,
+    pub durability: DurabilityPolicy,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StoreStats {
     pub hot_cells: usize,
     pub sealed_pages: usize,
@@ -155,6 +219,7 @@ pub struct StoreStats {
     pub current_compression: CompressionKind,
     pub current_index_kind: IndexKind,
     pub current_page_clusterer: PageClustererKind,
+    pub current_durability: DurabilityPolicy,
     pub index_type: String,
     pub last_seal_time: Option<i64>,
     pub store_size_bytes: u64,
@@ -173,6 +238,7 @@ current page codec: {}
 current compression: {}
 current index kind: {}
 current page clusterer: {}
+current durability: {}
 index type: {}
 last seal time: {}
 store size bytes: {}
@@ -186,6 +252,7 @@ store size bytes: {}
             self.current_compression,
             self.current_index_kind,
             self.current_page_clusterer,
+            self.current_durability,
             self.index_type,
             self.last_seal_time
                 .map(|value| value.to_string())
@@ -376,6 +443,7 @@ impl MemoryEngine {
                 compression: options.compression,
                 index_kind: options.index_kind,
                 page_clusterer: options.page_clusterer,
+                durability: options.durability,
             };
             binary::write_messagepack_file(&manifest_path, FileKind::Manifest, &manifest)?;
         }
@@ -411,18 +479,35 @@ impl MemoryEngine {
             return Err(MgeError::NotInitialized(root.display().to_string()));
         }
 
-        let manifest: Manifest = binary::read_messagepack_file(&manifest_path, FileKind::Manifest)?;
+        let mut manifest: Manifest =
+            binary::read_messagepack_file(&manifest_path, FileKind::Manifest)?;
         ensure_runtime_page_codec(manifest.page_codec)?;
         let dictionary =
             MarkerDictionary::load_from_path(root.join("dictionary").join(MARKER_DICTIONARY_FILE))?;
-        let hot_cells = HotStore::new(root.join("hot").join(HOT_LOG_FILE)).load_cells()?;
-        let hot = HotMemoryLayer::from_cells(hot_cells);
+        let hot_store = HotStore::new(root.join("hot").join(HOT_LOG_FILE));
+        let hot_recovery = hot_store.load_recovering()?;
+        if hot_recovery.recovered_bad_tail {
+            hot_store.truncate_to_valid_offset(hot_recovery.valid_log_offset)?;
+        }
+        if let Some(next_cell_id) = hot_recovery
+            .cells
+            .iter()
+            .map(|cell| cell.id.saturating_add(1))
+            .max()
+        {
+            manifest.next_cell_id = manifest.next_cell_id.max(next_cell_id);
+        }
+        let hot = HotMemoryLayer::from_cells(hot_recovery.cells);
 
         Ok(Self {
             root,
             manifest,
             dictionary,
             hot,
+            pending_hot_cells: Vec::new(),
+            hot_metadata_dirty: false,
+            hot_unsynced_events: 0,
+            last_hot_sync: Instant::now(),
         })
     }
 
@@ -440,6 +525,7 @@ impl MemoryEngine {
             compression: self.manifest.compression,
             index_kind: self.manifest.index_kind,
             page_clusterer: self.manifest.page_clusterer,
+            durability: self.manifest.durability,
         }
     }
 
@@ -454,9 +540,10 @@ impl MemoryEngine {
             && update.compression.is_none()
             && update.index_kind.is_none()
             && update.page_clusterer.is_none()
+            && update.durability.is_none()
         {
             return Err(MgeError::InvalidInput(
-                "storage config update requires page_codec, compression, index_kind, or page_clusterer"
+                "storage config update requires page_codec, compression, index_kind, page_clusterer, or durability"
                     .to_string(),
             ));
         }
@@ -473,6 +560,9 @@ impl MemoryEngine {
         }
         if let Some(page_clusterer) = update.page_clusterer {
             self.manifest.page_clusterer = page_clusterer;
+        }
+        if let Some(durability) = update.durability {
+            self.manifest.durability = durability;
         }
 
         let current = self.storage_config();
@@ -536,11 +626,10 @@ impl MemoryEngine {
             request.links,
         );
 
-        HotStore::new(self.hot_cells_path()).append_cell(&cell)?;
         self.hot.insert(cell.clone());
+        self.pending_hot_cells.push(cell.clone());
+        self.hot_metadata_dirty = true;
         self.manifest.updated_at = current_timestamp();
-        self.save_manifest()?;
-        self.dictionary.save_to_path(self.markers_path())?;
 
         Ok(cell)
     }
@@ -797,6 +886,7 @@ impl MemoryEngine {
 
     pub fn seal(&mut self) -> Result<SealReport> {
         let hot_store = HotStore::new(self.hot_cells_path());
+        self.flush_pending_hot(true)?;
         let hot_cells = self.hot.all_cells();
         if hot_cells.is_empty() {
             return Ok(SealReport {
@@ -860,6 +950,22 @@ impl MemoryEngine {
         })
     }
 
+    pub fn checkpoint(&mut self) -> Result<HotCheckpointReport> {
+        self.flush_pending_hot(true)?;
+        let hot_store = HotStore::new(self.hot_cells_path());
+        let cells = self.hot.all_cells();
+        let snapshot = hot_store.write_snapshot(&cells)?;
+        self.hot_unsynced_events = 0;
+        self.last_hot_sync = Instant::now();
+
+        Ok(HotCheckpointReport {
+            hot_cells: cells.len(),
+            snapshot_path: self.hot_snapshot_path(),
+            hot_log_offset: snapshot.hot_log_offset,
+            durability: self.manifest.durability,
+        })
+    }
+
     pub fn stats(&self) -> Result<StoreStats> {
         let hot_cells = self.hot.len();
         let catalog = self.load_page_catalog()?;
@@ -875,6 +981,7 @@ impl MemoryEngine {
             current_compression: self.manifest.compression,
             current_index_kind: self.manifest.index_kind,
             current_page_clusterer: self.manifest.page_clusterer,
+            current_durability: self.manifest.durability,
             index_type: self.manifest.index_kind.to_string(),
             last_seal_time: self.manifest.last_seal_time,
             store_size_bytes: store_size_bytes(&self.root)?,
@@ -998,13 +1105,10 @@ impl MemoryEngine {
 
         let mut cell_ids = BTreeSet::new();
         let mut cell_links = Vec::new();
-        let hot_cells = match HotStore::new(self.hot_cells_path()).load_cells() {
-            Ok(cells) => cells,
-            Err(err) => {
-                report.error(format!("hot memory load failed: {err}"));
-                Vec::new()
-            }
-        };
+        if let Err(err) = HotStore::new(self.hot_cells_path()).load_cells() {
+            report.error(format!("hot memory load failed: {err}"));
+        }
+        let hot_cells = self.hot.all_cells();
         report.checked_hot_cells = hot_cells.len();
         let mut max_cell_id = 0;
         for cell in &hot_cells {
@@ -1126,6 +1230,45 @@ impl MemoryEngine {
             }
         }
 
+        Ok(())
+    }
+
+    fn flush_pending_hot(&mut self, force_sync: bool) -> Result<()> {
+        if self.pending_hot_cells.is_empty() && !self.hot_metadata_dirty {
+            if force_sync {
+                HotStore::new(self.hot_cells_path()).sync()?;
+            }
+            return Ok(());
+        }
+
+        self.save_manifest()?;
+        self.dictionary.save_to_path(self.markers_path())?;
+
+        let hot_store = HotStore::new(self.hot_cells_path());
+        let pending = std::mem::take(&mut self.pending_hot_cells);
+        for (index, cell) in pending.iter().enumerate() {
+            let sync_each_record = self.manifest.durability == DurabilityPolicy::Safe;
+            if let Err(err) = hot_store.append_cell(cell, sync_each_record) {
+                self.pending_hot_cells = pending[index..].to_vec();
+                return Err(err);
+            }
+        }
+
+        let should_sync = force_sync
+            || matches!(
+                self.manifest.durability,
+                DurabilityPolicy::Balanced | DurabilityPolicy::Safe
+            );
+        if should_sync {
+            hot_store.sync()?;
+            self.hot_unsynced_events = 0;
+            self.last_hot_sync = Instant::now();
+        } else {
+            self.hot_unsynced_events = self
+                .hot_unsynced_events
+                .saturating_add(u64::try_from(pending.len()).unwrap_or(u64::MAX));
+        }
+        self.hot_metadata_dirty = false;
         Ok(())
     }
 
@@ -1426,6 +1569,10 @@ impl MemoryEngine {
         self.root.join("hot").join(HOT_LOG_FILE)
     }
 
+    fn hot_snapshot_path(&self) -> PathBuf {
+        self.root.join("hot").join("snapshot.mgs")
+    }
+
     fn pages_dir(&self) -> PathBuf {
         self.root.join("pages")
     }
@@ -1472,6 +1619,16 @@ impl Store for MemoryEngine {
 impl Retriever for MemoryEngine {
     fn recall(&self, request: RecallRequest) -> Result<ContextPacket> {
         MemoryEngine::recall(self, request)
+    }
+}
+
+impl Drop for MemoryEngine {
+    fn drop(&mut self) {
+        let force_sync = matches!(
+            self.manifest.durability,
+            DurabilityPolicy::Balanced | DurabilityPolicy::Safe
+        );
+        let _ = self.flush_pending_hot(force_sync);
     }
 }
 

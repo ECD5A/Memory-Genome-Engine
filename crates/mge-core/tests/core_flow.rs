@@ -1,16 +1,18 @@
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 
 use mge_core::binary::{self, CodecId, FileKind};
 use mge_core::{
     build_context_packet, build_pages_from_cells, build_pages_with_clusterer, canonicalize_marker,
     marker_strings_for_cell_fields, score_cell_debug, AgentCapabilities, AgentCapability,
     AuditEvent, AuditLogger, BinaryFusePageIndex, CandidateIndexData, CandidatePageIndex,
-    CompressionKind, Compressor, ContextDebugInfo, ExactMarkerPageIndex, IndexKind, InitOptions,
-    MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
-    MessagePackPageCodec, NoopAuditLogger, PageBuildOptions, PageCatalogEntry, PageClustererKind,
-    PageCodec, PageCodecKind, RecallMode, RecallPolicy, RecallRequest, RememberRequest,
-    ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate, TrustLevel, ZstdCompression,
+    CompressionKind, Compressor, ContextDebugInfo, DurabilityPolicy, ExactMarkerPageIndex,
+    IndexKind, InitOptions, MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemorySource,
+    MemoryStatus, MemoryValue, MessagePackPageCodec, NoopAuditLogger, PageBuildOptions,
+    PageCatalogEntry, PageClustererKind, PageCodec, PageCodecKind, RecallMode, RecallPolicy,
+    RecallRequest, RememberRequest, ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate,
+    TrustLevel, ZstdCompression,
 };
 use tempfile::tempdir;
 
@@ -140,6 +142,7 @@ fn init_options_are_saved_in_manifest() {
             compression: CompressionKind::Zstd,
             index_kind: IndexKind::ExactMarkerPage,
             page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
         },
     )
     .unwrap();
@@ -199,6 +202,14 @@ fn recall_modes_do_not_create_json_runtime_storage() {
         "runtime storage recall mode memory",
         &["tag:runtime".to_string()],
     );
+    let checkpoint = engine.checkpoint().unwrap();
+    assert_eq!(
+        checkpoint
+            .snapshot_path
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some("snapshot.mgs")
+    );
     engine.seal().unwrap();
 
     let focused = RecallRequest::new("runtime storage");
@@ -214,6 +225,7 @@ fn recall_modes_do_not_create_json_runtime_storage() {
     assert!(!dir.path().join("manifest.json").exists());
     assert!(!dir.path().join("markers.json").exists());
     assert!(!dir.path().join("hot").join("hot_cells.jsonl").exists());
+    assert!(!dir.path().join("hot").join("snapshot.json").exists());
     assert!(!dir
         .path()
         .join("indexes")
@@ -236,6 +248,7 @@ fn init_rejects_json_runtime_page_codec() {
             compression: CompressionKind::None,
             index_kind: IndexKind::ExactMarkerPage,
             page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
         },
     )
     .unwrap_err();
@@ -254,6 +267,7 @@ fn storage_config_update_changes_future_defaults() {
             compression: Some(CompressionKind::Zstd),
             index_kind: None,
             page_clusterer: Some(PageClustererKind::MarkerOverlap),
+            durability: None,
         })
         .unwrap();
 
@@ -335,6 +349,10 @@ fn hot_ram_layer_indexes_candidates_and_recovers_from_log() {
     assert_eq!(packet.debug.hot_candidate_cells, 1);
     assert_eq!(packet.debug.hot_cells_scanned, 1);
 
+    let checkpoint = engine.checkpoint().unwrap();
+    assert_eq!(checkpoint.hot_cells, 3);
+    assert!(checkpoint.snapshot_path.is_file());
+
     let reopened = MemoryEngine::open_at(dir.path()).unwrap();
     let reopened_packet = reopened.recall(request.clone()).unwrap();
     assert_eq!(reopened_packet.relevant_memory.len(), 1);
@@ -343,6 +361,14 @@ fn hot_ram_layer_indexes_candidates_and_recovers_from_log() {
 
     engine.seal().unwrap();
     assert_eq!(engine.stats().unwrap().hot_cells, 0);
+    assert!(!dir.path().join("hot").join("snapshot.mgs").exists());
+    assert_eq!(
+        mge_core::HotStore::new(dir.path().join("hot").join("hot.mgl"))
+            .load_cells()
+            .unwrap()
+            .len(),
+        0
+    );
     let sealed_packet = engine.recall(request).unwrap();
     assert_eq!(sealed_packet.relevant_memory.len(), 1);
     assert_eq!(sealed_packet.debug.hot_total_cells, 0);
@@ -350,6 +376,154 @@ fn hot_ram_layer_indexes_candidates_and_recovers_from_log() {
     assert_eq!(sealed_packet.debug.hot_cells_scanned, 0);
     assert_eq!(sealed_packet.debug.loaded_pages, 1);
     assert_eq!(sealed_packet.debug.cells_ranked, 1);
+}
+
+#[test]
+fn remember_is_visible_immediately_before_hot_log_flush() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "ram-first",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "ram first hot memory",
+        &["tag:ram_first".to_string()],
+    );
+
+    let mut request = RecallRequest::new("ram first");
+    request.markers = vec!["tag:ram_first".to_string()];
+    let packet = engine.recall(request).unwrap();
+
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert_eq!(packet.debug.hot_total_cells, 1);
+    assert_eq!(
+        mge_core::HotStore::new(dir.path().join("hot").join("hot.mgl"))
+            .load_cells()
+            .unwrap()
+            .len(),
+        0
+    );
+}
+
+#[test]
+fn corrupted_last_hot_frame_does_not_destroy_valid_hot_memory() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "tail-recovery",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "first durable hot memory",
+        &["tag:tail".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "tail-recovery",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "second durable hot memory",
+        &["tag:tail".to_string()],
+    );
+    engine.checkpoint().unwrap();
+
+    let hot_path = dir.path().join("hot").join("hot.mgl");
+    let valid_len = fs::metadata(&hot_path).unwrap().len();
+    let mut file = OpenOptions::new().append(true).open(&hot_path).unwrap();
+    file.write_all(b"truncated-final-frame").unwrap();
+    file.flush().unwrap();
+    assert!(fs::metadata(&hot_path).unwrap().len() > valid_len);
+
+    drop(engine);
+    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    assert_eq!(fs::metadata(&hot_path).unwrap().len(), valid_len);
+
+    let mut request = RecallRequest::new("durable hot memory");
+    request.markers = vec!["tag:tail".to_string()];
+    request.mode = RecallMode::Broad;
+    let packet = reopened.recall(request).unwrap();
+
+    assert_eq!(packet.relevant_memory.len(), 2);
+    assert_eq!(packet.debug.hot_total_cells, 2);
+}
+
+#[test]
+fn safe_and_balanced_durability_flush_paths_restore_hot_memory() {
+    for durability in [DurabilityPolicy::Safe, DurabilityPolicy::Balanced] {
+        let dir = tempdir().unwrap();
+        let mut engine = MemoryEngine::init_with_options(
+            dir.path(),
+            InitOptions {
+                page_codec: PageCodecKind::MessagePack,
+                compression: CompressionKind::None,
+                index_kind: IndexKind::ExactMarkerPage,
+                page_clusterer: PageClustererKind::ScopeKind,
+                durability,
+            },
+        )
+        .unwrap();
+        remember_text_cell(
+            &mut engine,
+            "durability-mode",
+            MemoryStatus::Active,
+            TrustLevel::UserConfirmed,
+            "durability mode hot memory",
+            &["tag:durability".to_string()],
+        );
+        let checkpoint = engine.checkpoint().unwrap();
+        assert_eq!(checkpoint.durability, durability);
+
+        drop(engine);
+        let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+        let mut request = RecallRequest::new("durability mode");
+        request.markers = vec!["tag:durability".to_string()];
+        let packet = reopened.recall(request).unwrap();
+
+        assert_eq!(packet.relevant_memory.len(), 1);
+        assert_eq!(packet.debug.hot_total_cells, 1);
+    }
+}
+
+#[test]
+fn checkpoint_snapshot_replays_hot_log_after_snapshot_offset() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "checkpoint-replay",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "snapshot hot memory",
+        &["tag:checkpoint".to_string()],
+    );
+    let checkpoint = engine.checkpoint().unwrap();
+    assert_eq!(checkpoint.hot_cells, 1);
+
+    remember_text_cell(
+        &mut engine,
+        "checkpoint-replay",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "replayed hot memory",
+        &["tag:checkpoint".to_string()],
+    );
+    drop(engine);
+
+    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    let mut request = RecallRequest::new("");
+    request.mode = RecallMode::FullScope;
+    request.scope = Some("checkpoint-replay".to_string());
+    let packet = reopened.recall(request).unwrap();
+    let contents = packet
+        .relevant_memory
+        .iter()
+        .map(|item| item.content.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(packet.relevant_memory.len(), 2);
+    assert!(contents.contains(&"snapshot hot memory"));
+    assert!(contents.contains(&"replayed hot memory"));
 }
 
 #[test]
@@ -750,6 +924,7 @@ fn recall_from_messagepack_zstd_sealed_pages() {
             compression: CompressionKind::Zstd,
             index_kind: IndexKind::ExactMarkerPage,
             page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
         },
     )
     .unwrap();
@@ -790,6 +965,7 @@ fn storage_config_update_keeps_existing_pages_readable() {
             compression: Some(CompressionKind::Zstd),
             index_kind: None,
             page_clusterer: None,
+            durability: None,
         })
         .unwrap();
     assert_eq!(report.existing_pages_unchanged, 1);
@@ -837,6 +1013,7 @@ fn seal_uses_marker_overlap_clusterer_when_configured() {
             compression: None,
             index_kind: None,
             page_clusterer: Some(PageClustererKind::MarkerOverlap),
+            durability: None,
         })
         .unwrap();
 
@@ -975,6 +1152,7 @@ fn recall_from_binary_fuse_page_index() {
             compression: CompressionKind::None,
             index_kind: IndexKind::BinaryFusePage,
             page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
         },
     )
     .unwrap();
@@ -1023,6 +1201,7 @@ fn changing_index_kind_rebuilds_candidate_index_without_rewriting_pages() {
             compression: None,
             index_kind: Some(IndexKind::BinaryFusePage),
             page_clusterer: None,
+            durability: None,
         })
         .unwrap();
 
@@ -1542,6 +1721,7 @@ fn validate_clean_binary_fuse_store_passes() {
             compression: CompressionKind::None,
             index_kind: IndexKind::BinaryFusePage,
             page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
         },
     )
     .unwrap();
@@ -1794,6 +1974,7 @@ fn synthetic_binary_fuse_candidates_cover_exact_candidates() {
             compression: CompressionKind::None,
             index_kind: IndexKind::ExactMarkerPage,
             page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
         },
     )
     .unwrap();
@@ -1804,6 +1985,7 @@ fn synthetic_binary_fuse_candidates_cover_exact_candidates() {
             compression: CompressionKind::None,
             index_kind: IndexKind::BinaryFusePage,
             page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
         },
     )
     .unwrap();

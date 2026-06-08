@@ -40,7 +40,7 @@ pub use security::{
     RecallPolicy, SecurityProvider,
 };
 pub use store::{
-    InitOptions, InspectReport, MemoryEngine, RememberRequest, SealReport, StorageConfig,
-    StorageConfigUpdate, StorageConfigUpdateReport, Store, StoreStats, ValidationReport,
-    DEFAULT_STORE_DIR,
+    DurabilityPolicy, HotCheckpointReport, InitOptions, InspectReport, MemoryEngine,
+    RememberRequest, SealReport, StorageConfig, StorageConfigUpdate, StorageConfigUpdateReport,
+    Store, StoreStats, ValidationReport, DEFAULT_STORE_DIR,
 };

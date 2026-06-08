@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
 
 use crate::binary::{self, CodecId, FileKind};
 use crate::errors::{MgeError, Result};
@@ -11,6 +14,8 @@ use crate::security::RecallPolicy;
 
 pub type ScopeId = String;
 pub type KindId = MemoryKind;
+const HOT_SNAPSHOT_FILE: &str = "snapshot.mgs";
+const HOT_SNAPSHOT_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Default)]
 pub struct HotMemoryLayer {
@@ -28,6 +33,21 @@ pub struct HotCandidateQuery<'a> {
     pub scope: Option<&'a str>,
     pub kind: Option<MemoryKind>,
     pub allowed_statuses: &'a [MemoryStatus],
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct HotSnapshot {
+    pub version: u32,
+    pub created_at: i64,
+    pub hot_log_offset: u64,
+    pub cells: Vec<MemoryCell>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct HotRecovery {
+    pub cells: Vec<MemoryCell>,
+    pub valid_log_offset: usize,
+    pub recovered_bad_tail: bool,
 }
 
 impl HotMemoryLayer {
@@ -272,50 +292,142 @@ impl HotStore {
         Ok(())
     }
 
-    pub fn append_cell(&self, cell: &MemoryCell) -> Result<()> {
+    pub fn append_cell(&self, cell: &MemoryCell, sync_after_write: bool) -> Result<()> {
         self.ensure_exists()?;
         let record = rmp_serde::to_vec_named(cell)?;
         let record = binary::encode_frame(FileKind::HotRecord, CodecId::MessagePack, &record)?;
-        let mut bytes = fs::read(&self.path)?;
-        binary::decode_frame_at(&bytes, 0, FileKind::HotLog)?;
-        bytes.extend_from_slice(&record);
-        binary::atomic_write_bytes(&self.path, &bytes)?;
+        let header = fs::read(&self.path)?;
+        binary::decode_frame_at(&header, 0, FileKind::HotLog)?;
+
+        let mut file = OpenOptions::new().append(true).open(&self.path)?;
+        file.write_all(&record)?;
+        if sync_after_write {
+            file.flush()?;
+            file.sync_all()?;
+        }
         Ok(())
     }
 
     pub fn load_cells(&self) -> Result<Vec<MemoryCell>> {
+        Ok(self.load_recovering()?.cells)
+    }
+
+    pub fn load_recovering(&self) -> Result<HotRecovery> {
         if !self.path.exists() {
-            return Ok(Vec::new());
+            return Ok(HotRecovery::default());
         }
 
         let content = fs::read(&self.path)?;
-        let mut cells = Vec::new();
         if content.is_empty() {
-            return Ok(cells);
+            return Ok(HotRecovery::default());
         }
-        let (_, mut offset) = binary::decode_frame_at(&content, 0, FileKind::HotLog)?;
-        while offset < content.len() {
-            let (record, next_offset) =
-                binary::decode_frame_at(&content, offset, FileKind::HotRecord)?;
-            if record.codec != CodecId::MessagePack {
-                return Err(MgeError::StorageFormat(format!(
-                    "wrong codec for hot record: expected {}, found {}",
-                    CodecId::MessagePack.as_str(),
-                    record.codec.as_str()
-                )));
-            }
-            cells.push(rmp_serde::from_slice(&record.payload)?);
-            offset = next_offset;
+
+        let (_, log_start_offset) = binary::decode_frame_at(&content, 0, FileKind::HotLog)?;
+        let mut cells = Vec::new();
+        let mut replay_offset = log_start_offset;
+
+        if let Some(snapshot) = self.load_usable_snapshot(content.len(), log_start_offset)? {
+            replay_offset = usize::try_from(snapshot.hot_log_offset).map_err(|_| {
+                MgeError::StorageFormat(
+                    "hot snapshot offset does not fit this platform".to_string(),
+                )
+            })?;
+            cells = snapshot.cells;
         }
-        Ok(cells)
+
+        let replay = decode_hot_records_from(&content, replay_offset)?;
+        cells.extend(replay.cells);
+
+        Ok(HotRecovery {
+            cells,
+            valid_log_offset: replay.valid_log_offset,
+            recovered_bad_tail: replay.recovered_bad_tail,
+        })
+    }
+
+    pub fn truncate_to_valid_offset(&self, offset: usize) -> Result<()> {
+        if !self.path.exists() {
+            return Ok(());
+        }
+        let file = OpenOptions::new().write(true).open(&self.path)?;
+        file.set_len(u64::try_from(offset).map_err(|_| {
+            MgeError::InvalidInput("hot log truncate offset is larger than u64".to_string())
+        })?)?;
+        file.sync_all()?;
+        Ok(())
+    }
+
+    pub fn sync(&self) -> Result<()> {
+        self.ensure_exists()?;
+        let file = OpenOptions::new().read(true).write(true).open(&self.path)?;
+        file.sync_all()?;
+        Ok(())
+    }
+
+    pub fn write_snapshot(&self, cells: &[MemoryCell]) -> Result<HotSnapshot> {
+        self.ensure_exists()?;
+        self.sync()?;
+        let hot_log_offset = fs::metadata(&self.path)?.len();
+        let snapshot = HotSnapshot {
+            version: HOT_SNAPSHOT_VERSION,
+            created_at: current_timestamp(),
+            hot_log_offset,
+            cells: cells.to_vec(),
+        };
+        binary::write_messagepack_file(self.snapshot_path(), FileKind::HotSnapshot, &snapshot)?;
+        Ok(snapshot)
+    }
+
+    pub fn remove_snapshot(&self) -> Result<()> {
+        let path = self.snapshot_path();
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+
+    fn load_usable_snapshot(
+        &self,
+        hot_log_len: usize,
+        log_start_offset: usize,
+    ) -> Result<Option<HotSnapshot>> {
+        let path = self.snapshot_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        let snapshot =
+            match binary::read_messagepack_file::<HotSnapshot>(&path, FileKind::HotSnapshot) {
+                Ok(snapshot) => snapshot,
+                Err(_) => return Ok(None),
+            };
+        if snapshot.version != HOT_SNAPSHOT_VERSION {
+            return Ok(None);
+        }
+        let Ok(offset) = usize::try_from(snapshot.hot_log_offset) else {
+            return Ok(None);
+        };
+        if offset < log_start_offset || offset > hot_log_len {
+            return Ok(None);
+        }
+        Ok(Some(snapshot))
+    }
+
+    fn snapshot_path(&self) -> PathBuf {
+        self.path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(HOT_SNAPSHOT_FILE)
     }
 
     pub fn archive_and_clear(&self) -> Result<Option<PathBuf>> {
         self.ensure_exists()?;
+        self.sync()?;
         let bytes = fs::read(&self.path)?;
         let (_, offset) = binary::decode_frame_at(&bytes, 0, FileKind::HotLog)?;
         if bytes.len() == offset {
             binary::atomic_write_bytes(&self.path, &empty_hot_log_bytes()?)?;
+            self.remove_snapshot()?;
             return Ok(None);
         }
 
@@ -329,8 +441,51 @@ impl HotStore {
         let archive_path = unique_archive_path(&archive_dir, current_timestamp());
         fs::rename(&self.path, &archive_path)?;
         binary::atomic_write_bytes(&self.path, &empty_hot_log_bytes()?)?;
+        self.remove_snapshot()?;
         Ok(Some(archive_path))
     }
+}
+
+fn decode_hot_records_from(content: &[u8], mut offset: usize) -> Result<HotRecovery> {
+    let mut cells = Vec::new();
+    while offset < content.len() {
+        let (record, next_offset) =
+            match binary::decode_frame_at(content, offset, FileKind::HotRecord) {
+                Ok(decoded) => decoded,
+                Err(_) => {
+                    return Ok(HotRecovery {
+                        cells,
+                        valid_log_offset: offset,
+                        recovered_bad_tail: true,
+                    });
+                }
+            };
+        if record.codec != CodecId::MessagePack {
+            return Ok(HotRecovery {
+                cells,
+                valid_log_offset: offset,
+                recovered_bad_tail: true,
+            });
+        }
+        let cell = match rmp_serde::from_slice(&record.payload) {
+            Ok(cell) => cell,
+            Err(_) => {
+                return Ok(HotRecovery {
+                    cells,
+                    valid_log_offset: offset,
+                    recovered_bad_tail: true,
+                });
+            }
+        };
+        cells.push(cell);
+        offset = next_offset;
+    }
+
+    Ok(HotRecovery {
+        cells,
+        valid_log_offset: offset,
+        recovered_bad_tail: false,
+    })
 }
 
 fn empty_hot_log_bytes() -> Result<Vec<u8>> {

@@ -26,6 +26,7 @@ Agent receives ContextPacket, not raw memory store
 - Не делать fake encryption или fake Binary Fuse.
 - Не ломать defaults ради экспериментов; быстрые/новые режимы сначала идут как opt-in.
 - Не раздувать проект: маленькие модули, понятные traits, тесты, отдельные коммиты.
+- Не добавлять Bloom, Counting Bloom, Cuckoo, XOR, Ribbon или новые filter families без benchmark-доказательства и стабильного `CandidatePageIndex` boundary.
 
 JSON policy:
 
@@ -121,9 +122,13 @@ JSON policy:
   - `kind_to_cells: KindId -> Vec<CellId>`
   - `status_to_cells: Status -> Vec<CellId>`
 - `MemoryEngine::open_at` / `init_at` теперь один раз читают `hot/hot.mgl` и восстанавливают L1 RAM layer из durable binary log.
-- `remember` добавляет запись в `hot/hot.mgl` и сразу обновляет `HotMemoryLayer`; recall внутри того же engine instance не перечитывает hot log.
+- Hot memory теперь работает по RAM-first модели: `remember` сразу обновляет `HotMemoryLayer` и ставит cell в queue для hot-log persistence; `recall` не ждёт диск.
+- Pending hot events flush через queued persistence path на `checkpoint`, `seal` и normal engine drop boundaries.
+- Durability policy настраивается как `fast`, `balanced` default или `safe`.
+- `mge checkpoint` пишет optional binary `hot/snapshot.mgs` после flush pending hot events.
+- Recovery может загрузить `hot/snapshot.mgs`, replay `hot/hot.mgl` после snapshot offset и truncate corrupted final hot record без потери более ранних valid frames.
 - Hot recall теперь берёт candidates из `HotMemoryLayer` через marker/scope/kind/status indexes до существующего filtering/scoring path.
-- `seal` теперь использует текущие hot cells из `HotMemoryLayer`, архивирует/очищает `hot/hot.mgl` и очищает RAM indexes после успешного seal.
+- `seal` теперь flush pending hot events, использует текущие hot cells из `HotMemoryLayer`, архивирует/очищает `hot/hot.mgl`, удаляет stale `hot/snapshot.mgs` и очищает RAM indexes после успешного seal.
 - `stats` и exports используют текущий RAM hot view там, где это безопасно; `validate` всё ещё читает durable hot storage для проверки recovery/integrity.
 - Новые sealed pages теперь хранят codec-independent SHA-256 content checksums.
 - Canonical bytes для page checksum и logical page-size estimates теперь используют MessagePack вместо JSON.
@@ -159,6 +164,7 @@ JSON policy:
 - Добавлен synthetic benchmark tool: `cargo run -p mge-cli --bin mge-synthetic-bench`.
 - Synthetic benchmark сравнивает `exact_marker_page` и opt-in `binary_fuse_page` на одинаковых generated stores и проверяет `exact_candidates ⊆ binary_fuse_candidates`.
 - Synthetic benchmark harness теперь показывает remember, seal, hot focused/broad/full-scope recall до seal, sealed focused/broad/full-scope recall после seal, index lookup, page decode, ContextPacket build, candidate pages, hot total/candidate/scanned cells, cells scanned, returned items, storage size, seal hot-clear correctness и p50/p95/avg metrics where practical.
+- Index/filter minimalism задокументирован: L1 Hot RAM использует только exact mutable indexes; L2 использует `ExactMarkerPageIndex` по умолчанию и `BinaryFusePageIndex` как единственный optional static probabilistic filter backend.
 - Hot log archiving теперь использует уникальные archive names, если несколько seals попадают в одно timestamp window.
 - Добавлены `ValidationReport` и CLI `validate` как read-only consistency checks для manifest, catalog, pages, page checksums, marker references и candidate index coverage.
 - Store validation теперь проверяет cell links на unknown targets и self-links.
@@ -189,6 +195,7 @@ JSON policy:
 - Не начинать с UI, chatbot, cloud service, vector DB, fake encryption, fake Binary Fuse или Markdown как внутреннего storage format.
 - Не хранить реальные credentials или secrets. Sensitive values должны быть представлены metadata/placeholders через `SecretReference`.
 - Не заменять marker/page API на vector-only retrieval flow.
+- Не превращать проект в filter zoo. Новые filter/index families требуют benchmark evidence, correctness proof и отсутствия public API sprawl.
 
 ## Команды Проверки
 
@@ -211,6 +218,8 @@ cargo run -p mge-cli -- stats
 cargo run -p mge-cli -- stats --json
 cargo run -p mge-cli -- validate
 cargo run -p mge-cli -- export
+cargo run -p mge-cli -- config set durability safe
+cargo run -p mge-cli -- checkpoint
 cargo run -p mge-cli -- init --index-kind binary_fuse_page
 cargo run -p mge-cli -- config set --index-kind binary_fuse_page
 cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --scopes 16 --markers-per-cell 5 --marker-groups 12 --targeted-queries 6 --noise-queries 3 --repeats 5 --seed 1
@@ -219,7 +228,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 86 tests total (12 CLI unit tests + 4 CLI integration tests + 1 core unit test + 69 core integration tests).
+- `cargo test`: passed, 92 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 73 core integration tests).
 - Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.
 - Benchmark harness integration smoke test: passed для exact + Binary Fuse modes и required metrics.
@@ -258,6 +267,13 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - exact_marker_page: hot focused avg 2890 us, hot lookup avg 144 us, hot candidates avg 30, sealed focused avg 11256 us, sealed page decode avg 4103 us, broad avg 11155 us, full-scope avg 1791 us, post-seal hot cells 0.
   - binary_fuse_page: hot focused avg 2888 us, hot lookup avg 140 us, hot candidates avg 30, sealed focused avg 11461 us, sealed page decode avg 4153 us, broad avg 11227 us, full-scope avg 1927 us, post-seal hot cells 0.
   - Benchmark subset check: focused exact candidates subset of binary_fuse candidates passed.
+- RAM-first hot durability package: passed.
+  - `remember` RAM-first и queue hot persistence без ожидания `hot/hot.mgl`.
+  - `checkpoint` и `seal` сначала flush pending hot events.
+  - `mge config set durability fast|balanced|safe` и `mge checkpoint` реализованы.
+  - `hot/snapshot.mgs` - optional binary checkpoint storage, а не новый слой памяти.
+  - Crash recovery сохраняет valid hot frames и truncates только corrupted final frame.
+  - Tests прошли для immediate RAM recall до log flush, checkpoint/reopen recovery, corrupted final frame recovery, safe/balanced flush paths, seal hot-log/snapshot clearing, checkpoint snapshot + replay и no JSON runtime storage regression.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.

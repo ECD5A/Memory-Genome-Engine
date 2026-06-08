@@ -21,6 +21,8 @@
 - Store config show/set for future page defaults. Done.
 - Binary runtime storage layout. Done: `manifest.mgm`, `dictionary/markers.mgd`, `hot/hot.mgl`, `pages/*.mgp`, and `indexes/*.mgi`.
 - Binary file headers, payload checksums, and atomic writes. Done.
+- L1 Hot RAM layer. Done with exact RAM indexes and queued binary hot-log persistence.
+- Hot durability policies and checkpoint snapshot. Done: `fast`, `balanced` default, `safe`, plus optional `hot/snapshot.mgs`.
 - JSON runtime storage removal. Done for current storage path; JSON remains only explicit debug output/API parsing.
 - Fast storage profile. Done as opt-in `mge init --profile fast`.
 - Markdown human-readable export. Done as `.memory-genome/exports/memory.md`.
@@ -36,7 +38,7 @@
 - Store validation hardening for checksums, links, marker dictionary consistency, orphan page files, and unknown index files. Done.
 - CLI milestone integration test against the real `mge` binary. Done.
 - Better reranking. Foundation done; future tuning should be benchmark-driven.
-- Additional XOR/Ribbon-style index experiments. Deferred until Binary Fuse shows practical benefit on larger stores.
+- Index/filter minimalism. Done as a project rule: no Bloom, Counting Bloom, Cuckoo, XOR, Ribbon, or new filter family unless benchmarks prove a real need without destabilizing `CandidatePageIndex`.
 
 ## v0.3
 

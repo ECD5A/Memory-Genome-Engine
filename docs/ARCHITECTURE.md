@@ -59,6 +59,7 @@ Hot memory is mutable and append-only:
 
 ```text
 .memory-genome/hot/hot.mgl
+.memory-genome/hot/snapshot.mgs   # optional checkpoint snapshot
 ```
 
 Sealed memory is semi-static and page based:
@@ -67,6 +68,7 @@ Sealed memory is semi-static and page based:
 .memory-genome/manifest.mgm
 .memory-genome/dictionary/markers.mgd
 .memory-genome/hot/hot.mgl
+.memory-genome/hot/snapshot.mgs
 .memory-genome/pages/000001.mgp
 .memory-genome/pages/000002.mgp
 .memory-genome/indexes/page_index.mgi
@@ -83,7 +85,8 @@ Current direction:
 
 - manifest: MessagePack binary `.mgm`;
 - marker dictionary: MessagePack binary `.mgd`;
-- hot memory: length-prefixed MessagePack append-only `.mgl`;
+- hot memory: RAM-first L1 layer plus length-prefixed MessagePack append-only `.mgl`;
+- optional hot checkpoint: MessagePack binary `.mgs`;
 - sealed pages: MessagePack binary `.mgp`, with a future custom binary page codec boundary;
 - page catalog and candidate indexes: MessagePack binary `.mgi`;
 - compression: zstd is available now;
@@ -94,6 +97,23 @@ Current direction:
 Binary runtime files carry fixed headers with magic bytes, file kind, format version, codec identifier, payload length, and a SHA-256 payload checksum. This applies to `manifest.mgm`, `dictionary/markers.mgd`, `hot/hot.mgl` frames, `pages/*.mgp`, and `indexes/*.mgi`.
 
 Full-file storage writes use a temporary file, flush/sync, and same-directory rename where practical. Hot memory remains a binary log format: `hot/hot.mgl` has a `hot_log` frame followed by `hot_record` frames.
+
+Hot memory is RAM-first. `remember` updates `HotMemoryLayer` immediately and queues the cell for the persistence path; `recall` reads L1 RAM and does not wait for disk. `seal`, `checkpoint`, and normal engine drop flush pending hot events before crossing a durability boundary.
+
+Durability policy is stored in the manifest and exposed through config:
+
+```bash
+mge config set durability fast
+mge config set durability balanced
+mge config set durability safe
+mge checkpoint
+```
+
+- `fast`: queued hot persistence writes without forcing fsync except explicit checkpoint/seal boundaries.
+- `balanced`: the default; queued writes are fsynced at checkpoint/seal/drop boundaries.
+- `safe`: RAM-first API is preserved, but flushed queued records use per-record sync semantics during the persistence flush path.
+
+Recovery reads `hot/snapshot.mgs` when usable, then replays `hot/hot.mgl` after the snapshot offset. If the final hot record frame is truncated or corrupted, recovery keeps all valid earlier frames, truncates the bad tail, and rebuilds `HotMemoryLayer` from valid cells.
 
 Page files use codecs hidden behind the `PageCodec` trait:
 
@@ -160,6 +180,27 @@ This is a real per-page static filter implementation backed by the `xorf` crate'
 Hot memory uses mutable scanning/indexing. Sealed pages use static candidate indexes.
 
 `IndexKind` records the current index implementation in manifest/catalog/index metadata. Implemented kinds are `exact_marker_page` and `binary_fuse_page`. Switching the kind does not rewrite sealed page files; it rebuilds only the candidate index from existing sealed pages.
+
+## Index And Filter Minimalism
+
+The project deliberately avoids a filter zoo.
+
+L1 Hot RAM uses only exact mutable RAM indexes:
+
+- `CellId -> MemoryCell`
+- `MarkerId -> Vec<CellId>`
+- canonical scope -> cells
+- kind -> cells
+- status -> cells
+
+Bloom, Counting Bloom, Cuckoo, XOR, Ribbon, or other filter families are not used in L1 Hot RAM.
+
+L2 Sealed Pages use:
+
+- `ExactMarkerPageIndex` as the reliable default baseline;
+- `BinaryFusePageIndex` as the only current optional static probabilistic candidate filter backend.
+
+New index/filter backends may be added only when a benchmark shows a real bottleneck, the backend improves a real scenario, correctness is preserved, `CandidatePageIndex` remains stable, and the public API does not become a collection of experimental filters.
 
 ## Retrieval
 
