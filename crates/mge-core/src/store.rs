@@ -914,13 +914,17 @@ impl MemoryEngine {
         }
 
         for cell in &hot_cells {
-            for marker in cell.marker_ids_for_indexing() {
+            let mut invalid_marker = None;
+            cell.for_each_marker_id_for_indexing(|marker| {
                 if self.dictionary.marker(marker).is_none() {
-                    return Err(MgeError::InvalidInput(format!(
-                        "cell {} references unknown marker {}",
-                        cell.id, marker
-                    )));
+                    invalid_marker = Some(marker);
                 }
+            });
+            if let Some(marker) = invalid_marker {
+                return Err(MgeError::InvalidInput(format!(
+                    "cell {} references unknown marker {}",
+                    cell.id, marker
+                )));
             }
         }
 
@@ -1563,14 +1567,14 @@ impl MemoryEngine {
     }
 
     fn validate_cell_markers(&self, label: &str, cell: &MemoryCell, report: &mut ValidationReport) {
-        for marker in cell.marker_ids_for_indexing() {
+        cell.for_each_marker_id_for_indexing(|marker| {
             if self.dictionary.marker(marker).is_none() {
                 report.error(format!(
                     "{label} {} references unknown marker {}",
                     cell.id, marker
                 ));
             }
-        }
+        });
     }
 
     fn validate_candidate_index(
@@ -1761,11 +1765,15 @@ fn append_cell_markdown(output: &mut String, cell: &MemoryCell, dictionary: &Mar
     if let Some(subject) = &cell.subject {
         output.push_str(&format!("- subject: {}\n", subject));
     }
-    let markers = cell
-        .marker_ids_for_indexing()
-        .iter()
-        .filter_map(|marker| dictionary.marker(*marker))
-        .collect::<Vec<_>>();
+    let mut seen_marker_ids = BTreeSet::new();
+    let mut markers = Vec::new();
+    cell.for_each_marker_id_for_indexing(|marker_id| {
+        if seen_marker_ids.insert(marker_id) {
+            if let Some(marker) = dictionary.marker(marker_id) {
+                markers.push(marker);
+            }
+        }
+    });
     if !markers.is_empty() {
         output.push_str(&format!("- markers: `{}`\n", markers.join("`, `")));
     }

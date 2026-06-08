@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fmt;
 use std::str::FromStr;
 
@@ -85,6 +85,11 @@ impl MarkerGenome {
         sorted_unique(markers)
     }
 
+    pub fn iter_all_marker_ids(&self) -> impl Iterator<Item = MarkerId> + '_ {
+        self.iter_system_marker_ids()
+            .chain(self.custom.iter().copied())
+    }
+
     pub fn system_marker_ids(&self) -> Vec<MarkerId> {
         let mut markers = Vec::new();
         markers.extend(self.scope);
@@ -97,11 +102,33 @@ impl MarkerGenome {
         sorted_unique(markers)
     }
 
+    pub fn iter_system_marker_ids(&self) -> impl Iterator<Item = MarkerId> + '_ {
+        [
+            self.scope,
+            self.kind,
+            self.status,
+            self.trust,
+            self.sensitivity,
+        ]
+        .into_iter()
+        .flatten()
+        .chain(self.subject.iter().copied())
+        .chain(self.value_domain.iter().copied())
+    }
+
     pub fn custom_marker_ids(&self) -> Vec<MarkerId> {
         sorted_unique(self.custom.iter().copied())
     }
 
+    pub fn iter_custom_marker_ids(&self) -> impl Iterator<Item = MarkerId> + '_ {
+        self.custom.iter().copied()
+    }
+
     pub fn scope_marker(&self) -> Option<MarkerId> {
+        self.scope
+    }
+
+    pub fn scope_marker_id(&self) -> Option<MarkerId> {
         self.scope
     }
 
@@ -109,7 +136,15 @@ impl MarkerGenome {
         self.kind
     }
 
+    pub fn kind_marker_id(&self) -> Option<MarkerId> {
+        self.kind
+    }
+
     pub fn status_marker(&self) -> Option<MarkerId> {
+        self.status
+    }
+
+    pub fn status_marker_id(&self) -> Option<MarkerId> {
         self.status
     }
 
@@ -117,7 +152,15 @@ impl MarkerGenome {
         self.trust
     }
 
+    pub fn trust_marker_id(&self) -> Option<MarkerId> {
+        self.trust
+    }
+
     pub fn sensitivity_marker(&self) -> Option<MarkerId> {
+        self.sensitivity
+    }
+
+    pub fn sensitivity_marker_id(&self) -> Option<MarkerId> {
         self.sensitivity
     }
 
@@ -135,7 +178,9 @@ impl MarkerGenome {
     pub fn marker_summary(cells: &[MemoryCell]) -> Vec<MarkerId> {
         let mut summary = BTreeSet::new();
         for cell in cells {
-            summary.extend(cell.marker_ids_for_indexing());
+            cell.for_each_marker_id_for_indexing(|marker_id| {
+                summary.insert(marker_id);
+            });
         }
         summary.into_iter().collect()
     }
@@ -411,13 +456,39 @@ impl MemoryCell {
     }
 
     pub fn marker_ids_for_indexing(&self) -> Vec<MarkerId> {
-        if self.marker_genome.is_empty() {
-            return sorted_unique(self.markers.iter().copied());
+        let mut markers = BTreeSet::new();
+        self.for_each_marker_id_for_indexing(|marker_id| {
+            markers.insert(marker_id);
+        });
+        markers.into_iter().collect()
+    }
+
+    pub fn flattened_marker_ids(&self) -> &[MarkerId] {
+        &self.markers
+    }
+
+    pub fn iter_flattened_marker_ids(&self) -> impl Iterator<Item = MarkerId> + '_ {
+        self.markers.iter().copied()
+    }
+
+    pub fn for_each_marker_id_for_indexing(&self, mut visit: impl FnMut(MarkerId)) {
+        if !self.markers.is_empty() {
+            for marker_id in &self.markers {
+                visit(*marker_id);
+            }
+            return;
         }
 
-        let mut markers = self.marker_genome.all_marker_ids();
-        markers.extend(self.markers.iter().copied());
-        sorted_unique(markers)
+        for marker_id in self.marker_genome.iter_all_marker_ids() {
+            visit(marker_id);
+        }
+    }
+
+    pub fn marker_overlap_count(&self, query_marker_set: &HashSet<MarkerId>) -> usize {
+        query_marker_set
+            .iter()
+            .filter(|marker_id| self.contains_marker(**marker_id))
+            .count()
     }
 
     pub fn contains_marker(&self, marker_id: MarkerId) -> bool {

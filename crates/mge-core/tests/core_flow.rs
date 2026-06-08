@@ -8,11 +8,11 @@ use mge_core::{
     marker_strings_for_cell_fields, score_cell_debug, AgentCapabilities, AgentCapability,
     AuditEvent, AuditLogger, BinaryFusePageIndex, CandidateIndexData, CandidatePageIndex,
     CompressionKind, Compressor, ContextDebugInfo, DurabilityPolicy, ExactMarkerPageIndex,
-    IndexKind, InitOptions, MarkerGenome, MarkerOverlapClusterer, MemoryEngine, MemoryKind,
-    MemorySource, MemoryStatus, MemoryValue, MessagePackPageCodec, NoopAuditLogger,
-    PageBuildOptions, PageCatalogEntry, PageClustererKind, PageCodec, PageCodecKind, RecallMode,
-    RecallPolicy, RecallRequest, RememberRequest, ScopeKindClusterer, SensitivityLevel,
-    StorageConfigUpdate, TrustLevel, ZstdCompression,
+    HotCandidateQuery, HotMemoryLayer, IndexKind, InitOptions, MarkerGenome,
+    MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
+    MessagePackPageCodec, NoopAuditLogger, PageBuildOptions, PageCatalogEntry, PageClustererKind,
+    PageCodec, PageCodecKind, QueryMode, RecallMode, RecallPolicy, RecallRequest, RememberRequest,
+    ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate, TrustLevel, ZstdCompression,
 };
 use serde::Serialize;
 use tempfile::tempdir;
@@ -93,13 +93,27 @@ fn marker_genome_builds_from_existing_memory_input() {
     let genome = MarkerGenome::from_canonical_markers(pairs, &explicit);
 
     assert_eq!(genome.scope_marker(), Some(1));
+    assert_eq!(genome.scope_marker_id(), Some(1));
     assert_eq!(genome.kind_marker(), Some(2));
+    assert_eq!(genome.kind_marker_id(), Some(2));
     assert_eq!(genome.status_marker(), Some(3));
+    assert_eq!(genome.status_marker_id(), Some(3));
     assert_eq!(genome.trust_marker(), Some(4));
+    assert_eq!(genome.trust_marker_id(), Some(4));
     assert_eq!(genome.sensitivity_marker(), Some(5));
+    assert_eq!(genome.sensitivity_marker_id(), Some(5));
     assert_eq!(genome.custom_marker_ids(), vec![8]);
+    assert_eq!(genome.iter_custom_marker_ids().collect::<Vec<_>>(), vec![8]);
     assert_eq!(genome.system_marker_ids(), vec![1, 2, 3, 4, 5, 6, 7, 9]);
+    assert_eq!(
+        genome.iter_system_marker_ids().collect::<Vec<_>>(),
+        vec![1, 2, 3, 4, 5, 6, 7, 9]
+    );
     assert_eq!(genome.all_marker_ids(), vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert_eq!(
+        genome.iter_all_marker_ids().collect::<Vec<_>>(),
+        vec![1, 2, 3, 4, 5, 6, 7, 9, 8]
+    );
     assert_eq!(genome.fingerprint().len(), 64);
 }
 
@@ -178,6 +192,34 @@ fn old_vec_marker_cell_records_decode_without_marker_genome() {
     assert_eq!(decoded.marker_ids_for_indexing(), vec![10, 30]);
     assert!(decoded.contains_marker(10));
     assert!(decoded.contains_marker(30));
+}
+
+#[test]
+fn old_vec_marker_cells_remain_indexable_in_hot_ram() {
+    let cell = mge_core::MemoryCell::new(
+        77,
+        MemoryKind::ProjectFact,
+        None,
+        MemoryValue::Text("old vec marker hot memory".to_string()),
+        "compat".to_string(),
+        MemoryStatus::Active,
+        TrustLevel::ToolObserved,
+        SensitivityLevel::Public,
+        vec![30, 10, 30],
+        None,
+        Vec::new(),
+    );
+    let layer = HotMemoryLayer::from_cells(vec![cell]);
+    let allowed_statuses = vec![MemoryStatus::Active];
+    let candidates = layer.candidate_ids(HotCandidateQuery {
+        marker_ids: &[10],
+        marker_mode: QueryMode::Union,
+        scope: None,
+        kind: None,
+        allowed_statuses: &allowed_statuses,
+    });
+
+    assert_eq!(candidates, vec![77]);
 }
 
 #[test]

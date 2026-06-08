@@ -193,11 +193,7 @@ pub fn score_cell_debug_with_context(
         return None;
     }
 
-    let marker_overlap = cell
-        .marker_ids_for_indexing()
-        .iter()
-        .filter(|marker| context.query_marker_set.contains(marker))
-        .count() as i64;
+    let marker_overlap = cell.marker_overlap_count(&context.query_marker_set) as i64;
 
     let value_text = cell.value.to_plain_text();
     let value_tokens = tokenize_keywords(&value_text);
@@ -301,12 +297,15 @@ pub fn build_context_packet(
         .iter()
         .take(max_items)
         .map(|ranked| {
-            let markers = ranked
-                .cell
-                .marker_ids_for_indexing()
-                .iter()
-                .filter_map(|marker| dictionary.marker(*marker).map(str::to_string))
-                .collect();
+            let mut seen_marker_ids = std::collections::BTreeSet::new();
+            let mut markers = Vec::new();
+            ranked.cell.for_each_marker_id_for_indexing(|marker_id| {
+                if seen_marker_ids.insert(marker_id) {
+                    if let Some(marker) = dictionary.marker(marker_id) {
+                        markers.push(marker.to_string());
+                    }
+                }
+            });
 
             ContextMemoryItem {
                 kind: ranked.cell.kind,

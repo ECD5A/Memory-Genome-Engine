@@ -234,7 +234,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 99 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 80 core integration tests).
+- `cargo test`: passed, 100 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 81 core integration tests).
 - Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.
 - Benchmark harness integration smoke test: passed для exact + Binary Fuse modes и required metrics.
@@ -281,6 +281,15 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - Benchmark smoke config: 120 cells, 12 pages, 4 scopes, 4 marker groups, 4 targeted queries, 2 noise queries, 3 repeats, seed 7.
   - exact_marker_page: hot focused avg 3933 us, hot lookup avg 166 us, sealed focused avg 6672 us, broad avg 6955 us, broad pages loaded avg 3, broad pages pruned by metadata avg 6.
   - binary_fuse_page: hot focused avg 3741 us, hot lookup avg 139 us, sealed focused avg 6746 us, broad avg 6785 us, broad pages loaded avg 3, broad pages pruned by metadata avg 6.
+  - Benchmark subset check passed.
+- Marker access allocation reduction package: passed.
+  - Добавлены borrowed/iterator marker accessors: `iter_all_marker_ids`, `iter_system_marker_ids`, `iter_custom_marker_ids`, `*_marker_id`, `flattened_marker_ids`, `iter_flattened_marker_ids`, `for_each_marker_id_for_indexing` и `marker_overlap_count`.
+  - Core hot paths больше не вызывают `marker_ids_for_indexing()`; этот метод остался только как compatibility helper.
+  - Убраны intermediate marker Vec rebuilds из L1 Hot RAM indexing, page grouping, page summaries, sealed recall scoring, ContextPacket marker export, validation и Markdown export.
+  - Benchmark before/after на том же 120 cells / 12 pages / seed 7 smoke config:
+    - exact_marker_page: hot focused 3933 -> 2955 us; hot lookup 166 -> 145 us; sealed focused 6672 -> 5762 us; broad 6955 -> 5895 us.
+    - binary_fuse_page: hot focused 3741 -> 2880 us; hot lookup 139 -> 139 us; sealed focused 6746 -> 5846 us; broad 6785 -> 5800 us.
+    - after exact timing: focused filter 2214 us, broad filter 2263 us, focused context build 378 us, broad context build 379 us, focused decode 1448 us, broad decode 1487 us.
   - Benchmark subset check passed.
 - L1 Hot RAM layer package: passed.
   - `HotMemoryLayer` индексирует hot cells в RAM по cell id, marker id, canonical scope, kind и status.
