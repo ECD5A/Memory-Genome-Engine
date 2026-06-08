@@ -132,6 +132,12 @@ mge export
 mge export --format json # explicit debug export
 ```
 
+Core benchmark/smoke harness:
+
+```bash
+cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --scopes 16 --markers-per-cell 5 --marker-groups 12 --targeted-queries 6 --noise-queries 3 --repeats 5 --seed 1
+```
+
 Use `--marker` on recall for explicit marker search:
 
 ```bash

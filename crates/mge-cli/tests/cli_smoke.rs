@@ -132,6 +132,79 @@ fn cli_fast_profile_initializes_compact_storage_defaults() {
     assert_eq!(stats["current_page_clusterer"], "scope_kind");
 }
 
+#[test]
+fn synthetic_benchmark_outputs_valid_core_metrics() {
+    let dir = tempdir().unwrap();
+    let store_root = dir.path().join("bench");
+    let output = Command::new(env!("CARGO_BIN_EXE_mge-synthetic-bench"))
+        .args([
+            "--cells",
+            "24",
+            "--pages",
+            "6",
+            "--scopes",
+            "3",
+            "--markers-per-cell",
+            "4",
+            "--marker-groups",
+            "4",
+            "--targeted-queries",
+            "3",
+            "--noise-queries",
+            "1",
+            "--repeats",
+            "2",
+            "--seed",
+            "42",
+            "--store-root",
+        ])
+        .arg(&store_root)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "mge-synthetic-bench failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["synthetic_config"]["cells"], 24);
+    assert_eq!(
+        report["subset_check"]["focused_exact_candidates_subset_of_binary_fuse_candidates"],
+        true
+    );
+
+    let modes = report["modes"].as_array().unwrap();
+    assert_eq!(modes.len(), 2);
+    assert_eq!(modes[0]["index_kind"], "exact_marker_page");
+    assert_eq!(modes[1]["index_kind"], "binary_fuse_page");
+    for mode in modes {
+        assert_eq!(mode["total_sealed_pages"], 6);
+        assert_eq!(mode["total_cells"], 24);
+        assert!(mode["storage_size_bytes"].as_u64().unwrap() > 0);
+        assert_eq!(mode["build"]["remember_latency_micros"]["count"], 24);
+        assert_eq!(
+            mode["recall_modes"]["focused"]["latency_micros"]["count"],
+            8
+        );
+        assert_eq!(mode["recall_modes"]["broad"]["latency_micros"]["count"], 8);
+        assert_eq!(
+            mode["recall_modes"]["full_scope"]["latency_micros"]["count"],
+            8
+        );
+        assert!(
+            mode["index_lookup"]["latency_micros"]["count"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert_eq!(mode["page_decode"]["pages_decoded"], 12);
+        assert_eq!(mode["context_packet_build"]["latency_micros"]["count"], 2);
+    }
+}
+
 fn run_mge(store: &Path, args: &[&str]) -> Output {
     let output = Command::new(env!("CARGO_BIN_EXE_mge"))
         .arg("--store")

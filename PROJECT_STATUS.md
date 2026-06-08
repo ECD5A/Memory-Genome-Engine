@@ -147,6 +147,7 @@ JSON policy:
 - Tests now assert `exact_candidates ⊆ binary_fuse_candidates` for the same sealed pages and verify index-kind switching without page rewrites.
 - Synthetic benchmark tool added as `cargo run -p mge-cli --bin mge-synthetic-bench`.
 - Synthetic benchmark compares `exact_marker_page` and opt-in `binary_fuse_page` on identical generated stores and checks `exact_candidates ⊆ binary_fuse_candidates`.
+- Synthetic benchmark harness now reports remember, seal, focused recall, broad recall, full-scope recall, index lookup, page decode, ContextPacket build, candidate pages, cells scanned, returned items, storage size, and p50/p95/avg metrics where practical.
 - Hot log archiving now uses unique archive names when multiple seals happen within the same timestamp window.
 - `ValidationReport` and CLI `validate` added as read-only consistency checks for manifest, catalog, pages, page checksums, marker references, and candidate index coverage.
 - Store validation now checks cell links for unknown targets and self-links.
@@ -201,15 +202,21 @@ cargo run -p mge-cli -- validate
 cargo run -p mge-cli -- export
 cargo run -p mge-cli -- init --index-kind binary_fuse_page
 cargo run -p mge-cli -- config set --index-kind binary_fuse_page
-cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --marker-groups 12 --targeted-queries 6 --noise-queries 3
+cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --scopes 16 --markers-per-cell 5 --marker-groups 12 --targeted-queries 6 --noise-queries 3 --repeats 5 --seed 1
 ```
 
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 79 tests total (12 CLI unit tests + 3 CLI integration tests + 1 core unit test + 63 core integration tests).
+- `cargo test`: passed, 80 tests total (12 CLI unit tests + 4 CLI integration tests + 1 core unit test + 63 core integration tests).
 - Recall modes tests: passed for focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering, and no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed for `--mode broad`, `--mode full-scope --scope`, and full-scope missing-scope failure.
+- Benchmark harness integration smoke test: passed for exact + Binary Fuse modes and required metrics.
+- Benchmark harness CLI smoke command: passed.
+  - config: 120 cells, 12 sealed pages, 4 logical scopes, 5 markers per cell, 4 marker groups, 4 targeted queries, 2 noise queries, 3 repeats, seed 7.
+  - exact_marker_page: remember avg 8367 us, seal avg 61834 us, focused recall avg 5270 us, broad recall avg 12575 us, full-scope recall avg 1764 us, index lookup avg 1 us, page decode avg 391 us, ContextPacket build avg 944 us, storage 108585 bytes.
+  - binary_fuse_page: remember avg 8040 us, seal avg 54785 us, focused recall avg 5312 us, broad recall avg 12805 us, full-scope recall avg 1871 us, index lookup avg 1 us, page decode avg 395 us, ContextPacket build avg 952 us, storage 112749 bytes.
+  - subset check: focused exact candidates subset of binary_fuse candidates passed.
 - Milestone smoke commands: passed.
 - MessagePack+zstd smoke commands: passed.
 - Config show/set mixed-store smoke commands: passed.
