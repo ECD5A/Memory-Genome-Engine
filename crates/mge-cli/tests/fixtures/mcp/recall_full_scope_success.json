@@ -1,0 +1,28 @@
+{
+  "jsonrpc": "2.0",
+  "id": "recall_full_scope_success",
+  "result": {
+    "ok": true,
+    "tool": "mge_recall",
+    "protocol_version": "mge-jsonrpc-1",
+    "integration_schema_version": 1,
+    "context": {
+      "mode": "full_scope",
+      "relevant_memory_count": 1,
+      "first_content": "Agent contract golden memory",
+      "first_kind": "procedure",
+      "constraints_count": 2,
+      "warnings_count": 0,
+      "score_details_count": 1,
+      "debug_present": true,
+      "store_stats_present": true
+    },
+    "context_packet_shape": {
+      "relevant_memory_present": true,
+      "constraints_present": true,
+      "warnings_present": true,
+      "debug_present": true
+    },
+    "json_runtime_storage": false
+  }
+}

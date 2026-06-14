@@ -5,13 +5,15 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, bail, Context, Result};
 use mge_core::{
-    CellId, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue, RecallMode,
-    RecallRequest, RememberRequest, SensitivityLevel, TrustLevel,
+    CellId, ContextPacket, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
+    RecallMode, RecallRequest, RememberRequest, SensitivityLevel, StoreStats, TrustLevel,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 const JSONRPC_VERSION: &str = "2.0";
+const PROTOCOL_VERSION: &str = "mge-jsonrpc-1";
+const INTEGRATION_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
@@ -39,6 +41,21 @@ struct JsonRpcResponse {
 struct JsonRpcError {
     code: i64,
     message: String,
+    tool_name: String,
+    recoverable: bool,
+    protocol_version: &'static str,
+    integration_schema_version: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details: Option<Value>,
+}
+
+#[derive(Debug)]
+struct ToolError {
+    code: i64,
+    message: String,
+    tool_name: String,
+    recoverable: bool,
+    details: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -131,8 +148,18 @@ fn handle_line(line: &str) -> JsonRpcResponse {
         Ok(request) => {
             let id = request.id.clone();
             if request.jsonrpc.as_deref().unwrap_or(JSONRPC_VERSION) != JSONRPC_VERSION {
-                return error_response(id, -32600, "jsonrpc must be \"2.0\"");
+                return error_response(
+                    ToolError {
+                        code: -32600,
+                        message: "jsonrpc must be \"2.0\"".to_string(),
+                        tool_name: request.method,
+                        recoverable: true,
+                        details: Some(json!({ "error_kind": "invalid_request" })),
+                    },
+                    id,
+                );
             }
+
             match handle_request(request) {
                 Ok(result) => JsonRpcResponse {
                     jsonrpc: JSONRPC_VERSION,
@@ -140,29 +167,72 @@ fn handle_line(line: &str) -> JsonRpcResponse {
                     result: Some(result),
                     error: None,
                 },
-                Err(err) => error_response(id, -32000, err.to_string()),
+                Err(err) => error_response(err, id),
             }
         }
         Err(err) => error_response(
+            ToolError {
+                code: -32700,
+                message: format!("failed to parse JSON-RPC request: {err}"),
+                tool_name: "unknown".to_string(),
+                recoverable: true,
+                details: Some(json!({ "error_kind": "parse_error" })),
+            },
             None,
-            -32700,
-            format!("failed to parse JSON-RPC request: {err}"),
         ),
     }
 }
 
-fn handle_request(request: JsonRpcRequest) -> Result<Value> {
-    match request.method.as_str() {
-        "mge_remember" => mge_remember(request.params),
-        "mge_recall" => mge_recall(request.params),
-        "mge_seal" => mge_seal(request.params),
-        "mge_checkpoint" => mge_checkpoint(request.params),
-        "mge_stats" => mge_stats(request.params),
-        "mge_validate" => mge_validate(request.params),
-        "mge_rebuild_indexes" => mge_rebuild_indexes(request.params),
-        "mge_export_markdown" => mge_export_markdown(request.params),
-        other => bail!("unknown method: {other}"),
+fn handle_request(request: JsonRpcRequest) -> std::result::Result<Value, ToolError> {
+    let tool = request.method.as_str();
+    match tool {
+        "mge_schema" => Ok(mge_schema()),
+        "mge_remember" => with_tool(tool, mge_remember(request.params)),
+        "mge_recall" => with_tool(tool, mge_recall(request.params)),
+        "mge_seal" => with_tool(tool, mge_seal(request.params)),
+        "mge_checkpoint" => with_tool(tool, mge_checkpoint(request.params)),
+        "mge_stats" => with_tool(tool, mge_stats(request.params)),
+        "mge_validate" => with_tool(tool, mge_validate(request.params)),
+        "mge_rebuild_indexes" => with_tool(tool, mge_rebuild_indexes(request.params)),
+        "mge_export_markdown" => with_tool(tool, mge_export_markdown(request.params)),
+        other => Err(ToolError {
+            code: -32601,
+            message: format!("unknown method: {other}"),
+            tool_name: other.to_string(),
+            recoverable: false,
+            details: Some(json!({ "error_kind": "unknown_method" })),
+        }),
     }
+}
+
+fn with_tool(tool: &str, result: Result<Value>) -> std::result::Result<Value, ToolError> {
+    result.map_err(|err| {
+        let message = err.to_string();
+        let error_kind = classify_error_kind(&message);
+        ToolError {
+            code: if error_kind == "invalid_params" {
+                -32602
+            } else {
+                -32000
+            },
+            message,
+            tool_name: tool.to_string(),
+            recoverable: true,
+            details: Some(json!({ "error_kind": error_kind })),
+        }
+    })
+}
+
+fn mge_schema() -> Value {
+    tool_result(
+        "mge_schema",
+        true,
+        json!({
+            "tools": tool_schemas(),
+            "context_packet_contract": context_packet_contract_schema(),
+            "error_contract": error_contract_schema()
+        }),
+    )
 }
 
 fn mge_remember(params: Value) -> Result<Value> {
@@ -182,14 +252,17 @@ fn mge_remember(params: Value) -> Result<Value> {
     request.links = params.links;
 
     let cell = engine.remember(request)?;
-    Ok(json!({
-        "ok": true,
-        "cell_id": cell.id,
-        "scope": cell.scope,
-        "kind": cell.kind,
-        "status": cell.status,
-        "json_runtime_storage": false
-    }))
+    Ok(tool_result(
+        "mge_remember",
+        true,
+        json!({
+            "cell_id": cell.id,
+            "scope": cell.scope,
+            "kind": cell.kind,
+            "status": cell.status,
+            "json_runtime_storage": false
+        }),
+    ))
 }
 
 fn mge_recall(params: Value) -> Result<Value> {
@@ -219,32 +292,42 @@ fn mge_recall(params: Value) -> Result<Value> {
         .transpose()?;
 
     let packet = engine.recall(request)?;
-    Ok(json!({
-        "ok": true,
-        "context_packet": packet,
-        "json_runtime_storage": false
-    }))
+    let stats = engine.stats()?;
+    let context = context_contract(&packet, &stats);
+    Ok(tool_result(
+        "mge_recall",
+        true,
+        json!({
+            "context_packet": packet,
+            "context": context,
+            "json_runtime_storage": false
+        }),
+    ))
 }
 
 fn mge_seal(params: Value) -> Result<Value> {
     let params: StoreParams = parse_params(params)?;
     let mut engine = open_engine(&params.store_path)?;
     let report = engine.seal()?;
-    Ok(json!({ "ok": true, "seal": report }))
+    Ok(tool_result("mge_seal", true, json!({ "seal": report })))
 }
 
 fn mge_checkpoint(params: Value) -> Result<Value> {
     let params: StoreParams = parse_params(params)?;
     let mut engine = open_engine(&params.store_path)?;
     let report = engine.checkpoint()?;
-    Ok(json!({ "ok": true, "checkpoint": report }))
+    Ok(tool_result(
+        "mge_checkpoint",
+        true,
+        json!({ "checkpoint": report }),
+    ))
 }
 
 fn mge_stats(params: Value) -> Result<Value> {
     let params: StoreParams = parse_params(params)?;
     let engine = open_engine(&params.store_path)?;
     let stats = engine.stats()?;
-    Ok(json!({ "ok": true, "stats": stats }))
+    Ok(tool_result("mge_stats", true, json!({ "stats": stats })))
 }
 
 fn mge_validate(params: Value) -> Result<Value> {
@@ -255,14 +338,22 @@ fn mge_validate(params: Value) -> Result<Value> {
     } else {
         engine.validate()?
     };
-    Ok(json!({ "ok": report.ok, "validation": report }))
+    Ok(tool_result(
+        "mge_validate",
+        report.ok,
+        json!({ "validation": report }),
+    ))
 }
 
 fn mge_rebuild_indexes(params: Value) -> Result<Value> {
     let params: StoreParams = parse_params(params)?;
     let engine = open_engine(&params.store_path)?;
     let report = engine.rebuild_catalog_and_indexes()?;
-    Ok(json!({ "ok": true, "rebuild": report }))
+    Ok(tool_result(
+        "mge_rebuild_indexes",
+        true,
+        json!({ "rebuild": report }),
+    ))
 }
 
 fn mge_export_markdown(params: Value) -> Result<Value> {
@@ -279,12 +370,50 @@ fn mge_export_markdown(params: Value) -> Result<Value> {
     } else {
         engine.export_markdown_to_default_path()?
     };
-    Ok(json!({
-        "ok": true,
-        "output_path": path,
-        "format": "markdown",
-        "json_runtime_storage": false
-    }))
+    Ok(tool_result(
+        "mge_export_markdown",
+        true,
+        json!({
+            "output_path": path,
+            "format": "markdown",
+            "json_runtime_storage": false
+        }),
+    ))
+}
+
+fn tool_result(tool: &str, ok: bool, body: Value) -> Value {
+    let mut object = match body {
+        Value::Object(object) => object,
+        other => {
+            let mut object = Map::new();
+            object.insert("value".to_string(), other);
+            object
+        }
+    };
+    object.insert("ok".to_string(), Value::Bool(ok));
+    object.insert("tool".to_string(), Value::String(tool.to_string()));
+    object.insert(
+        "protocol_version".to_string(),
+        Value::String(PROTOCOL_VERSION.to_string()),
+    );
+    object.insert(
+        "integration_schema_version".to_string(),
+        Value::Number(INTEGRATION_SCHEMA_VERSION.into()),
+    );
+    Value::Object(object)
+}
+
+fn context_contract(packet: &ContextPacket, stats: &StoreStats) -> Value {
+    json!({
+        "query": packet.query,
+        "mode": packet.debug.recall_mode,
+        "relevant_memory": packet.relevant_memory,
+        "constraints": packet.constraints,
+        "warnings": packet.warnings,
+        "score_details": packet.debug.score_details,
+        "debug": packet.debug,
+        "store_stats": stats
+    })
 }
 
 fn parse_params<T: for<'de> Deserialize<'de>>(params: Value) -> Result<T> {
@@ -310,16 +439,142 @@ fn parse_memory_source(
     }
 }
 
-fn error_response(id: Option<Value>, code: i64, message: impl Into<String>) -> JsonRpcResponse {
+fn error_response(err: ToolError, id: Option<Value>) -> JsonRpcResponse {
     JsonRpcResponse {
         jsonrpc: JSONRPC_VERSION,
         id,
         result: None,
         error: Some(JsonRpcError {
-            code,
-            message: message.into(),
+            code: err.code,
+            message: err.message,
+            tool_name: err.tool_name,
+            recoverable: err.recoverable,
+            protocol_version: PROTOCOL_VERSION,
+            integration_schema_version: INTEGRATION_SCHEMA_VERSION,
+            details: err.details,
         }),
     }
+}
+
+fn classify_error_kind(message: &str) -> &'static str {
+    if message.contains("invalid params") {
+        "invalid_params"
+    } else if message.contains("failed to open store") {
+        "store_open_failed"
+    } else if message.contains("requires scope") || message.contains("requires query") {
+        "invalid_request"
+    } else {
+        "tool_error"
+    }
+}
+
+fn tool_schemas() -> Value {
+    json!({
+        "mge_remember": {
+            "input": {
+                "required": ["store_path", "content"],
+                "properties": {
+                    "store_path": "string path to existing Memory Genome store",
+                    "content": "string memory content",
+                    "kind": "memory kind string, default temporary_note",
+                    "scope": "scope string, default global",
+                    "markers": "array of marker strings",
+                    "trust": "trust level string, default agent_inferred",
+                    "sensitivity": "sensitivity level string, default private",
+                    "status": "status string, default active",
+                    "subject": "optional subject string",
+                    "source_type": "optional source type; requires source_ref",
+                    "source_ref": "optional source reference; requires source_type",
+                    "links": "array of linked CellId numbers"
+                }
+            },
+            "output": ["ok", "tool", "protocol_version", "integration_schema_version", "cell_id", "scope", "kind", "status", "json_runtime_storage"]
+        },
+        "mge_recall": {
+            "input": {
+                "required": ["store_path"],
+                "properties": {
+                    "store_path": "string path to existing Memory Genome store",
+                    "query": "required for focused/broad",
+                    "mode": "focused | broad | full_scope",
+                    "scope": "required for full_scope",
+                    "markers": "array of marker strings",
+                    "max_items": "optional positive integer",
+                    "kind": "optional memory kind string",
+                    "include_deprecated": "boolean",
+                    "include_secret_references": "boolean"
+                }
+            },
+            "output": ["ok", "tool", "protocol_version", "integration_schema_version", "context_packet", "context", "json_runtime_storage"]
+        },
+        "mge_seal": store_tool_schema("seal"),
+        "mge_checkpoint": store_tool_schema("checkpoint"),
+        "mge_stats": store_tool_schema("stats"),
+        "mge_validate": {
+            "input": {
+                "required": ["store_path"],
+                "properties": {
+                    "store_path": "string path to existing Memory Genome store",
+                    "deep": "boolean, default false"
+                }
+            },
+            "output": ["ok", "tool", "protocol_version", "integration_schema_version", "validation"]
+        },
+        "mge_rebuild_indexes": store_tool_schema("rebuild"),
+        "mge_export_markdown": {
+            "input": {
+                "required": ["store_path"],
+                "properties": {
+                    "store_path": "string path to existing Memory Genome store",
+                    "output_path": "optional markdown output path"
+                }
+            },
+            "output": ["ok", "tool", "protocol_version", "integration_schema_version", "output_path", "format", "json_runtime_storage"]
+        }
+    })
+}
+
+fn store_tool_schema(output_field: &str) -> Value {
+    json!({
+        "input": {
+            "required": ["store_path"],
+            "properties": {
+                "store_path": "string path to existing Memory Genome store"
+            }
+        },
+        "output": ["ok", "tool", "protocol_version", "integration_schema_version", output_field]
+    })
+}
+
+fn context_packet_contract_schema() -> Value {
+    json!({
+        "context_packet": "core ContextPacket, unchanged",
+        "context": {
+            "query": "string",
+            "mode": "focused | broad | full_scope",
+            "relevant_memory": "array of ContextMemoryItem",
+            "constraints": "array of strings",
+            "warnings": "array of strings",
+            "score_details": "array of score debug entries",
+            "debug": "ContextDebugInfo",
+            "store_stats": "StoreStats snapshot after recall"
+        }
+    })
+}
+
+fn error_contract_schema() -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "error": {
+            "code": "number",
+            "message": "string",
+            "tool_name": "string",
+            "recoverable": "boolean",
+            "protocol_version": PROTOCOL_VERSION,
+            "integration_schema_version": INTEGRATION_SCHEMA_VERSION,
+            "details": "optional object"
+        }
+    })
 }
 
 fn default_kind() -> String {

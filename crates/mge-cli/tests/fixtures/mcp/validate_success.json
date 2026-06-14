@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": "validate_success",
+  "result": {
+    "ok": true,
+    "tool": "mge_validate",
+    "protocol_version": "mge-jsonrpc-1",
+    "integration_schema_version": 1,
+    "validation": {
+      "ok": true,
+      "index_kind": "exact_marker_page",
+      "checked_sealed_pages": 1,
+      "checked_sealed_cells": 1,
+      "errors_count": 0,
+      "first_error_contains": null
+    }
+  }
+}

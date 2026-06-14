@@ -311,13 +311,25 @@ fn mcp_server_json_rpc_adapter_supports_agent_workflow() {
     ]);
 
     assert_eq!(responses.len(), 9);
+    assert_eq!(responses[0]["result"]["protocol_version"], "mge-jsonrpc-1");
+    assert_eq!(responses[0]["result"]["integration_schema_version"], 1);
+    assert_eq!(responses[0]["result"]["tool"], "mge_remember");
     assert_eq!(responses[0]["result"]["ok"], true);
     assert_eq!(responses[0]["result"]["cell_id"], 1);
     assert_eq!(responses[0]["result"]["json_runtime_storage"], false);
+    assert_eq!(responses[1]["result"]["tool"], "mge_recall");
     assert_eq!(
         responses[1]["result"]["context_packet"]["debug"]["recall_mode"],
         "focused"
     );
+    assert_eq!(
+        responses[1]["result"]["context"]["mode"],
+        responses[1]["result"]["context_packet"]["debug"]["recall_mode"]
+    );
+    assert!(responses[1]["result"]["context"]["score_details"]
+        .as_array()
+        .is_some());
+    assert!(responses[1]["result"]["context"]["store_stats"].is_object());
     assert_eq!(
         responses[1]["result"]["context_packet"]["relevant_memory"]
             .as_array()
@@ -332,6 +344,13 @@ fn mcp_server_json_rpc_adapter_supports_agent_workflow() {
     assert_eq!(responses[6]["result"]["rebuild"]["pages_unchanged"], true);
     assert_eq!(responses[7]["result"]["format"], "markdown");
     assert!(export_path.is_file());
+    assert_eq!(responses[8]["error"]["code"], -32000);
+    assert_eq!(responses[8]["error"]["tool_name"], "mge_recall");
+    assert_eq!(responses[8]["error"]["recoverable"], true);
+    assert_eq!(
+        responses[8]["error"]["details"]["error_kind"],
+        "invalid_request"
+    );
     assert!(responses[8]["error"]["message"]
         .as_str()
         .unwrap()
@@ -339,6 +358,196 @@ fn mcp_server_json_rpc_adapter_supports_agent_workflow() {
 
     assert!(!store.join("manifest.json").exists());
     assert!(!store.join("hot").join("hot_cells.jsonl").exists());
+}
+
+#[test]
+fn mcp_server_exposes_stable_schema_and_structured_errors() {
+    let responses = run_mcp_json_lines(&[
+        json!({
+            "jsonrpc": "2.0",
+            "id": "schema",
+            "method": "mge_schema",
+            "params": {}
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "unknown",
+            "method": "mge_unknown_tool",
+            "params": {}
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "bad_args",
+            "method": "mge_remember",
+            "params": { "store_path": "missing-store" }
+        }),
+    ]);
+
+    let schema = &responses[0]["result"];
+    assert_eq!(schema["protocol_version"], "mge-jsonrpc-1");
+    assert_eq!(schema["integration_schema_version"], 1);
+    for tool in [
+        "mge_remember",
+        "mge_recall",
+        "mge_seal",
+        "mge_checkpoint",
+        "mge_stats",
+        "mge_validate",
+        "mge_rebuild_indexes",
+        "mge_export_markdown",
+    ] {
+        assert!(schema["tools"][tool]["input"]["required"]
+            .as_array()
+            .is_some());
+        assert!(schema["tools"][tool]["output"].as_array().is_some());
+    }
+    assert!(schema["context_packet_contract"]["context"]["relevant_memory"].is_string());
+    assert_eq!(
+        schema["error_contract"]["error"]["protocol_version"],
+        "mge-jsonrpc-1"
+    );
+
+    let unknown = &responses[1]["error"];
+    assert_eq!(unknown["code"], -32601);
+    assert_eq!(unknown["tool_name"], "mge_unknown_tool");
+    assert_eq!(unknown["recoverable"], false);
+    assert_eq!(unknown["details"]["error_kind"], "unknown_method");
+
+    let bad_args = &responses[2]["error"];
+    assert_eq!(bad_args["code"], -32602);
+    assert_eq!(bad_args["tool_name"], "mge_remember");
+    assert_eq!(bad_args["recoverable"], true);
+    assert_eq!(bad_args["details"]["error_kind"], "invalid_params");
+    assert!(bad_args["message"]
+        .as_str()
+        .unwrap()
+        .contains("missing field `content`"));
+}
+
+#[test]
+fn mcp_contract_golden_outputs_are_stable() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    let store_path = store.to_string_lossy().to_string();
+
+    run_mge(&store, &["init", "--profile", "fast"]);
+    let mut responses = run_mcp_json_lines(&[
+        json!({
+            "jsonrpc": "2.0",
+            "id": "remember_success",
+            "method": "mge_remember",
+            "params": {
+                "store_path": store_path.clone(),
+                "content": "Agent contract golden memory",
+                "kind": "procedure",
+                "scope": "contract_scope",
+                "markers": ["topic:contract"],
+                "trust": "user_confirmed",
+                "sensitivity": "private"
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "recall_focused_success",
+            "method": "mge_recall",
+            "params": {
+                "store_path": store_path.clone(),
+                "query": "contract golden memory",
+                "mode": "focused",
+                "scope": "contract_scope",
+                "max_items": 5
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "recall_broad_success",
+            "method": "mge_recall",
+            "params": {
+                "store_path": store_path.clone(),
+                "query": "contract golden memory",
+                "mode": "broad",
+                "scope": "contract_scope",
+                "max_items": 10
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "seal_success",
+            "method": "mge_seal",
+            "params": { "store_path": store_path.clone() }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "recall_full_scope_success",
+            "method": "mge_recall",
+            "params": {
+                "store_path": store_path.clone(),
+                "mode": "full_scope",
+                "scope": "contract_scope"
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "validate_success",
+            "method": "mge_validate",
+            "params": { "store_path": store_path.clone(), "deep": true }
+        }),
+    ]);
+
+    fs::remove_file(store.join("indexes").join("marker_index.mgi")).unwrap();
+    responses.extend(run_mcp_json_lines(&[
+        json!({
+            "jsonrpc": "2.0",
+            "id": "validate_failure",
+            "method": "mge_validate",
+            "params": { "store_path": store_path.clone(), "deep": true }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "rebuild_success",
+            "method": "mge_rebuild_indexes",
+            "params": { "store_path": store_path.clone() }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "structured_error",
+            "method": "mge_unknown_tool",
+            "params": {}
+        }),
+    ]));
+
+    assert_golden(
+        "remember_success",
+        &normalize_mcp_response_for_golden(&responses[0]),
+    );
+    assert_golden(
+        "recall_focused_success",
+        &normalize_mcp_response_for_golden(&responses[1]),
+    );
+    assert_golden(
+        "recall_broad_success",
+        &normalize_mcp_response_for_golden(&responses[2]),
+    );
+    assert_golden(
+        "recall_full_scope_success",
+        &normalize_mcp_response_for_golden(&responses[4]),
+    );
+    assert_golden(
+        "validate_success",
+        &normalize_mcp_response_for_golden(&responses[5]),
+    );
+    assert_golden(
+        "validate_failure",
+        &normalize_mcp_response_for_golden(&responses[6]),
+    );
+    assert_golden(
+        "rebuild_success",
+        &normalize_mcp_response_for_golden(&responses[7]),
+    );
+    assert_golden(
+        "structured_error",
+        &normalize_mcp_response_for_golden(&responses[8]),
+    );
 }
 
 #[test]
@@ -863,6 +1072,145 @@ fn corpus_benchmark_rejects_store_root_inside_corpus_even_when_missing() {
     assert!(String::from_utf8_lossy(&output.stderr)
         .contains("--store-root must be outside --corpus-root"));
     assert!(!nested_store.exists());
+}
+
+fn assert_golden(name: &str, actual: &Value) {
+    let expected: Value = serde_json::from_str(golden_fixture(name)).unwrap();
+    assert_eq!(
+        actual,
+        &expected,
+        "MCP golden fixture mismatch for {name}\nactual:\n{}",
+        serde_json::to_string_pretty(actual).unwrap()
+    );
+}
+
+fn golden_fixture(name: &str) -> &'static str {
+    match name {
+        "remember_success" => include_str!("fixtures/mcp/remember_success.json"),
+        "recall_focused_success" => include_str!("fixtures/mcp/recall_focused_success.json"),
+        "recall_broad_success" => include_str!("fixtures/mcp/recall_broad_success.json"),
+        "recall_full_scope_success" => include_str!("fixtures/mcp/recall_full_scope_success.json"),
+        "validate_success" => include_str!("fixtures/mcp/validate_success.json"),
+        "validate_failure" => include_str!("fixtures/mcp/validate_failure.json"),
+        "rebuild_success" => include_str!("fixtures/mcp/rebuild_success.json"),
+        "structured_error" => include_str!("fixtures/mcp/structured_error.json"),
+        other => panic!("unknown golden fixture {other}"),
+    }
+}
+
+fn normalize_mcp_response_for_golden(response: &Value) -> Value {
+    if response.get("error").is_some() {
+        let error = &response["error"];
+        return json!({
+            "jsonrpc": response["jsonrpc"],
+            "id": response["id"],
+            "error": {
+                "code": error["code"],
+                "message": error["message"],
+                "tool_name": error["tool_name"],
+                "recoverable": error["recoverable"],
+                "protocol_version": error["protocol_version"],
+                "integration_schema_version": error["integration_schema_version"],
+                "error_kind": error["details"]["error_kind"]
+            }
+        });
+    }
+
+    let result = &response["result"];
+    let base = json!({
+        "jsonrpc": response["jsonrpc"],
+        "id": response["id"],
+        "result": {
+            "ok": result["ok"],
+            "tool": result["tool"],
+            "protocol_version": result["protocol_version"],
+            "integration_schema_version": result["integration_schema_version"]
+        }
+    });
+
+    match result["tool"].as_str().unwrap() {
+        "mge_remember" => json_with_result_fields(
+            base,
+            json!({
+                "cell_id": result["cell_id"],
+                "scope": result["scope"],
+                "kind": result["kind"],
+                "status": result["status"],
+                "json_runtime_storage": result["json_runtime_storage"]
+            }),
+        ),
+        "mge_recall" => {
+            let relevant = result["context"]["relevant_memory"].as_array().unwrap();
+            let first = relevant.first().unwrap();
+            json_with_result_fields(
+                base,
+                json!({
+                    "context": {
+                        "mode": result["context"]["mode"],
+                        "relevant_memory_count": relevant.len(),
+                        "first_content": first["content"],
+                        "first_kind": first["kind"],
+                        "constraints_count": result["context"]["constraints"].as_array().unwrap().len(),
+                        "warnings_count": result["context"]["warnings"].as_array().unwrap().len(),
+                        "score_details_count": result["context"]["score_details"].as_array().unwrap().len(),
+                        "debug_present": result["context"]["debug"].is_object(),
+                        "store_stats_present": result["context"]["store_stats"].is_object()
+                    },
+                    "context_packet_shape": {
+                        "relevant_memory_present": result["context_packet"]["relevant_memory"].is_array(),
+                        "constraints_present": result["context_packet"]["constraints"].is_array(),
+                        "warnings_present": result["context_packet"]["warnings"].is_array(),
+                        "debug_present": result["context_packet"]["debug"].is_object()
+                    },
+                    "json_runtime_storage": result["json_runtime_storage"]
+                }),
+            )
+        }
+        "mge_validate" => {
+            let errors = result["validation"]["errors"].as_array().unwrap();
+            json_with_result_fields(
+                base,
+                json!({
+                    "validation": {
+                        "ok": result["validation"]["ok"],
+                        "index_kind": result["validation"]["index_kind"],
+                        "checked_sealed_pages": result["validation"]["checked_sealed_pages"],
+                        "checked_sealed_cells": result["validation"]["checked_sealed_cells"],
+                        "errors_count": errors.len(),
+                        "first_error_contains": errors.first().and_then(|value| value.as_str()).map(|value| {
+                            if value.contains("active candidate index file missing") {
+                                "active candidate index file missing"
+                            } else {
+                                value
+                            }
+                        })
+                    }
+                }),
+            )
+        }
+        "mge_rebuild_indexes" => json_with_result_fields(
+            base,
+            json!({
+                "rebuild": {
+                    "index_kind": result["rebuild"]["index_kind"],
+                    "pages_scanned": result["rebuild"]["pages_scanned"],
+                    "catalog_entries_written": result["rebuild"]["catalog_entries_written"],
+                    "exact_index_written": result["rebuild"]["exact_index_written"],
+                    "binary_fuse_index_written": result["rebuild"]["binary_fuse_index_written"],
+                    "pages_unchanged": result["rebuild"]["pages_unchanged"]
+                }
+            }),
+        ),
+        other => panic!("unsupported golden normalization for tool {other}"),
+    }
+}
+
+fn json_with_result_fields(mut base: Value, fields: Value) -> Value {
+    let result = base["result"].as_object_mut().unwrap();
+    for (key, value) in fields.as_object().unwrap() {
+        result.insert(key.clone(), value.clone());
+    }
+    base
 }
 
 fn run_mge(store: &Path, args: &[&str]) -> Output {

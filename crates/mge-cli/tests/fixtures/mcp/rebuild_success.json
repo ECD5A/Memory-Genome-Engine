@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": "rebuild_success",
+  "result": {
+    "ok": true,
+    "tool": "mge_rebuild_indexes",
+    "protocol_version": "mge-jsonrpc-1",
+    "integration_schema_version": 1,
+    "rebuild": {
+      "index_kind": "exact_marker_page",
+      "pages_scanned": 1,
+      "catalog_entries_written": 1,
+      "exact_index_written": true,
+      "binary_fuse_index_written": false,
+      "pages_unchanged": true
+    }
+  }
+}

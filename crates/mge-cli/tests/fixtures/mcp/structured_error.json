@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": "structured_error",
+  "error": {
+    "code": -32601,
+    "message": "unknown method: mge_unknown_tool",
+    "tool_name": "mge_unknown_tool",
+    "recoverable": false,
+    "protocol_version": "mge-jsonrpc-1",
+    "integration_schema_version": 1,
+    "error_kind": "unknown_method"
+  }
+}
