@@ -33,6 +33,17 @@ recall -> ContextPacket
 
 The packet is task-relevant and size-controlled, not necessarily tiny. `focused` is narrow, `broad` is wider, and `full_scope` requires an explicit scope.
 
+MCP/SDK recall responses keep the core `ContextPacket` under `context_packet` and also expose a stable adapter wrapper under `context`:
+
+- `query`
+- `mode`
+- `relevant_memory`
+- `constraints`
+- `warnings`
+- `score_details`
+- `debug`
+- `store_stats`
+
 ## Integration Boundaries
 
 Use the lowest layer that fits the host:
@@ -44,6 +55,15 @@ Use the lowest layer that fits the host:
 - TypeScript: use the thin wrapper in `sdk/typescript`.
 
 Rust remains the core. Python and TypeScript wrappers delegate to the Rust CLI and do not duplicate memory logic.
+
+## Versioning
+
+The current integration contract uses:
+
+- `protocol_version`: `mge-jsonrpc-1`
+- `integration_schema_version`: `1`
+
+These fields version only the MCP/SDK protocol contract. They do not change the binary storage format, page codec, filter strategy, or recall semantics.
 
 ## Local-First Safety
 

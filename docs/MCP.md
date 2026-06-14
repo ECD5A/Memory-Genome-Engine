@@ -6,6 +6,12 @@
 
 JSON here is protocol output only. It is not runtime storage.
 
+Current contract:
+
+- JSON-RPC version: `2.0`
+- `protocol_version`: `mge-jsonrpc-1`
+- `integration_schema_version`: `1`
+
 ## Run
 
 ```bash
@@ -21,14 +27,40 @@ Each input line must be one JSON-RPC request:
 Each output line is one JSON-RPC response:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"ok":true,"stats":{}}}
+{"jsonrpc":"2.0","id":1,"result":{"ok":true,"tool":"mge_stats","protocol_version":"mge-jsonrpc-1","integration_schema_version":1,"stats":{}}}
 ```
 
-Errors are structured:
+## Schemas
+
+The adapter exposes the current tool schema with `mge_schema`:
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"failed to open store .memory-genome"}}
+{"jsonrpc":"2.0","id":"schema","method":"mge_schema","params":{}}
 ```
+
+The response contains:
+
+- `tools`: input/output schema summaries for every public tool.
+- `context_packet_contract`: stable recall wrapper shape.
+- `error_contract`: structured error shape.
+
+Golden contract tests live under `crates/mge-cli/tests/fixtures/mcp`.
+
+## Error Model
+
+Errors are structured and stable for SDKs:
+
+```json
+{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params: missing field `content`","tool_name":"mge_remember","recoverable":true,"protocol_version":"mge-jsonrpc-1","integration_schema_version":1,"details":{"error_kind":"invalid_params"}}}
+```
+
+Fields:
+
+- `code`: JSON-RPC-compatible numeric code.
+- `message`: human-readable error.
+- `tool_name`: requested tool or `unknown`.
+- `recoverable`: whether the caller can usually fix and retry.
+- `details.error_kind`: stable machine-readable category.
 
 ## Tools
 
@@ -64,6 +96,17 @@ Input:
 
 Output contains the `ContextPacket` under `result.context_packet`.
 
+For SDK stability, recall also includes `result.context`, an adapter-level wrapper:
+
+- `query`
+- `mode`
+- `relevant_memory`
+- `constraints`
+- `warnings`
+- `score_details`
+- `debug`
+- `store_stats`
+
 ### Store Operations
 
 - `mge_seal`: `{ "store_path": "..." }`
@@ -86,3 +129,7 @@ Output contains the `ContextPacket` under `result.context_packet`.
 - Markdown export writes to the default store export path or an explicit `output_path`.
 - It does not execute files, download data, install dependencies, read unrelated directories, or change the storage layout.
 - `full_scope` recall requires `scope`.
+
+## Compatibility
+
+`integration_schema_version` changes only when the adapter contract changes. It does not change the Memory Genome storage version. Adding optional fields is allowed within the same major schema when existing fields keep their meaning.

@@ -35,6 +35,19 @@ client.rebuild_indexes()
 client.export_markdown()
 ```
 
+Typed SDK surface:
+
+- `RecallMode`
+- `RememberOptions`
+- `ContextMemoryItem`
+- `ContextPacket`
+- `StoreStats`
+- `ValidationReport`
+- `McpError`
+- `MgeCommandError`
+- `MgeProtocolError`
+- `result_or_raise_mcp_error(response)`
+
 By default the wrapper runs `mge` from `PATH`. During local development pass a command explicitly:
 
 ```python
@@ -84,6 +97,20 @@ client.exportMarkdown();
 
 The TypeScript wrapper uses Node built-ins only and shells out to the Rust CLI.
 
+Typed SDK surface:
+
+- `RecallMode`
+- `RememberOptions`
+- `RecallOptions`
+- `ContextMemoryItem`
+- `ContextPacket`
+- `StoreStats`
+- `ValidationReport`
+- `McpStructuredError`
+- `MemoryGenomeCommandError`
+- `MemoryGenomeProtocolError`
+- `resultOrThrowMcpError(response)`
+
 ## Supported Operations
 
 Both wrappers cover:
@@ -97,6 +124,24 @@ Both wrappers cover:
 - validate / validate deep
 - rebuild indexes
 - export Markdown
+
+## Structured Errors
+
+The CLI wrappers raise command errors for failed local process execution. If a host talks directly to `mge-mcp-server`, both SDKs include helpers that map the structured JSON-RPC error into a typed protocol exception.
+
+Error fields:
+
+- `code`
+- `message`
+- `tool_name`
+- `recoverable`
+- `protocol_version`
+- `integration_schema_version`
+- optional `details`
+
+## Versioning
+
+SDKs target `protocol_version = mge-jsonrpc-1` and `integration_schema_version = 1`. These are integration contract versions and do not change the binary storage layout or storage version.
 
 ## Policy
 

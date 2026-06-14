@@ -108,8 +108,10 @@ Active mandate: Agent Integration / MCP / SDK.
 
 - Stable Rust integration boundary reviewed; `MemoryEngine` уже покрывает init/open, remember, recall, seal, checkpoint, stats, validate, validate_deep, rebuild indexes и Markdown export.
 - Добавлен `mge-mcp-server` как local JSON-RPC stdin/stdout adapter с tools для remember, recall, seal, checkpoint, stats, validate, rebuild indexes и Markdown export.
+- MCP tool contracts стабилизированы через `protocol_version = mge-jsonrpc-1`, `integration_schema_version = 1`, `mge_schema`, structured errors, adapter-level recall `context` и golden JSON contract fixtures.
 - Добавлен thin Python SDK wrapper в `sdk/python`.
 - Добавлен thin TypeScript SDK wrapper в `sdk/typescript`.
+- Добавлены typed Python и TypeScript SDK contract surfaces плюс structured protocol error helpers.
 - Добавлены runnable Python и TypeScript basic examples.
 - Добавлены agent workflow examples для CLI, MCP-style JSON-RPC, Python и TypeScript.
 - Добавлены integration docs: `docs/INTEGRATION.md`, `docs/MCP.md`, `docs/SDK.md` и русские mirrors.
@@ -123,7 +125,7 @@ Mandate 2 constraints сохранены:
 
 Следующий шаг Mandate 2:
 
-- Решить, оставляем ли local JSON-RPC adapter первым MCP integration surface или позже добавляем full MCP SDK dependency после стабилизации tool schema.
+- Решить, оставляем ли local JSON-RPC adapter первым MCP integration surface или позже добавляем full MCP SDK dependency теперь, когда tool schema versioned и golden-tested.
 
 ## Сделано
 

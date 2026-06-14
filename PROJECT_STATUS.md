@@ -108,8 +108,10 @@ Done in Mandate 2 foundation:
 
 - Stable Rust integration boundary reviewed; `MemoryEngine` already covers init/open, remember, recall, seal, checkpoint, stats, validate, validate_deep, rebuild indexes, and Markdown export.
 - Added `mge-mcp-server` as a local JSON-RPC stdin/stdout adapter with tools for remember, recall, seal, checkpoint, stats, validate, rebuild indexes, and Markdown export.
+- Stabilized MCP tool contracts with `protocol_version = mge-jsonrpc-1`, `integration_schema_version = 1`, `mge_schema`, structured errors, adapter-level recall `context`, and golden JSON contract fixtures.
 - Added thin Python SDK wrapper in `sdk/python`.
 - Added thin TypeScript SDK wrapper in `sdk/typescript`.
+- Added typed Python and TypeScript SDK contract surfaces plus structured protocol error helpers.
 - Added runnable Python and TypeScript basic examples.
 - Added agent workflow examples for CLI, MCP-style JSON-RPC, Python, and TypeScript.
 - Added integration docs: `docs/INTEGRATION.md`, `docs/MCP.md`, and `docs/SDK.md`, plus Russian mirrors.
@@ -123,7 +125,7 @@ Mandate 2 constraints preserved:
 
 Next Mandate 2 step:
 
-- Decide whether to keep the local JSON-RPC adapter as the first MCP integration surface or add a full MCP SDK dependency later after the tool schema stabilizes.
+- Decide whether to keep the local JSON-RPC adapter as the first MCP integration surface or add a full MCP SDK dependency later now that the tool schema is versioned and golden-tested.
 
 ## Done
 

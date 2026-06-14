@@ -6,6 +6,12 @@
 
 JSON здесь является только protocol output. Это не runtime storage.
 
+Текущий contract:
+
+- JSON-RPC version: `2.0`
+- `protocol_version`: `mge-jsonrpc-1`
+- `integration_schema_version`: `1`
+
 ## Запуск
 
 ```bash
@@ -21,14 +27,40 @@ cargo run -p mge-cli --bin mge-mcp-server
 Каждая выходная строка - один JSON-RPC response:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"ok":true,"stats":{}}}
+{"jsonrpc":"2.0","id":1,"result":{"ok":true,"tool":"mge_stats","protocol_version":"mge-jsonrpc-1","integration_schema_version":1,"stats":{}}}
 ```
 
-Ошибки structured:
+## Schemas
+
+Adapter отдаёт текущую tool schema через `mge_schema`:
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"failed to open store .memory-genome"}}
+{"jsonrpc":"2.0","id":"schema","method":"mge_schema","params":{}}
 ```
+
+Response содержит:
+
+- `tools`: input/output schema summaries для каждого public tool.
+- `context_packet_contract`: stable recall wrapper shape.
+- `error_contract`: structured error shape.
+
+Golden contract tests лежат в `crates/mge-cli/tests/fixtures/mcp`.
+
+## Error Model
+
+Ошибки structured и стабильны для SDK:
+
+```json
+{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params: missing field `content`","tool_name":"mge_remember","recoverable":true,"protocol_version":"mge-jsonrpc-1","integration_schema_version":1,"details":{"error_kind":"invalid_params"}}}
+```
+
+Fields:
+
+- `code`: JSON-RPC-compatible numeric code.
+- `message`: human-readable error.
+- `tool_name`: requested tool или `unknown`.
+- `recoverable`: можно ли обычно исправить запрос и повторить.
+- `details.error_kind`: stable machine-readable category.
 
 ## Tools
 
@@ -64,6 +96,17 @@ Input:
 
 Output содержит `ContextPacket` в `result.context_packet`.
 
+Для SDK stability recall также содержит `result.context`, adapter-level wrapper:
+
+- `query`
+- `mode`
+- `relevant_memory`
+- `constraints`
+- `warnings`
+- `score_details`
+- `debug`
+- `store_stats`
+
 ### Store Operations
 
 - `mge_seal`: `{ "store_path": "..." }`
@@ -86,3 +129,7 @@ Output содержит `ContextPacket` в `result.context_packet`.
 - Markdown export пишет в default store export path или explicit `output_path`.
 - Он не исполняет files, не скачивает data, не устанавливает dependencies, не читает unrelated directories и не меняет storage layout.
 - `full_scope` recall требует `scope`.
+
+## Compatibility
+
+`integration_schema_version` меняется только при изменении adapter contract. Он не меняет Memory Genome storage version. Добавлять optional fields можно в той же major schema, если старые fields сохраняют смысл.
