@@ -411,6 +411,16 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - `ContextDebugInfo` now includes `sealed_cells_skipped_before_token_scoring` and `sealed_cells_token_scored`.
   - `mge-corpus-bench` records those counters in per-mode output and exact-vs-BinaryFuse locality summaries.
   - This is debug/reporting only; storage layout, recall results, validation, rebuild-indexes, and caches are unchanged.
+- Sealed token overlap cache package: passed.
+  - `CachedCellScoringData` now builds a runtime-only token set for longer value token lists and scoring checks the shorter query side first.
+  - The cache is still in RAM only; `.mgp` files, MessagePack page codec, storage layout, indexes, validation, rebuild-indexes, and ContextPacket output are unchanged.
+  - Generated safe corpus before/after on the same 18 imported files / 1980 chunks smoke shape:
+    - exact repeated focused: 22513 -> 20201 us.
+    - exact repeated broad: 12280 -> 7970 us.
+    - binary_fuse repeated focused: 24127 -> 18740 us.
+    - binary_fuse repeated broad: 14459 -> 7151 us.
+    - exact focused cell filtering: 12212 -> 9134 us; scoring cache build rose 6742 -> 8031 us because the per-cell cached token set is built once.
+  - `sealed_cells_skipped_before_token_scoring` showed only 43 cells skipped vs 484 token-scored on this corpus, so extra metadata/filter pruning was not the right next optimization.
 - L1 Hot RAM scoring cache package: passed.
   - Hot focused/broad recall now reuses `CachedCellScoringData` built at `remember`/hot recovery time instead of tokenizing hot cell value/subject on every recall.
   - Runtime scoring data is cleared with `HotMemoryLayer::clear()` during seal and is not persisted into `hot/hot.mgl` or snapshots as a separate storage format.

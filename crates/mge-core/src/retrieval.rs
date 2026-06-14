@@ -144,6 +144,7 @@ impl RecallFilterContext {
 pub struct ScoringContext {
     filter: RecallFilterContext,
     query_marker_set: HashSet<u32>,
+    query_tokens: Vec<String>,
     query_token_set: HashSet<String>,
     query_canonical: String,
 }
@@ -151,6 +152,7 @@ pub struct ScoringContext {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CachedCellScoringData {
     pub value_tokens: Vec<String>,
+    value_token_set: Option<HashSet<String>>,
     pub value_canonical: String,
     pub subject_tokens: Vec<String>,
 }
@@ -158,8 +160,15 @@ pub(crate) struct CachedCellScoringData {
 impl CachedCellScoringData {
     pub(crate) fn from_cell(cell: &MemoryCell) -> Self {
         let value_text = cell.value.to_plain_text_cow();
+        let value_tokens = tokenize_keywords(value_text.as_ref());
+        let value_token_set = if value_tokens.len() >= 8 {
+            Some(value_tokens.iter().cloned().collect())
+        } else {
+            None
+        };
         Self {
-            value_tokens: tokenize_keywords(value_text.as_ref()),
+            value_tokens,
+            value_token_set,
             value_canonical: canonicalize_marker_value(value_text.as_ref()),
             subject_tokens: cell
                 .subject
@@ -189,6 +198,7 @@ impl ScoringContext {
         Self {
             filter,
             query_marker_set: query_marker_ids.iter().copied().collect(),
+            query_tokens: query_tokens.to_vec(),
             query_token_set: query_tokens.iter().cloned().collect(),
             query_canonical: canonicalize_marker_value(&request.query),
         }
@@ -267,6 +277,12 @@ fn score_permitted_cell_debug(
 
     let value_overlap = if context.query_token_set.is_empty() {
         0
+    } else if let Some(value_token_set) = &cached.value_token_set {
+        context
+            .query_tokens
+            .iter()
+            .filter(|token| value_token_set.contains(token.as_str()))
+            .count() as i64
     } else {
         cached
             .value_tokens
