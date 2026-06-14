@@ -718,6 +718,34 @@ fn corpus_benchmark_generated_medium_profile_accepts_overrides() {
     );
 }
 
+#[test]
+fn corpus_benchmark_rejects_store_root_inside_corpus_even_when_missing() {
+    let dir = tempdir().unwrap();
+    let corpus = dir.path().join("corpus");
+    fs::create_dir_all(&corpus).unwrap();
+    fs::write(corpus.join("notes.md"), "# Notes\n\nAlpha corpus memory.\n").unwrap();
+
+    let nested_store = corpus.join("missing").join("store");
+    let output = Command::new(env!("CARGO_BIN_EXE_mge-corpus-bench"))
+        .args([
+            "--corpus",
+            corpus.to_str().unwrap(),
+            "--store-root",
+            nested_store.to_str().unwrap(),
+            "--profile",
+            "small",
+            "--repeats",
+            "1",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("--store-root must be outside --corpus-root"));
+    assert!(!nested_store.exists());
+}
+
 fn run_mge(store: &Path, args: &[&str]) -> Output {
     let output = Command::new(env!("CARGO_BIN_EXE_mge"))
         .arg("--store")

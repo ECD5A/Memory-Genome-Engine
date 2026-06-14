@@ -254,7 +254,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 112 tests total (13 CLI unit tests + 6 CLI integration tests + 2 core unit tests + 91 core integration tests).
+- `cargo test`: passed, 115 tests total (13 CLI unit tests + 9 CLI integration tests + 2 core unit tests + 91 core integration tests).
 - Validation/rebuild tests: passed для clean deep validation, corrupted/mismatched catalog summaries, missing exact index restore, active Binary Fuse index restore, recall after rebuild, hot memory untouched и no JSON/JSONL runtime storage regression.
 - Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.
@@ -416,11 +416,12 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
     - binary_fuse repeated broad: 14459 -> 7151 us.
     - exact focused cell filtering: 12212 -> 9134 us; scoring cache build вырос 6742 -> 8031 us, потому что per-cell cached token set строится один раз.
   - `sealed_cells_skipped_before_token_scoring` показал только 43 skipped cells против 484 token-scored на этом corpus, поэтому дополнительный metadata/filter pruning не был правильной следующей оптимизацией.
-- Real-workload corpus benchmark readiness package: in progress.
+- Real-workload corpus benchmark readiness package: passed.
   - `mge-corpus-bench` теперь принимает real-workload command shape с видимым alias `--corpus`, `--profile small|medium|code-heavy|docs-heavy|mixed`, `--chunk-lines` и `--seed`, сохраняя существующие `--corpus-root` и `--chunk-bytes`.
   - Добавлен `--generated` diverse local corpus mode с markdown notes, Rust/Python/TypeScript/JS/config/long-text/fragment/noise files внутри `--store-root/generated-corpus`.
   - Добавлен recommendation JSON с machine-readable bottleneck signals и human-readable summary lines: hot bottleneck, sealed cold/repeated bottleneck, BinaryFuse usefulness, page decode/scoring/filtering/ContextPacket shares, repeated locality benefit и suggested next core step.
   - Safety остаётся local-only: no download, no corpus execution, symlinks skipped, unsupported binary extensions skipped before read, corpus files не меняются, stores пишутся внутри `--store-root`.
+  - Tests покрывают real local directory mode через `--corpus`, generated small и medium profiles, binary extension skip, optional symlink skip, recommendation output, exact subset BinaryFuse check и rejection of nested `--store-root` inside corpus.
 - L1 Hot RAM scoring cache package: passed.
   - Hot focused/broad recall теперь переиспользует `CachedCellScoringData`, построенный на `remember`/hot recovery, вместо tokenization hot cell value/subject на каждый recall.
   - Runtime scoring data очищается через `HotMemoryLayer::clear()` при seal и не сохраняется в `hot/hot.mgl` или snapshots как отдельный storage format.

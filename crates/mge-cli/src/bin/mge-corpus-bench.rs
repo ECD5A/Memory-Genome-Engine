@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -437,12 +438,22 @@ fn ensure_store_root_is_safe(corpus_root: &Path, store_root: &Path) -> Result<()
         );
     }
 
-    if let Some(parent) = store_root.parent() {
-        if parent.exists() {
-            let canonical_parent = fs::canonicalize(parent)?;
-            if canonical_parent.starts_with(corpus_root) {
+    let absolute_store_root = if store_root.is_absolute() {
+        store_root.to_path_buf()
+    } else {
+        env::current_dir()?.join(store_root)
+    };
+    if absolute_store_root.starts_with(corpus_root) {
+        bail!("--store-root must be outside --corpus-root to keep corpus files untouched");
+    }
+
+    for ancestor in absolute_store_root.ancestors().skip(1) {
+        if ancestor.exists() {
+            let canonical_ancestor = fs::canonicalize(ancestor)?;
+            if canonical_ancestor.starts_with(corpus_root) {
                 bail!("--store-root must be outside --corpus-root to keep corpus files untouched");
             }
+            break;
         }
     }
     Ok(())
