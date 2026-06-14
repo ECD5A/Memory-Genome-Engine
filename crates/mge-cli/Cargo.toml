@@ -22,3 +22,7 @@ path = "src/main.rs"
 [[bin]]
 name = "mge-synthetic-bench"
 path = "src/bin/mge-synthetic-bench.rs"
+
+[[bin]]
+name = "mge-corpus-bench"
+path = "src/bin/mge-corpus-bench.rs"

@@ -355,6 +355,115 @@ fn synthetic_benchmark_outputs_valid_core_metrics() {
     }
 }
 
+#[test]
+fn corpus_benchmark_outputs_valid_core_metrics() {
+    let dir = tempdir().unwrap();
+    let corpus = dir.path().join("corpus");
+    fs::create_dir_all(corpus.join("src")).unwrap();
+    fs::create_dir_all(corpus.join("docs")).unwrap();
+    fs::write(
+        corpus.join("src").join("lib.rs"),
+        "pub fn alpha_engine() { let marker = \"alpha corpus memory\"; }\n\
+         pub fn beta_engine() { let marker = \"beta corpus memory\"; }\n",
+    )
+    .unwrap();
+    fs::write(
+        corpus.join("docs").join("notes.md"),
+        "# Corpus Notes\n\nAlpha module keeps compact page memory.\nBeta module checks recall timing.\n",
+    )
+    .unwrap();
+    fs::write(
+        corpus.join("Cargo.toml"),
+        "[package]\nname = \"corpus-smoke\"\nversion = \"0.0.0\"\n",
+    )
+    .unwrap();
+    fs::write(corpus.join("ignored.bin"), [0, 159, 146, 150]).unwrap();
+
+    let store_root = dir.path().join("corpus-bench-store");
+    let output = Command::new(env!("CARGO_BIN_EXE_mge-corpus-bench"))
+        .args([
+            "--corpus-root",
+            corpus.to_str().unwrap(),
+            "--store-root",
+            store_root.to_str().unwrap(),
+            "--max-files",
+            "8",
+            "--max-bytes",
+            "20000",
+            "--max-file-bytes",
+            "10000",
+            "--chunk-bytes",
+            "256",
+            "--targeted-queries",
+            "2",
+            "--noise-queries",
+            "1",
+            "--repeats",
+            "2",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "mge-corpus-bench failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let chunks = report["corpus"]["chunks_created"].as_u64().unwrap();
+    assert!(report["corpus"]["files_imported"].as_u64().unwrap() >= 3);
+    assert!(chunks >= 3);
+    assert_eq!(
+        report["subset_check"]["focused_exact_candidates_subset_of_binary_fuse_candidates"],
+        true
+    );
+
+    let modes = report["modes"].as_array().unwrap();
+    assert_eq!(modes.len(), 2);
+    assert_eq!(modes[0]["index_kind"], "exact_marker_page");
+    assert_eq!(modes[1]["index_kind"], "binary_fuse_page");
+    for mode in modes {
+        assert_eq!(mode["total_cells"].as_u64().unwrap(), chunks);
+        assert!(mode["total_sealed_pages"].as_u64().unwrap() > 0);
+        assert!(mode["avg_encoded_page_bytes"].as_u64().unwrap() > 0);
+        assert_eq!(mode["validation"]["validate_deep_ok"], true);
+        assert_eq!(mode["validation"]["rebuild_indexes_ok"], true);
+        assert_eq!(mode["validation"]["validate_after_rebuild_ok"], true);
+        assert_eq!(mode["build"]["remember_latency_micros"]["count"], chunks);
+        assert_eq!(
+            mode["sealed_recall_modes"]["cold"]["focused"]["latency_micros"]["count"],
+            6
+        );
+        assert_eq!(
+            mode["sealed_recall_modes"]["repeated"]["focused"]["latency_micros"]["count"],
+            6
+        );
+        assert_eq!(
+            mode["sealed_recall_modes"]["repeated"]["focused"]["timing_breakdown_micros"]
+                ["scoring_cache_build"]["count"],
+            6
+        );
+        assert!(
+            mode["sealed_recall_modes"]["repeated"]["focused"]["decoded_page_cache_hits"]["count"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+    }
+
+    for kind in ["exact_marker_page", "binary_fuse_page"] {
+        let mode_root = store_root.join(kind);
+        assert!(mode_root.join("manifest.mgm").is_file());
+        assert!(mode_root.join("dictionary").join("markers.mgd").is_file());
+        assert!(mode_root.join("pages").is_dir());
+        assert!(mode_root.join("indexes").join("page_index.mgi").is_file());
+        assert!(!mode_root.join("manifest.json").exists());
+        assert!(!mode_root.join("hot").join("hot_cells.jsonl").exists());
+    }
+}
+
 fn run_mge(store: &Path, args: &[&str]) -> Output {
     let output = Command::new(env!("CARGO_BIN_EXE_mge"))
         .arg("--store")

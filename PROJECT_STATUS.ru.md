@@ -247,11 +247,12 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 109 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 90 core integration tests).
+- `cargo test`: passed, 110 tests total (13 CLI unit tests + 6 CLI integration tests + 1 core unit test + 90 core integration tests).
 - Validation/rebuild tests: passed для clean deep validation, corrupted/mismatched catalog summaries, missing exact index restore, active Binary Fuse index restore, recall after rebuild, hot memory untouched и no JSON/JSONL runtime storage regression.
 - Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.
 - Benchmark harness integration smoke test: passed для exact + Binary Fuse modes и required metrics.
+- Corpus benchmark integration smoke test: passed for local corpus import, exact + Binary Fuse modes, cold/repeated recall metrics, validation/rebuild checks, subset check, and no JSON/JSONL runtime storage regression.
 - Benchmark harness CLI smoke command: passed.
   - config: 120 cells, 12 sealed pages, 4 logical scopes, 5 markers per cell, 4 marker groups, 4 targeted queries, 2 noise queries, 3 repeats, seed 7.
   - exact_marker_page: remember avg 8367 us, seal avg 61834 us, focused recall avg 5270 us, broad recall avg 12575 us, full-scope recall avg 1764 us, index lookup avg 1 us, page decode avg 391 us, ContextPacket build avg 944 us, storage 108585 bytes.
@@ -329,6 +330,17 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
     - binary focused total 35181 us, page decode 11557 us, scoring cache build 3104 us, cell filtering 5798 us.
     - binary broad total 35393 us, page decode 11526 us, scoring cache build 3132 us, cell filtering 5777 us.
   - Total latency materially не изменился; очищен только accounting.
+- Corpus benchmark package: passed.
+  - Добавлен `mge-corpus-bench` для local real-workload measurement перед решениями про custom codec или partial decode.
+  - Supported corpus extensions: `.txt`, `.md`, `.rs`, `.toml`, `.json` как text import only, `.py`, `.ts`, `.js`.
+  - Safety: no downloads, no corpus execution, skips symlinks, skips common generated dirs, respects max-files/max-bytes/max-file-bytes, fresh `--store-root` outside corpus root required.
+  - Metrics include files/bytes/chunks, avg chunk bytes, avg markers per cell, scopes/extensions, remember/seal/storage/page size, hot recall, sealed cold recall, sealed repeated recall, cache hits/misses, page read/decode, scoring cache build, filtering, reranking, ContextPacket build, cells decoded/filtered/ranked, returned items, validation/rebuild status, and exact-vs-Binary-Fuse subset check.
+  - Local repo corpus smoke: 24 files, 239826 bytes, 220 chunks, avg chunk 1089 bytes, 6 scopes, 3 extensions.
+  - exact repeated focused: total 25033 us, page decode 2528 us, scoring cache build 9862 us, cell filtering 9786 us, ContextPacket build 322 us.
+  - exact cold focused: total 40544 us, page decode 9084 us, cell filtering 28046 us, ContextPacket build 323 us.
+  - binary repeated focused: total 24266 us, page decode 2442 us, scoring cache build 9741 us, cell filtering 9653 us.
+  - repeated broad loaded about 3 pages / 78 cells on this limited repo corpus; metadata pruning kept broad recall small.
+  - Current real-ish bottleneck: cell filtering/scoring and scoring-cache construction dominate repeated focused recall; cold focused recall is dominated by filtering plus page decode.
 - L1 Hot RAM layer package: passed.
   - `HotMemoryLayer` индексирует hot cells в RAM по cell id, marker id, canonical scope, kind и status.
   - Correctness tests прошли для immediate recall после remember, reopen recovery из `hot/hot.mgl`, очистки hot после seal, sealed recall после seal, full-scope hot+sealed recall и default status exclusion before scoring.

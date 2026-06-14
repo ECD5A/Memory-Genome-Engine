@@ -137,6 +137,7 @@ Core benchmark/smoke harness:
 
 ```bash
 cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --scopes 16 --markers-per-cell 5 --marker-groups 12 --targeted-queries 6 --noise-queries 3 --repeats 5 --seed 1
+cargo run -p mge-cli --bin mge-corpus-bench -- --corpus-root . --store-root ../mge-corpus-bench-store --max-files 200 --max-bytes 8388608 --repeats 3
 ```
 
 Для явного marker search используйте `--marker`:
