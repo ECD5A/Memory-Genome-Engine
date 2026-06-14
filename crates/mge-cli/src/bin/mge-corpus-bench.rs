@@ -1261,10 +1261,8 @@ fn recommendation_to_json(exact: &ModeRun, binary: &ModeRun) -> serde_json::Valu
     let scoring_cache_build_share = percent_of(scoring_cache_build, sealed_repeated);
     let cell_filtering_share = percent_of(cell_filtering, sealed_repeated);
     let context_packet_build_share = percent_of(context_packet_build, sealed_repeated);
-    let scoring_filtering_share = percent_of(
-        scoring_cache_build.saturating_add(cell_filtering),
-        sealed_repeated,
-    );
+    let scoring_filtering_inclusive = scoring_cache_build.max(cell_filtering);
+    let scoring_filtering_share = percent_of(scoring_filtering_inclusive, sealed_repeated);
     let repeated_locality_benefit = percent_reduction(sealed_cold, sealed_repeated);
     let binary_fuse_delta = signed_percent_delta(binary_repeated, sealed_repeated);
 
@@ -1354,7 +1352,7 @@ fn recommendation_to_json(exact: &ModeRun, binary: &ModeRun) -> serde_json::Valu
                 "page_decode": page_decode_share,
                 "scoring_cache_build": scoring_cache_build_share,
                 "cell_filtering": cell_filtering_share,
-                "scoring_plus_filtering": scoring_filtering_share,
+                "scoring_filtering_inclusive": scoring_filtering_share,
                 "context_packet_build": context_packet_build_share,
             },
         },
