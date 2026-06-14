@@ -42,10 +42,11 @@
 
 ## v0.3
 
-- Rust API freeze for SDK boundary.
-- Python SDK through PyO3/maturin.
-- TypeScript SDK or REST wrapper.
-- MCP server.
+- Rust API freeze for SDK boundary. Foundation done via `MemoryEngine` integration review.
+- MCP server. Foundation done as `mge-mcp-server`, a local JSON-RPC stdin/stdout MCP-ready adapter.
+- Python SDK. Foundation done as a thin CLI wrapper in `sdk/python`; PyO3/maturin remains optional future packaging work.
+- TypeScript SDK. Foundation done as a thin Node wrapper in `sdk/typescript`.
+- Agent integration examples. Foundation done.
 
 ## v0.4
 

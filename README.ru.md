@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-Mandate%201%20closure-blue)](PROJECT_STATUS.ru.md)
+[![Status](https://img.shields.io/badge/status-Mandate%202%20integration-blue)](PROJECT_STATUS.ru.md)
 [![Interface](https://img.shields.io/badge/interface-CLI%20%7C%20Core%20API-informational)](crates/)
 [![Storage](https://img.shields.io/badge/storage-cells%20%2B%20markers%20%2B%20pages-6f42c1)](docs/ARCHITECTURE.ru.md)
 
@@ -31,7 +31,8 @@ Cells -> Marker Genome -> Hot Memory -> Sealed Pages -> Candidate Page Index -> 
 Реализация v0.1 сделана Rust-first:
 
 - `mge-core`: переиспользуемая библиотека движка памяти.
-- `mge-cli`: первый CLI-интерфейс, бинарник `mge`.
+- `mge-cli`: CLI interface, binary `mge`, плюс `mge-mcp-server` для local JSON-RPC integration.
+- `sdk/python` и `sdk/typescript`: thin wrappers вокруг Rust CLI.
 - `.memory-genome/`: локальное binary-хранилище с `manifest.mgm`, `dictionary/markers.mgd`, `hot/hot.mgl`, `pages/*.mgp` и `indexes/*.mgi`.
 - `MarkerGenome`: structured marker DNA каждой `MemoryCell`; flattened marker IDs остаются runtime/index view.
 - Runtime storage использует MessagePack-oriented binary files; zstd compression доступен для sealed pages.
@@ -42,8 +43,14 @@ Cells -> Marker Genome -> Hot Memory -> Sealed Pages -> Candidate Page Index -> 
 - [Архитектура](docs/ARCHITECTURE.ru.md)
 - [Дорожная карта](docs/ROADMAP.ru.md)
 - [Бенчмарки](docs/BENCHMARKS.ru.md)
+- [Интеграция](docs/INTEGRATION.ru.md)
+- [MCP adapter](docs/MCP.ru.md)
+- [SDK](docs/SDK.ru.md)
 - [Базовое использование](examples/basic_usage.ru.md)
+- [Agent workflow](examples/agent_workflow.ru.md)
 - [Rust API example](examples/basic_usage.rs)
+- [Python SDK example](examples/python_basic_usage.py)
+- [TypeScript SDK example](examples/typescript_basic_usage.ts)
 - [Статус проекта](PROJECT_STATUS.ru.md)
 
 ## Почему Не Markdown
@@ -147,6 +154,17 @@ cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile small --sto
 
 Benchmark reports объяснены в [Бенчмарках](docs/BENCHMARKS.ru.md). JSON benchmark output - это report/debug output, а не runtime storage.
 
+## Agent Integration
+
+Мандат 2 добавляет local integration boundaries без изменения core storage architecture:
+
+- `mge-mcp-server`: MCP-ready JSON-RPC stdin/stdout adapter.
+- Python SDK: thin wrapper в `sdk/python`.
+- TypeScript SDK: thin wrapper в `sdk/typescript`.
+- Agent examples: [Agent workflow](examples/agent_workflow.ru.md).
+
+Integration layer возвращает `ContextPacket` из recall и использует JSON только как protocol/debug output, а не runtime storage.
+
 Для явного marker search используйте `--marker`:
 
 ```bash
@@ -193,7 +211,8 @@ tests/
 
 ## Текущие Ограничения
 
-- Mandate 1 core находится в closure phase: storage, L1 Hot RAM, sealed pages, indexes, validation/rebuild, CLI и benchmark foundation готовы.
+- Mandate 1 core закрыт: storage, L1 Hot RAM, sealed pages, indexes, validation/rebuild, CLI и benchmark foundation готовы.
+- Mandate 2 integration foundation активен: MCP-ready adapter и thin Python/TypeScript SDK wrappers уже есть.
 - Большой user-provided corpus всё ещё полезен перед любым дальнейшим scoring/filtering cleanup.
 - Нет GUI.
 - Нет chatbot.

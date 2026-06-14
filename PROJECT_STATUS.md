@@ -41,20 +41,20 @@ JSON policy:
 | --- | --- | --- |
 | v0.1 core/CLI | Done / hardening | Rust core, CLI, cells, markers, hot memory, sealed pages, exact index, recall, and context packets work. |
 | v0.2 storage/index foundation | Done / hardening | Binary runtime storage layout, MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in, and validation hardening are done. |
-| v0.2 remaining | Closure phase | Benchmark foundation is ready; remaining work is docs/API polish and a larger user-provided corpus run. |
-| v0.3 SDK/MCP | Not started | Python/TypeScript/MCP only after Rust core API stabilizes. |
+| v0.2 remaining | Closed | Benchmark foundation is ready; further core cleanup is benchmark-gated. |
+| v0.3 SDK/MCP | In progress | Mandate 2 integration foundation is active: MCP-ready adapter and thin Python/TypeScript wrappers are present. |
 | v0.4 security | Foundation only | Interfaces/policy exist; real encryption/session unlock/blind markers are not started. |
 | v0.5 safety/search | Partial foundation | Policy/capabilities exist; poisoning/conflict/vector reranking are not started. |
 
 ## Current Focus
 
-- Push the v0.1/v0.2 core/storage/index foundation toward a fast compact runtime path.
+- Build Mandate 2 agent integration while keeping the Mandate 1 core stable.
 - Keep JSON out of internal runtime storage; use it only for explicit debug output and structured input parsing.
-- Keep the implementation deterministic, local, compact, marker/page based, and ready for later encryption, SDKs, and MCP.
+- Keep the implementation deterministic, local, compact, marker/page based, and ready for later security work.
 
 ## Mandate 1 Closure Status
 
-Mandate 1 is in closure phase. The developer-ready core is functionally ready after docs/API cleanup and a final benchmark pass.
+Mandate 1 is closed on commit `d441ca1`.
 
 Ready:
 
@@ -100,9 +100,30 @@ Remaining closure gaps:
 - Keep minimal Rust API examples in `examples/basic_usage.rs`.
 - Optional scoring/filtering cleanup only after a larger real corpus confirms the same bottleneck.
 
-Recommended next mandate after closure:
+## Mandate 2 Progress
 
-- Mandate 2 should be Agent Integration / SDK / MCP only after the owner accepts the final corpus results.
+Active mandate: Agent Integration / MCP / SDK.
+
+Done in Mandate 2 foundation:
+
+- Stable Rust integration boundary reviewed; `MemoryEngine` already covers init/open, remember, recall, seal, checkpoint, stats, validate, validate_deep, rebuild indexes, and Markdown export.
+- Added `mge-mcp-server` as a local JSON-RPC stdin/stdout adapter with tools for remember, recall, seal, checkpoint, stats, validate, rebuild indexes, and Markdown export.
+- Added thin Python SDK wrapper in `sdk/python`.
+- Added thin TypeScript SDK wrapper in `sdk/typescript`.
+- Added runnable Python and TypeScript basic examples.
+- Added agent workflow examples for CLI, MCP-style JSON-RPC, Python, and TypeScript.
+- Added integration docs: `docs/INTEGRATION.md`, `docs/MCP.md`, and `docs/SDK.md`, plus Russian mirrors.
+
+Mandate 2 constraints preserved:
+
+- Rust remains the core.
+- Python and TypeScript do not duplicate memory logic; they delegate to the Rust CLI.
+- JSON is protocol/debug output only, not runtime storage.
+- Storage layout, filters, page codec, recall modes, `MarkerGenome`, and `MemoryCell.markers` are unchanged.
+
+Next Mandate 2 step:
+
+- Decide whether to keep the local JSON-RPC adapter as the first MCP integration surface or add a full MCP SDK dependency later after the tool schema stabilizes.
 
 ## Done
 

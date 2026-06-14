@@ -42,10 +42,11 @@
 
 ## v0.3
 
-- Rust API freeze для SDK boundary.
-- Python SDK через PyO3/maturin.
-- TypeScript SDK или REST wrapper.
-- MCP server.
+- Rust API freeze для SDK boundary. Foundation сделан через `MemoryEngine` integration review.
+- MCP server. Foundation сделан как `mge-mcp-server`, local JSON-RPC stdin/stdout MCP-ready adapter.
+- Python SDK. Foundation сделан как thin CLI wrapper в `sdk/python`; PyO3/maturin остаётся optional future packaging work.
+- TypeScript SDK. Foundation сделан как thin Node wrapper в `sdk/typescript`.
+- Agent integration examples. Foundation сделан.
 
 ## v0.4
 

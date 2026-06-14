@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-Mandate%201%20closure-blue)](PROJECT_STATUS.md)
+[![Status](https://img.shields.io/badge/status-Mandate%202%20integration-blue)](PROJECT_STATUS.md)
 [![Interface](https://img.shields.io/badge/interface-CLI%20%7C%20Core%20API-informational)](crates/)
 [![Storage](https://img.shields.io/badge/storage-cells%20%2B%20markers%20%2B%20pages-6f42c1)](docs/ARCHITECTURE.md)
 
@@ -28,10 +28,11 @@ Agents should lease memory from the engine, not own the whole memory store. They
 Cells -> Marker Genome -> Hot Memory -> Sealed Pages -> Candidate Page Index -> Context Packet
 ```
 
-The v0.1 implementation is Rust-first:
+The current implementation is Rust-first:
 
 - `mge-core`: reusable memory engine library.
-- `mge-cli`: first command-line interface, binary name `mge`.
+- `mge-cli`: command-line interface, binary name `mge`, plus `mge-mcp-server` for local JSON-RPC integration.
+- `sdk/python` and `sdk/typescript`: thin wrappers around the Rust CLI.
 - `.memory-genome/`: local binary store with `manifest.mgm`, `dictionary/markers.mgd`, `hot/hot.mgl`, `pages/*.mgp`, and `indexes/*.mgi`.
 - `MarkerGenome`: structured marker DNA of a `MemoryCell`; flattened marker IDs remain the runtime/index view.
 - Runtime storage uses MessagePack-oriented binary files; zstd compression is available for sealed pages.
@@ -42,8 +43,14 @@ More detail:
 - [Architecture](docs/ARCHITECTURE.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Benchmarks](docs/BENCHMARKS.md)
+- [Integration](docs/INTEGRATION.md)
+- [MCP adapter](docs/MCP.md)
+- [SDKs](docs/SDK.md)
 - [Basic usage](examples/basic_usage.md)
+- [Agent workflow](examples/agent_workflow.md)
 - [Rust API example](examples/basic_usage.rs)
+- [Python SDK example](examples/python_basic_usage.py)
+- [TypeScript SDK example](examples/typescript_basic_usage.ts)
 - [Project status](PROJECT_STATUS.md)
 
 ## Why Not Markdown
@@ -147,6 +154,17 @@ cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile small --sto
 
 Benchmark reports are explained in [Benchmarks](docs/BENCHMARKS.md). JSON benchmark output is report/debug output only, not runtime storage.
 
+## Agent Integration
+
+Mandate 2 adds local integration boundaries without changing the core storage architecture:
+
+- `mge-mcp-server`: MCP-ready JSON-RPC stdin/stdout adapter.
+- Python SDK: thin wrapper in `sdk/python`.
+- TypeScript SDK: thin wrapper in `sdk/typescript`.
+- Agent examples: [Agent workflow](examples/agent_workflow.md).
+
+The integration layer returns `ContextPacket` from recall and uses JSON only as protocol/debug output, not runtime storage.
+
 Use `--marker` on recall for explicit marker search:
 
 ```bash
@@ -193,7 +211,8 @@ tests/
 
 ## Current Limits
 
-- Mandate 1 core is in closure phase: storage, L1 Hot RAM, sealed pages, indexes, validation/rebuild, CLI, and benchmark foundation are ready.
+- Mandate 1 core is closed: storage, L1 Hot RAM, sealed pages, indexes, validation/rebuild, CLI, and benchmark foundation are ready.
+- Mandate 2 integration foundation is active: MCP-ready adapter and thin Python/TypeScript SDK wrappers are present.
 - A larger user-provided corpus is still useful before any further scoring/filtering cleanup.
 - No GUI.
 - No chatbot.
