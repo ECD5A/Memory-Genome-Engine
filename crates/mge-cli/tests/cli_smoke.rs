@@ -1,8 +1,9 @@
 use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tempfile::tempdir;
 
 #[test]
@@ -220,6 +221,124 @@ fn cli_checkpoint_and_durability_config_restore_hot_memory() {
     let stats = run_mge_json(&store, &["stats", "--json"]);
     assert_eq!(stats["hot_cells"], 0);
     assert_eq!(stats["sealed_cells"], 1);
+}
+
+#[test]
+fn mcp_server_json_rpc_adapter_supports_agent_workflow() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    let export_path = dir.path().join("agent-memory.md");
+    let store_path = store.to_string_lossy().to_string();
+    let export_path_string = export_path.to_string_lossy().to_string();
+
+    run_mge(&store, &["init", "--profile", "fast"]);
+
+    let responses = run_mcp_json_lines(&[
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "mge_remember",
+            "params": {
+                "store_path": store_path.clone(),
+                "content": "Agent should recall project memory before making changes",
+                "kind": "procedure",
+                "scope": "mandate_2",
+                "markers": ["topic:agent_integration"],
+                "trust": "user_confirmed",
+                "sensitivity": "private"
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "mge_recall",
+            "params": {
+                "store_path": store_path.clone(),
+                "query": "agent integration memory",
+                "mode": "focused",
+                "scope": "mandate_2",
+                "max_items": 3
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "mge_checkpoint",
+            "params": { "store_path": store_path.clone() }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "mge_seal",
+            "params": { "store_path": store_path.clone() }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "mge_stats",
+            "params": { "store_path": store_path.clone() }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "mge_validate",
+            "params": { "store_path": store_path.clone(), "deep": true }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "mge_rebuild_indexes",
+            "params": { "store_path": store_path.clone() }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "mge_export_markdown",
+            "params": {
+                "store_path": store_path.clone(),
+                "output_path": export_path_string.clone()
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "mge_recall",
+            "params": {
+                "store_path": store_path.clone(),
+                "mode": "full_scope"
+            }
+        }),
+    ]);
+
+    assert_eq!(responses.len(), 9);
+    assert_eq!(responses[0]["result"]["ok"], true);
+    assert_eq!(responses[0]["result"]["cell_id"], 1);
+    assert_eq!(responses[0]["result"]["json_runtime_storage"], false);
+    assert_eq!(
+        responses[1]["result"]["context_packet"]["debug"]["recall_mode"],
+        "focused"
+    );
+    assert_eq!(
+        responses[1]["result"]["context_packet"]["relevant_memory"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(responses[3]["result"]["seal"]["hot_cells_sealed"], 1);
+    assert_eq!(responses[4]["result"]["stats"]["hot_cells"], 0);
+    assert_eq!(responses[4]["result"]["stats"]["sealed_cells"], 1);
+    assert_eq!(responses[5]["result"]["validation"]["ok"], true);
+    assert_eq!(responses[6]["result"]["rebuild"]["pages_unchanged"], true);
+    assert_eq!(responses[7]["result"]["format"], "markdown");
+    assert!(export_path.is_file());
+    assert!(responses[8]["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("full_scope recall requires scope"));
+
+    assert!(!store.join("manifest.json").exists());
+    assert!(!store.join("hot").join("hot_cells.jsonl").exists());
 }
 
 #[test]
@@ -787,4 +906,33 @@ fn run_mge_failure(store: &Path, args: &[&str]) -> Output {
     );
 
     output
+}
+
+fn run_mcp_json_lines(requests: &[Value]) -> Vec<Value> {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mge-mcp-server"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        for request in requests {
+            writeln!(stdin, "{}", serde_json::to_string(request).unwrap()).unwrap();
+        }
+    }
+
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "mge-mcp-server failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
 }

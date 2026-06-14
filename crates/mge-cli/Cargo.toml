@@ -10,6 +10,7 @@ default-run = "mge"
 anyhow.workspace = true
 clap.workspace = true
 mge-core = { path = "../mge-core" }
+serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
@@ -26,3 +27,7 @@ path = "src/bin/mge-synthetic-bench.rs"
 [[bin]]
 name = "mge-corpus-bench"
 path = "src/bin/mge-corpus-bench.rs"
+
+[[bin]]
+name = "mge-mcp-server"
+path = "src/bin/mge-mcp-server.rs"

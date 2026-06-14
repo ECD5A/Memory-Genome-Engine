@@ -449,6 +449,7 @@ dependencies = [
  "anyhow",
  "clap",
  "mge-core",
+ "serde",
  "serde_json",
  "tempfile",
 ]
