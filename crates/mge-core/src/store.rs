@@ -4,7 +4,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
@@ -33,8 +33,9 @@ use crate::pages::{
 };
 use crate::retrieval::{
     full_scope_cell_debug_with_filter, score_cell_debug_with_cached_context,
-    score_cell_debug_with_context, CachedCellScoringData, RecallFilterContext, RecallRequest,
-    Retriever, ScoringContext,
+    score_cell_debug_with_context, score_permitted_cell_debug_with_cached_context,
+    score_permitted_cell_debug_with_context, CachedCellScoringData, RecallFilterContext,
+    RecallRequest, Retriever, ScoringContext,
 };
 use crate::security::{AuditEvent, AuditLogger, NoSecurity, NoopAuditLogger, SecurityProvider};
 
@@ -406,20 +407,31 @@ struct CachedDecodedPage {
     scoring: Option<Arc<PageScoringCache>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct PageScoringCache {
-    cells: Vec<CachedCellScoringData>,
+    cells: Vec<OnceLock<CachedCellScoringData>>,
 }
 
 impl PageScoringCache {
-    fn from_page(page: &MemoryPage) -> Self {
+    fn for_page(page: &MemoryPage) -> Self {
         Self {
-            cells: page
-                .cells
-                .iter()
-                .map(CachedCellScoringData::from_cell)
-                .collect(),
+            cells: page.cells.iter().map(|_| OnceLock::new()).collect(),
         }
+    }
+
+    fn cell_with_timing(
+        &self,
+        cell_index: usize,
+        cell: &MemoryCell,
+    ) -> Option<(&CachedCellScoringData, u64)> {
+        let slot = self.cells.get(cell_index)?;
+        if let Some(cached) = slot.get() {
+            return Some((cached, 0));
+        }
+
+        let started = Instant::now();
+        let cached = slot.get_or_init(|| CachedCellScoringData::from_cell(cell));
+        Some((cached, elapsed_micros(started)))
     }
 }
 
@@ -986,13 +998,21 @@ impl MemoryEngine {
                         full_scope_cell_debug_with_filter(cell, &filter_context)
                     }
                     RecallMode::Focused | RecallMode::Broad => {
-                        if let Some(cached) = scoring_cache
+                        if !scoring_context.permits_cell(cell) {
+                            None
+                        } else if let Some((cached, build_micros)) = scoring_cache
                             .as_ref()
-                            .and_then(|cache| cache.cells.get(cell_index))
+                            .and_then(|cache| cache.cell_with_timing(cell_index, cell))
                         {
-                            score_cell_debug_with_cached_context(cell, &scoring_context, cached)
+                            scoring_cache_build_micros =
+                                scoring_cache_build_micros.saturating_add(build_micros);
+                            score_permitted_cell_debug_with_cached_context(
+                                cell,
+                                &scoring_context,
+                                cached,
+                            )
                         } else {
-                            score_cell_debug_with_context(cell, &scoring_context)
+                            score_permitted_cell_debug_with_context(cell, &scoring_context)
                         }
                     }
                 } {
@@ -1767,13 +1787,11 @@ impl MemoryEngine {
                     match cached.scoring {
                         Some(scoring) => (Some(scoring), 0, true, false),
                         None => {
-                            let scoring_started = Instant::now();
-                            let scoring = Arc::new(PageScoringCache::from_page(&cached.page));
-                            let scoring_cache_build_micros = elapsed_micros(scoring_started);
+                            let scoring = Arc::new(PageScoringCache::for_page(&cached.page));
                             self.page_cache
                                 .borrow_mut()
                                 .set_scoring(entry.page_id, Arc::clone(&scoring));
-                            (Some(scoring), scoring_cache_build_micros, false, true)
+                            (Some(scoring), 0, false, true)
                         }
                     }
                 } else {
@@ -1792,6 +1810,9 @@ impl MemoryEngine {
         }
 
         let mut timed_page = self.read_page_with_timing(entry)?;
+        if include_scoring {
+            timed_page.scoring = Some(Arc::new(PageScoringCache::for_page(&timed_page.page)));
+        }
         timed_page.scoring_cache_miss = include_scoring;
         self.page_cache
             .borrow_mut()

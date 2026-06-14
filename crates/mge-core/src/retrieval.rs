@@ -193,6 +193,10 @@ impl ScoringContext {
             query_canonical: canonicalize_marker_value(&request.query),
         }
     }
+
+    pub(crate) fn permits_cell(&self, cell: &MemoryCell) -> bool {
+        self.filter.permits_cell(cell)
+    }
 }
 
 pub fn score_cell(
@@ -236,6 +240,22 @@ pub(crate) fn score_cell_debug_with_cached_context(
     }
 
     score_permitted_cell_debug(cell, context, cached)
+}
+
+pub(crate) fn score_permitted_cell_debug_with_cached_context(
+    cell: &MemoryCell,
+    context: &ScoringContext,
+    cached: &CachedCellScoringData,
+) -> Option<ContextScoreDebugItem> {
+    score_permitted_cell_debug(cell, context, cached)
+}
+
+pub(crate) fn score_permitted_cell_debug_with_context(
+    cell: &MemoryCell,
+    context: &ScoringContext,
+) -> Option<ContextScoreDebugItem> {
+    let cached = CachedCellScoringData::from_cell(cell);
+    score_permitted_cell_debug(cell, context, &cached)
 }
 
 fn score_permitted_cell_debug(

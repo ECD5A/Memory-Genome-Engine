@@ -116,6 +116,7 @@ JSON policy:
 - Page catalog entries now also record lightweight pre-decode summaries: scope marker summary, kind marker summary, direct status summary, direct sensitivity summary, trust summary, and encoded page size.
 - Sealed recall now has a small bounded decoded-page cache for immutable sealed pages; validation and rebuild paths intentionally bypass it and read page files directly.
 - Decoded sealed pages can now keep runtime-only scoring data for repeated recall: per-cell value tokens, canonical value text, and subject tokens are cached in RAM after a decoded page cache hit. This does not change `.mgp` storage, ContextPacket output, validation, or rebuild behavior.
+- Decoded sealed page scoring data is now lazy per cell: page cache stores runtime cache slots and builds token/canonical scoring data only for cells that pass cheap metadata/filter checks and actually need text scoring.
 - Internal store files now use the final binary layout:
   - `manifest.mgm`
   - `dictionary/markers.mgd`
@@ -286,6 +287,12 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - sealed repeated focused exact stayed comparable: 20894 us -> 21144 us.
   - sealed repeated broad exact stayed comparable: 6439 us -> 6669 us.
   - subset check: focused exact candidates subset of binary_fuse candidates passed.
+- Lazy sealed scoring cache benchmark command: passed on the same generated corpus shape, 36 files, 748536 imported bytes, 960 chunks.
+  - sealed repeated focused exact: 21252 us -> 15859 us.
+  - sealed repeated focused binary_fuse: 21774 us -> 15546 us.
+  - sealed repeated broad exact: 6642 us -> 6405 us.
+  - repeated focused exact timing after: total 15859 us, page decode 2976 us, scoring cache build 6221 us, cell filtering 8806 us, ContextPacket build 518 us.
+  - subset check: focused exact candidates subset of binary_fuse candidates passed.
 - Benchmark harness CLI smoke command: passed.
   - config: 120 cells, 12 sealed pages, 4 logical scopes, 5 markers per cell, 4 marker groups, 4 targeted queries, 2 noise queries, 3 repeats, seed 7.
   - exact_marker_page: remember avg 8367 us, seal avg 61834 us, focused recall avg 5270 us, broad recall avg 12575 us, full-scope recall avg 1764 us, index lookup avg 1 us, page decode avg 391 us, ContextPacket build avg 944 us, storage 108585 bytes.
@@ -403,6 +410,10 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - Hot focused/broad recall now reuses `CachedCellScoringData` built at `remember`/hot recovery time instead of tokenizing hot cell value/subject on every recall.
   - Runtime scoring data is cleared with `HotMemoryLayer::clear()` during seal and is not persisted into `hot/hot.mgl` or snapshots as a separate storage format.
   - Correctness tests passed for cache build/clear, hot recall, reopen recovery, seal clearing, full-scope behavior, and no JSON runtime storage regression.
+- Lazy sealed page scoring cache package: passed.
+  - `PageScoringCache` now stores lazy per-cell `OnceLock<CachedCellScoringData>` slots instead of tokenizing every cell on the page when the page enters scoring cache.
+  - Sealed focused/broad recall now runs cheap filter checks before building token/canonical scoring data and uses prechecked scoring to avoid duplicate filter work.
+  - Runtime cache remains in RAM only; `.mgp` files, page codec, storage layout, validation, and rebuild-indexes are unchanged.
 - L1 Hot RAM layer package: passed.
   - `HotMemoryLayer` indexes hot cells in RAM by cell id, marker id, canonical scope, kind, and status.
   - Correctness tests passed for immediate recall after remember, reopen recovery from `hot/hot.mgl`, hot clearing after seal, sealed recall after seal, full-scope hot+sealed recall, and default status exclusion before scoring.

@@ -1112,7 +1112,8 @@ fn sealed_recall_context_output_is_stable_after_cache_hit() {
     assert_eq!(second.debug.loaded_pages, 1);
     assert_eq!(second.debug.decoded_page_cache_hits, 1);
     assert_eq!(second.debug.decoded_page_cache_misses, 0);
-    assert_eq!(second.debug.scoring_cache_misses, 1);
+    assert_eq!(second.debug.scoring_cache_hits, 1);
+    assert_eq!(second.debug.scoring_cache_misses, 0);
     assert_eq!(second.debug.returned_items, 1);
     assert_eq!(first.relevant_memory, third.relevant_memory);
     assert_eq!(first.debug.score_details, third.debug.score_details);
