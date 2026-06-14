@@ -872,6 +872,34 @@ fn comparison_to_json(exact: &ModeRun, binary: &ModeRun) -> serde_json::Value {
                 &binary.sealed_repeated_full_scope_recall,
             ),
         },
+        "sealed_repeated_locality": {
+            "focused": recall_locality_pair_json(
+                &exact.sealed_repeated_focused_recall,
+                &binary.sealed_repeated_focused_recall,
+            ),
+            "broad": recall_locality_pair_json(
+                &exact.sealed_repeated_broad_recall,
+                &binary.sealed_repeated_broad_recall,
+            ),
+            "full_scope": recall_locality_pair_json(
+                &exact.sealed_repeated_full_scope_recall,
+                &binary.sealed_repeated_full_scope_recall,
+            ),
+        },
+        "top_bottlenecks_avg_micros": {
+            "exact_marker_page": {
+                "hot_focused": top_bottlenecks_json(&exact.hot_focused_recall),
+                "sealed_cold_focused": top_bottlenecks_json(&exact.sealed_cold_focused_recall),
+                "sealed_repeated_focused": top_bottlenecks_json(&exact.sealed_repeated_focused_recall),
+                "sealed_repeated_broad": top_bottlenecks_json(&exact.sealed_repeated_broad_recall),
+            },
+            "binary_fuse_page": {
+                "hot_focused": top_bottlenecks_json(&binary.hot_focused_recall),
+                "sealed_cold_focused": top_bottlenecks_json(&binary.sealed_cold_focused_recall),
+                "sealed_repeated_focused": top_bottlenecks_json(&binary.sealed_repeated_focused_recall),
+                "sealed_repeated_broad": top_bottlenecks_json(&binary.sealed_repeated_broad_recall),
+            },
+        },
         "sealed_cold_focused_avg_micros": pair_json(&exact.sealed_cold_focused_recall.total_recall_micros, &binary.sealed_cold_focused_recall.total_recall_micros),
         "sealed_repeated_focused_avg_micros": pair_json(&exact.sealed_repeated_focused_recall.total_recall_micros, &binary.sealed_repeated_focused_recall.total_recall_micros),
         "sealed_repeated_broad_avg_micros": pair_json(&exact.sealed_repeated_broad_recall.total_recall_micros, &binary.sealed_repeated_broad_recall.total_recall_micros),
@@ -924,6 +952,53 @@ fn recall_timing_pair_json(exact: &RecallBenchRun, binary: &RecallBenchRun) -> s
         "reranking": pair_json(&exact.reranking_micros, &binary.reranking_micros),
         "context_packet_build": pair_json(&exact.context_packet_build_micros, &binary.context_packet_build_micros),
     })
+}
+
+fn recall_locality_pair_json(exact: &RecallBenchRun, binary: &RecallBenchRun) -> serde_json::Value {
+    json!({
+        "decoded_page_cache_hits": pair_json(&exact.decoded_page_cache_hits, &binary.decoded_page_cache_hits),
+        "decoded_page_cache_misses": pair_json(&exact.decoded_page_cache_misses, &binary.decoded_page_cache_misses),
+        "scoring_cache_hits": pair_json(&exact.scoring_cache_hits, &binary.scoring_cache_hits),
+        "scoring_cache_misses": pair_json(&exact.scoring_cache_misses, &binary.scoring_cache_misses),
+        "pages_loaded": pair_json(&exact.pages_loaded, &binary.pages_loaded),
+        "pages_pruned_by_metadata": pair_json(&exact.pages_pruned_by_metadata, &binary.pages_pruned_by_metadata),
+        "cells_decoded": pair_json(&exact.cells_decoded, &binary.cells_decoded),
+        "cells_ranked": pair_json(&exact.cells_ranked, &binary.cells_ranked),
+        "returned_items": pair_json(&exact.returned_items, &binary.returned_items),
+    })
+}
+
+fn top_bottlenecks_json(run: &RecallBenchRun) -> serde_json::Value {
+    let mut bottlenecks = vec![
+        (
+            "query_marker_extraction",
+            run.query_marker_extraction_micros.avg(),
+        ),
+        ("hot_memory_lookup", run.hot_memory_lookup_micros.avg()),
+        (
+            "candidate_page_index_lookup",
+            run.candidate_page_index_lookup_micros.avg(),
+        ),
+        ("page_file_read_load", run.page_file_read_load_micros.avg()),
+        ("page_decode", run.page_decode_micros.avg()),
+        ("scoring_cache_build", run.scoring_cache_build_micros.avg()),
+        ("cell_filtering", run.cell_filtering_micros.avg()),
+        ("reranking", run.reranking_micros.avg()),
+        (
+            "context_packet_build",
+            run.context_packet_build_micros.avg(),
+        ),
+    ];
+    bottlenecks.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(right.0)));
+    json!(bottlenecks
+        .into_iter()
+        .filter(|(_, avg_micros)| *avg_micros > 0)
+        .take(5)
+        .map(|(component, avg_micros)| json!({
+            "component": component,
+            "avg_micros": avg_micros,
+        }))
+        .collect::<Vec<_>>())
 }
 
 fn pair_json(exact: &MetricSamples, binary: &MetricSamples) -> serde_json::Value {

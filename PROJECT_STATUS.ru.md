@@ -179,6 +179,7 @@ JSON policy:
 - Synthetic benchmark сравнивает `exact_marker_page` и opt-in `binary_fuse_page` на одинаковых generated stores и проверяет `exact_candidates ⊆ binary_fuse_candidates`.
 - Synthetic benchmark harness теперь показывает remember, seal, hot focused/broad/full-scope recall до seal, sealed focused/broad/full-scope recall после seal, index lookup, page decode, ContextPacket build, candidate pages, pages pruned by metadata, hot total/candidate/scanned cells, cells scanned, returned items, storage size, seal hot-clear correctness и p50/p95/avg metrics where practical.
 - Corpus benchmark comparison output теперь содержит прямые exact-vs-Binary-Fuse summaries для hot/cold/repeated focused/broad/full-scope recall, repeated timing breakdowns, ContextPacket build time, storage size, average encoded page size и average cells per page.
+- Corpus benchmark comparison output теперь также содержит repeated recall locality summaries и top timing bottlenecks для hot focused, sealed cold focused, sealed repeated focused и sealed repeated broad workloads.
 - Index/filter minimalism задокументирован: L1 Hot RAM использует только exact mutable indexes; L2 использует `ExactMarkerPageIndex` по умолчанию и `BinaryFusePageIndex` как единственный optional static probabilistic filter backend.
 - Hot log archiving теперь использует уникальные archive names, если несколько seals попадают в одно timestamp window.
 - Добавлены `ValidationReport` и CLI `validate` как read-only consistency checks для manifest, catalog, pages, page checksums, marker references и candidate index coverage.
@@ -389,6 +390,10 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - Добавлен decision-ready `comparison` summary для exact vs BinaryFuse по hot/cold/repeated recall и focused/broad/full-scope modes.
   - Repeated sealed recall summary теперь показывает total recall, query marker extraction, hot lookup, index lookup, page read/load, page decode, scoring cache build, cell filtering, reranking и ContextPacket build по recall mode.
   - Existing detailed `modes` output оставлен без изменений; это только форма отчёта, а не изменение retrieval/storage behavior.
+- Corpus benchmark bottleneck summary package: passed.
+  - Добавлен `sealed_repeated_locality` с decoded page cache hits/misses, scoring cache hits/misses, pages loaded/pruned, cells decoded/ranked и returned items.
+  - Добавлен `top_bottlenecks_avg_micros` для основных hot/cold/repeated workloads, отсортированный по average component time.
+  - Это только форма отчёта; recall, storage, indexes, filters и ContextPacket output не менялись.
 - L1 Hot RAM scoring cache package: passed.
   - Hot focused/broad recall теперь переиспользует `CachedCellScoringData`, построенный на `remember`/hot recovery, вместо tokenization hot cell value/subject на каждый recall.
   - Runtime scoring data очищается через `HotMemoryLayer::clear()` при seal и не сохраняется в `hot/hot.mgl` или snapshots как отдельный storage format.

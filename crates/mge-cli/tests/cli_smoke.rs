@@ -463,6 +463,27 @@ fn corpus_benchmark_outputs_valid_core_metrics() {
             .unwrap()
             > 0
     );
+    assert!(
+        report["comparison"]["sealed_repeated_locality"]["focused"]["decoded_page_cache_hits"]
+            ["exact_marker_page"]
+            .as_u64()
+            .is_some()
+    );
+    assert!(
+        report["comparison"]["sealed_repeated_locality"]["focused"]["scoring_cache_misses"]
+            ["binary_fuse_page"]
+            .as_u64()
+            .is_some()
+    );
+    assert!(
+        report["comparison"]["top_bottlenecks_avg_micros"]["exact_marker_page"]
+            ["sealed_repeated_focused"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["component"].as_str().is_some()
+                && entry["avg_micros"].as_u64().is_some())
+    );
 
     let modes = report["modes"].as_array().unwrap();
     assert_eq!(modes.len(), 2);

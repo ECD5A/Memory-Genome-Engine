@@ -184,6 +184,7 @@ JSON policy:
 - Corpus benchmark tool added as `cargo run -p mge-cli --bin mge-corpus-bench`.
 - Corpus benchmark imports only local text/code corpus files with explicit max-files/max-bytes limits, skips symlinks and common generated directories, never executes corpus files, writes stores only under `--store-root`, compares exact vs Binary Fuse, and reports cold vs repeated focused/broad/full-scope recall.
 - Corpus benchmark comparison output now includes direct exact-vs-Binary-Fuse summaries for hot/cold/repeated focused/broad/full-scope recall, repeated timing breakdowns, ContextPacket build time, storage size, average encoded page size, and average cells per page.
+- Corpus benchmark comparison output now also includes repeated recall locality summaries and top timing bottlenecks for hot focused, sealed cold focused, sealed repeated focused, and sealed repeated broad workloads.
 - Index/filter minimalism is documented: L1 Hot RAM uses exact mutable indexes only; L2 uses `ExactMarkerPageIndex` by default and `BinaryFusePageIndex` as the only optional static probabilistic filter backend.
 - Hot log archiving now uses unique archive names when multiple seals happen within the same timestamp window.
 - `ValidationReport` and CLI `validate` added as read-only consistency checks for manifest, catalog, pages, page checksums, marker references, and candidate index coverage.
@@ -394,6 +395,10 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - Added a decision-ready `comparison` summary for exact vs BinaryFuse across hot/cold/repeated recall and focused/broad/full-scope modes.
   - Repeated sealed recall summary now exposes total recall, query marker extraction, hot lookup, index lookup, page read/load, page decode, scoring cache build, cell filtering, reranking, and ContextPacket build by recall mode.
   - Existing detailed `modes` output remains unchanged; this is report shape only, not a retrieval/storage behavior change.
+- Corpus benchmark bottleneck summary package: passed.
+  - Added `sealed_repeated_locality` with decoded page cache hits/misses, scoring cache hits/misses, pages loaded/pruned, cells decoded/ranked, and returned items.
+  - Added `top_bottlenecks_avg_micros` for the main hot/cold/repeated workloads, sorted by average component time.
+  - This is report shape only; recall, storage, indexes, filters, and ContextPacket output are unchanged.
 - L1 Hot RAM scoring cache package: passed.
   - Hot focused/broad recall now reuses `CachedCellScoringData` built at `remember`/hot recovery time instead of tokenizing hot cell value/subject on every recall.
   - Runtime scoring data is cleared with `HotMemoryLayer::clear()` during seal and is not persisted into `hot/hot.mgl` or snapshots as a separate storage format.
