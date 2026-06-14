@@ -113,6 +113,7 @@ JSON policy:
 - Page catalog entries now record per-page codec/compression for mixed-store and backward-compatible reads.
 - Page catalog entries now also record lightweight pre-decode summaries: scope marker summary, kind marker summary, direct status summary, direct sensitivity summary, trust summary, and encoded page size.
 - Sealed recall now has a small bounded decoded-page cache for immutable sealed pages; validation and rebuild paths intentionally bypass it and read page files directly.
+- Decoded sealed pages can now keep runtime-only scoring data for repeated recall: per-cell value tokens, canonical value text, and subject tokens are cached in RAM after a decoded page cache hit. This does not change `.mgp` storage, ContextPacket output, validation, or rebuild behavior.
 - Internal store files now use the final binary layout:
   - `manifest.mgm`
   - `dictionary/markers.mgd`
@@ -307,6 +308,19 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
     - binary_fuse_page: hot focused 3741 -> 2880 us; hot lookup 139 -> 139 us; sealed focused 6746 -> 5846 us; broad 6785 -> 5800 us.
     - after exact timing: focused filter 2214 us, broad filter 2263 us, focused context build 378 us, broad context build 379 us, focused decode 1448 us, broad decode 1487 us.
   - Benchmark subset check passed.
+- Sealed scoring cache package: passed.
+  - Added runtime-only `CachedCellScoringData` for decoded sealed pages: value tokens, canonical value text, and subject tokens are derived once for cached pages and reused by focused/broad scoring.
+  - Cold page decode does not build this cache; cache data is attached only after a decoded page cache hit, so first-read latency and `.mgp` layout stay unchanged.
+  - `score_cell_debug_with_cached_context()` avoids per-cell value/subject tokenization for cached sealed pages; fallback scoring is used only when no cached scoring entry exists.
+  - Validate/deep-validate and rebuild-indexes still bypass decoded/scoring caches and read sealed page files directly.
+  - Benchmark before/after on 1200 cells / 120 pages / 16 scopes / seed 23:
+    - before exact focused/broad/full-scope avg: 34428 / 34707 / 11463 us.
+    - after exact focused/broad/full-scope avg: 34090 / 34371 / 11335 us.
+    - before binary_fuse focused/broad/full-scope avg: 35556 / 35917 / 12793 us.
+    - after binary_fuse focused/broad/full-scope avg: 35174 / 36421 / 12875 us.
+    - exact broad cell filtering improved 9119 -> 5825 us; exact broad page decode accounting rose 11634 -> 14710 us because scoring-cache construction is counted there on cache hits.
+  - Benchmark smoke with 120 cells / 12 pages / seed 7 passed; subset check remained true.
+  - Remaining bottleneck: MessagePack full-page decode/cache-miss cost and ContextPacket build on large returned sets; Binary Fuse is still not the dominant cost on this dataset.
 - L1 Hot RAM layer package: passed.
   - `HotMemoryLayer` indexes hot cells in RAM by cell id, marker id, canonical scope, kind, and status.
   - Correctness tests passed for immediate recall after remember, reopen recovery from `hot/hot.mgl`, hot clearing after seal, sealed recall after seal, full-scope hot+sealed recall, and default status exclusion before scoring.

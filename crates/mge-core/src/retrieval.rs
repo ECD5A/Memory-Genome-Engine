@@ -148,6 +148,28 @@ pub struct ScoringContext {
     query_canonical: String,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CachedCellScoringData {
+    pub value_tokens: Vec<String>,
+    pub value_canonical: String,
+    pub subject_tokens: Vec<String>,
+}
+
+impl CachedCellScoringData {
+    pub(crate) fn from_cell(cell: &MemoryCell) -> Self {
+        let value_text = cell.value.to_plain_text_cow();
+        Self {
+            value_tokens: tokenize_keywords(value_text.as_ref()),
+            value_canonical: canonicalize_marker_value(value_text.as_ref()),
+            subject_tokens: cell
+                .subject
+                .as_deref()
+                .map(tokenize_keywords)
+                .unwrap_or_default(),
+        }
+    }
+}
+
 impl ScoringContext {
     pub fn new(request: &RecallRequest, query_marker_ids: &[u32], query_tokens: &[String]) -> Self {
         Self::new_with_filter(
@@ -200,32 +222,47 @@ pub fn score_cell_debug_with_context(
         return None;
     }
 
-    let marker_overlap = cell.marker_overlap_count(&context.query_marker_set) as i64;
+    let cached = CachedCellScoringData::from_cell(cell);
+    score_permitted_cell_debug(cell, context, &cached)
+}
 
-    let mut value_overlap = 0;
-    let mut exact_value_match = false;
-    if !context.query_token_set.is_empty() || !context.query_canonical.is_empty() {
-        let value_text = cell.value.to_plain_text_cow();
-        if !context.query_token_set.is_empty() {
-            value_overlap = tokenize_keywords(value_text.as_ref())
-                .iter()
-                .filter(|token| context.query_token_set.contains(token.as_str()))
-                .count() as i64;
-        }
-        if !context.query_canonical.is_empty() {
-            exact_value_match =
-                exact_canonical_match(value_text.as_ref(), &context.query_canonical);
-        }
+pub(crate) fn score_cell_debug_with_cached_context(
+    cell: &MemoryCell,
+    context: &ScoringContext,
+    cached: &CachedCellScoringData,
+) -> Option<ContextScoreDebugItem> {
+    if !context.filter.permits_cell(cell) {
+        return None;
     }
 
+    score_permitted_cell_debug(cell, context, cached)
+}
+
+fn score_permitted_cell_debug(
+    cell: &MemoryCell,
+    context: &ScoringContext,
+    cached: &CachedCellScoringData,
+) -> Option<ContextScoreDebugItem> {
+    let marker_overlap = cell.marker_overlap_count(&context.query_marker_set) as i64;
+
+    let value_overlap = if context.query_token_set.is_empty() {
+        0
+    } else {
+        cached
+            .value_tokens
+            .iter()
+            .filter(|token| context.query_token_set.contains(token.as_str()))
+            .count() as i64
+    };
+    let exact_value_match =
+        !cached.value_canonical.is_empty() && cached.value_canonical == context.query_canonical;
+
     let exact_subject_match = !context.query_token_set.is_empty()
-        && cell.subject.as_ref().is_some_and(|subject| {
-            let subject_tokens = tokenize_keywords(subject);
-            !subject_tokens.is_empty()
-                && subject_tokens
-                    .iter()
-                    .all(|token| context.query_token_set.contains(token.as_str()))
-        });
+        && !cached.subject_tokens.is_empty()
+        && cached
+            .subject_tokens
+            .iter()
+            .all(|token| context.query_token_set.contains(token.as_str()));
 
     let marker_overlap_score = marker_overlap * 10;
     let exact_subject_score = if exact_subject_match { 5 } else { 0 };
@@ -408,9 +445,4 @@ fn sensitivity_penalty(sensitivity: SensitivityLevel) -> i64 {
         SensitivityLevel::Confidential => 2,
         SensitivityLevel::SecretReference => 100,
     }
-}
-
-fn exact_canonical_match(left: &str, right_canonical: &str) -> bool {
-    let left = canonicalize_marker_value(left);
-    !left.is_empty() && left == right_canonical
 }
