@@ -1,4 +1,6 @@
 /target/
 /.memory-genome/
+__pycache__/
+*.py[cod]
 **/*.rs.bk
 desktop.ini
