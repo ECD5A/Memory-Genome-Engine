@@ -29,6 +29,10 @@ fn marker_canonicalization() {
         canonicalize_marker("answer style").unwrap(),
         "tag:answer_style"
     );
+    assert_eq!(
+        canonicalize_marker(" Scope: Rust APIs / Policies!! ").unwrap(),
+        "scope:rust_apis_policies"
+    );
 }
 
 #[test]

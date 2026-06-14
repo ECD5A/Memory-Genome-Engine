@@ -186,20 +186,54 @@ pub fn canonicalize_marker(raw: &str) -> Result<String> {
 }
 
 pub fn canonicalize_marker_value(raw: &str) -> String {
-    let mut out = String::new();
+    let trimmed = raw.trim();
+    if trimmed.is_ascii() {
+        return canonicalize_marker_value_ascii(trimmed);
+    }
+
+    canonicalize_marker_value_unicode(trimmed)
+}
+
+fn canonicalize_marker_value_ascii(trimmed: &str) -> String {
+    let mut out = String::with_capacity(trimmed.len());
     let mut previous_was_separator = false;
 
-    for ch in raw.trim().chars().flat_map(char::to_lowercase) {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch);
+    for byte in trimmed.bytes() {
+        if byte.is_ascii_alphanumeric() {
+            out.push(byte.to_ascii_lowercase() as char);
             previous_was_separator = false;
-        } else if !previous_was_separator {
+        } else if !out.is_empty() && !previous_was_separator {
             out.push('_');
             previous_was_separator = true;
         }
     }
 
-    out.trim_matches('_').to_string()
+    if out.ends_with('_') {
+        out.pop();
+    }
+
+    out
+}
+
+fn canonicalize_marker_value_unicode(trimmed: &str) -> String {
+    let mut out = String::with_capacity(trimmed.len());
+    let mut previous_was_separator = false;
+
+    for ch in trimmed.chars().flat_map(char::to_lowercase) {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            previous_was_separator = false;
+        } else if !out.is_empty() && !previous_was_separator {
+            out.push('_');
+            previous_was_separator = true;
+        }
+    }
+
+    if out.ends_with('_') {
+        out.pop();
+    }
+
+    out
 }
 
 pub fn marker_strings_for_cell_fields(

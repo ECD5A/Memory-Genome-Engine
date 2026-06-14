@@ -89,6 +89,7 @@ JSON policy:
 - L1 Hot RAM indexes, page grouping, page summaries, recall filtering/scoring, markdown export и validation теперь используют genome-compatible marker access, сохраняя старые vec-style records.
 - Recall hot path теперь использует borrowed `MemoryValue` text где возможно, static stopword lookup для tokenization, более дешёвую scope filtering и single-pass ContextPacket assembly, чтобы уменьшить allocations и temporary rebuilds.
 - Keyword tokenization теперь имеет ASCII fast path для обычного text/code corpus, уменьшая временные string allocations без изменения normalized token output.
+- Marker value canonicalization теперь имеет ASCII fast path и избегает лишнего trim/copy прохода для обычного marker/query/value text.
 - Engine recall ranking теперь использует lightweight ranked cell handles для hot/sealed candidates, поэтому `MemoryCell` больше не clone-ится для каждого scored candidate до reranking.
 - ContextPacket output по-прежнему allocates только returned items; marker string vectors и content strings строятся после final ranking и dedupe.
 - Добавлена документация:
@@ -258,6 +259,10 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - exact_marker_page: cold focused avg 33769 us, repeated focused avg 20853 us, repeated broad avg 3761 us, page decode avg 2481 us, scoring cache build avg 7652 us, cell filtering avg 7943 us.
   - binary_fuse_page: repeated focused avg 20497 us, repeated broad avg 3483 us, page decode avg 2476 us, scoring cache build avg 7648 us, cell filtering avg 7919 us.
   - subset check: focused exact candidates subset of binary_fuse candidates passed.
+- Latest canonicalization benchmark smoke command: passed на 24 local files, 250192 imported bytes, 229 chunks.
+  - exact_marker_page: cold focused avg 30434 us, repeated focused avg 18186 us, repeated broad avg 3729 us, page decode avg 2518 us, scoring cache build avg 6149 us, cell filtering avg 6770 us.
+  - binary_fuse_page: repeated focused avg 17851 us, repeated broad avg 3395 us, page decode avg 2529 us, scoring cache build avg 6040 us, cell filtering avg 6839 us.
+  - subset check: focused exact candidates subset of binary_fuse candidates passed.
 - Benchmark harness CLI smoke command: passed.
   - config: 120 cells, 12 sealed pages, 4 logical scopes, 5 markers per cell, 4 marker groups, 4 targeted queries, 2 noise queries, 3 repeats, seed 7.
   - exact_marker_page: remember avg 8367 us, seal avg 61834 us, focused recall avg 5270 us, broad recall avg 12575 us, full-scope recall avg 1764 us, index lookup avg 1 us, page decode avg 391 us, ContextPacket build avg 944 us, storage 108585 bytes.
@@ -353,6 +358,15 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
     - before exact repeated focused: total 26480 us, scoring cache build 10116 us, cell filtering 10619 us.
     - after exact repeated focused: total 20853 us, scoring cache build 7652 us, cell filtering 7943 us.
     - after binary repeated focused: total 20497 us, scoring cache build 7648 us, cell filtering 7919 us.
+  - Recall/storage architecture unchanged; новые filters, codec, storage layout, SDK, UI, vector DB или JSON runtime storage не добавлялись.
+- ASCII canonicalization hot-path package: passed.
+  - `canonicalize_marker_value` теперь использует byte-level ASCII canonicalization для обычного marker/query/value text и сохраняет совместимый Unicode fallback.
+  - Функция избегает прежнего trailing `trim_matches('_').to_string()` copy: leading separators пропускаются, trailing separator убирается через один `pop`.
+  - Corpus after tokenizer vs after canonicalization на сопоставимом 24-file repo corpus smoke:
+    - exact repeated focused: 20853 us -> 18186 us.
+    - exact scoring cache build: 7652 us -> 6149 us.
+    - exact cell filtering: 7943 us -> 6770 us.
+    - binary repeated focused: 20497 us -> 17851 us.
   - Recall/storage architecture unchanged; новые filters, codec, storage layout, SDK, UI, vector DB или JSON runtime storage не добавлялись.
 - L1 Hot RAM layer package: passed.
   - `HotMemoryLayer` индексирует hot cells в RAM по cell id, marker id, canonical scope, kind и status.
