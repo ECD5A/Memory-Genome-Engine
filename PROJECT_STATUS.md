@@ -250,7 +250,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 108 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 89 core integration tests).
+- `cargo test`: passed, 109 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 90 core integration tests).
 - Validation/rebuild tests: passed for clean deep validation, corrupted/mismatched catalog summaries, missing exact index restore, active Binary Fuse index restore, recall after rebuild, hot memory untouched, and no JSON/JSONL runtime storage regression.
 - Recall modes tests: passed for focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering, and no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed for `--mode broad`, `--mode full-scope --scope`, and full-scope missing-scope failure.
@@ -321,6 +321,17 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
     - exact broad cell filtering improved 9119 -> 5825 us; exact broad page decode accounting rose 11634 -> 14710 us because scoring-cache construction is counted there on cache hits.
   - Benchmark smoke with 120 cells / 12 pages / seed 7 passed; subset check remained true.
   - Remaining bottleneck: MessagePack full-page decode/cache-miss cost and ContextPacket build on large returned sets; Binary Fuse is still not the dominant cost on this dataset.
+- Sealed recall timing cleanup package: passed.
+  - `page_decode_micros` now reports only page frame decode/decompress/page decode work.
+  - `scoring_cache_build_micros` reports runtime scoring-cache construction separately.
+  - Debug output now includes `decoded_page_cache_hits`, `decoded_page_cache_misses`, `scoring_cache_hits`, and `scoring_cache_misses`.
+  - Synthetic benchmark JSON now exposes separate page decode, scoring cache build, cell filtering, reranking, ContextPacket build, and total recall timings.
+  - Benchmark after cleanup on 1200 cells / 120 pages / 16 scopes / seed 23:
+    - exact focused total 34199 us, page decode 11628 us, scoring cache build 3115 us, cell filtering 5851 us.
+    - exact broad total 34257 us, page decode 11576 us, scoring cache build 3090 us, cell filtering 5848 us.
+    - binary focused total 35181 us, page decode 11557 us, scoring cache build 3104 us, cell filtering 5798 us.
+    - binary broad total 35393 us, page decode 11526 us, scoring cache build 3132 us, cell filtering 5777 us.
+  - Total latency stayed materially the same; only accounting was cleaned up.
 - L1 Hot RAM layer package: passed.
   - `HotMemoryLayer` indexes hot cells in RAM by cell id, marker id, canonical scope, kind, and status.
   - Correctness tests passed for immediate recall after remember, reopen recovery from `hot/hot.mgl`, hot clearing after seal, sealed recall after seal, full-scope hot+sealed recall, and default status exclusion before scoring.

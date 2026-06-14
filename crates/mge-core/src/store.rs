@@ -387,6 +387,10 @@ struct TimedPageRead {
     scoring: Option<Arc<PageScoringCache>>,
     file_read_micros: u64,
     decode_micros: u64,
+    scoring_cache_build_micros: u64,
+    decoded_page_cache_hit: bool,
+    scoring_cache_hit: bool,
+    scoring_cache_miss: bool,
 }
 
 #[derive(Debug)]
@@ -932,6 +936,11 @@ impl MemoryEngine {
         let mut false_positive_candidate_pages = 0;
         let mut page_file_read_load_micros = 0u64;
         let mut page_decode_micros = 0u64;
+        let mut scoring_cache_build_micros = 0u64;
+        let mut decoded_page_cache_hits = 0usize;
+        let mut decoded_page_cache_misses = 0usize;
+        let mut scoring_cache_hits = 0usize;
+        let mut scoring_cache_misses = 0usize;
         let mut loaded_pages_by_id = BTreeMap::new();
         let include_scoring_cache = !matches!(request.mode, RecallMode::FullScope);
         for page_id in &candidate_pages {
@@ -947,6 +956,19 @@ impl MemoryEngine {
             page_file_read_load_micros =
                 page_file_read_load_micros.saturating_add(timed_page.file_read_micros);
             page_decode_micros = page_decode_micros.saturating_add(timed_page.decode_micros);
+            scoring_cache_build_micros =
+                scoring_cache_build_micros.saturating_add(timed_page.scoring_cache_build_micros);
+            if timed_page.decoded_page_cache_hit {
+                decoded_page_cache_hits += 1;
+            } else {
+                decoded_page_cache_misses += 1;
+            }
+            if timed_page.scoring_cache_hit {
+                scoring_cache_hits += 1;
+            }
+            if timed_page.scoring_cache_miss {
+                scoring_cache_misses += 1;
+            }
             let page = timed_page.page;
             let scoring_cache = timed_page.scoring;
             loaded_pages += 1;
@@ -1034,10 +1056,15 @@ impl MemoryEngine {
             candidate_page_index_lookup_micros,
             page_file_read_load_micros,
             page_decode_micros,
+            scoring_cache_build_micros,
             cell_filtering_micros,
             reranking_micros,
             context_packet_build_micros: 0,
             total_recall_micros: 0,
+            decoded_page_cache_hits,
+            decoded_page_cache_misses,
+            scoring_cache_hits,
+            scoring_cache_misses,
             score_details: Vec::new(),
         };
 
@@ -1717,6 +1744,10 @@ impl MemoryEngine {
             scoring: None,
             file_read_micros,
             decode_micros,
+            scoring_cache_build_micros: 0,
+            decoded_page_cache_hit: false,
+            scoring_cache_hit: false,
+            scoring_cache_miss: false,
         })
     }
 
@@ -1727,31 +1758,37 @@ impl MemoryEngine {
     ) -> Result<TimedPageRead> {
         let cached_page = { self.page_cache.borrow_mut().get(entry.page_id) };
         if let Some(cached) = cached_page {
-            let (scoring, decode_micros) = if include_scoring {
-                match cached.scoring {
-                    Some(scoring) => (Some(scoring), 0),
-                    None => {
-                        let scoring_started = Instant::now();
-                        let scoring = Arc::new(PageScoringCache::from_page(&cached.page));
-                        let decode_micros = elapsed_micros(scoring_started);
-                        self.page_cache
-                            .borrow_mut()
-                            .set_scoring(entry.page_id, Arc::clone(&scoring));
-                        (Some(scoring), decode_micros)
+            let (scoring, scoring_cache_build_micros, scoring_cache_hit, scoring_cache_miss) =
+                if include_scoring {
+                    match cached.scoring {
+                        Some(scoring) => (Some(scoring), 0, true, false),
+                        None => {
+                            let scoring_started = Instant::now();
+                            let scoring = Arc::new(PageScoringCache::from_page(&cached.page));
+                            let scoring_cache_build_micros = elapsed_micros(scoring_started);
+                            self.page_cache
+                                .borrow_mut()
+                                .set_scoring(entry.page_id, Arc::clone(&scoring));
+                            (Some(scoring), scoring_cache_build_micros, false, true)
+                        }
                     }
-                }
-            } else {
-                (None, 0)
-            };
+                } else {
+                    (None, 0, false, false)
+                };
             return Ok(TimedPageRead {
                 page: cached.page,
                 scoring,
                 file_read_micros: 0,
-                decode_micros,
+                decode_micros: 0,
+                scoring_cache_build_micros,
+                decoded_page_cache_hit: true,
+                scoring_cache_hit,
+                scoring_cache_miss,
             });
         }
 
-        let timed_page = self.read_page_with_timing(entry)?;
+        let mut timed_page = self.read_page_with_timing(entry)?;
+        timed_page.scoring_cache_miss = include_scoring;
         self.page_cache
             .borrow_mut()
             .insert(Arc::clone(&timed_page.page), timed_page.scoring.clone());

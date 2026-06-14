@@ -247,7 +247,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 108 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 89 core integration tests).
+- `cargo test`: passed, 109 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 90 core integration tests).
 - Validation/rebuild tests: passed для clean deep validation, corrupted/mismatched catalog summaries, missing exact index restore, active Binary Fuse index restore, recall after rebuild, hot memory untouched и no JSON/JSONL runtime storage regression.
 - Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.
@@ -318,6 +318,17 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
     - exact broad cell filtering улучшился 9119 -> 5825 us; exact broad page decode accounting вырос 11634 -> 14710 us, потому что scoring-cache construction считается там на cache hits.
   - Benchmark smoke на 120 cells / 12 pages / seed 7 прошёл; subset check остался true.
   - Remaining bottleneck: MessagePack full-page decode/cache-miss cost и ContextPacket build на больших returned sets; Binary Fuse всё ещё не главный расход на этом dataset.
+- Sealed recall timing cleanup package: passed.
+  - `page_decode_micros` теперь показывает только page frame decode/decompress/page decode work.
+  - `scoring_cache_build_micros` отдельно показывает runtime scoring-cache construction.
+  - Debug output теперь включает `decoded_page_cache_hits`, `decoded_page_cache_misses`, `scoring_cache_hits` и `scoring_cache_misses`.
+  - Synthetic benchmark JSON теперь отдельно выводит page decode, scoring cache build, cell filtering, reranking, ContextPacket build и total recall timings.
+  - Benchmark after cleanup на 1200 cells / 120 pages / 16 scopes / seed 23:
+    - exact focused total 34199 us, page decode 11628 us, scoring cache build 3115 us, cell filtering 5851 us.
+    - exact broad total 34257 us, page decode 11576 us, scoring cache build 3090 us, cell filtering 5848 us.
+    - binary focused total 35181 us, page decode 11557 us, scoring cache build 3104 us, cell filtering 5798 us.
+    - binary broad total 35393 us, page decode 11526 us, scoring cache build 3132 us, cell filtering 5777 us.
+  - Total latency materially не изменился; очищен только accounting.
 - L1 Hot RAM layer package: passed.
   - `HotMemoryLayer` индексирует hot cells в RAM по cell id, marker id, canonical scope, kind и status.
   - Correctness tests прошли для immediate recall после remember, reopen recovery из `hot/hot.mgl`, очистки hot после seal, sealed recall после seal, full-scope hot+sealed recall и default status exclusion before scoring.

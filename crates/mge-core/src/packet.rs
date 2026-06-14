@@ -107,6 +107,8 @@ pub struct ContextDebugInfo {
     #[serde(default)]
     pub page_decode_micros: u64,
     #[serde(default)]
+    pub scoring_cache_build_micros: u64,
+    #[serde(default)]
     pub cell_filtering_micros: u64,
     #[serde(default)]
     pub reranking_micros: u64,
@@ -114,6 +116,14 @@ pub struct ContextDebugInfo {
     pub context_packet_build_micros: u64,
     #[serde(default)]
     pub total_recall_micros: u64,
+    #[serde(default)]
+    pub decoded_page_cache_hits: usize,
+    #[serde(default)]
+    pub decoded_page_cache_misses: usize,
+    #[serde(default)]
+    pub scoring_cache_hits: usize,
+    #[serde(default)]
+    pub scoring_cache_misses: usize,
     #[serde(default)]
     pub score_details: Vec<ContextScoreDebugItem>,
 }

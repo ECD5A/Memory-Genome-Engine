@@ -1090,14 +1090,22 @@ fn sealed_recall_context_output_is_stable_after_cache_hit() {
 
     let request = RecallRequest::new("How should the agent answer technical questions?");
     let first = engine.recall(request.clone()).unwrap();
-    let second = engine.recall(request).unwrap();
+    let second = engine.recall(request.clone()).unwrap();
+    let third = engine.recall(request).unwrap();
 
     assert_eq!(first.relevant_memory, second.relevant_memory);
     assert_eq!(first.constraints, second.constraints);
     assert_eq!(first.warnings, second.warnings);
     assert_eq!(first.debug.score_details, second.debug.score_details);
     assert_eq!(second.debug.loaded_pages, 1);
+    assert_eq!(second.debug.decoded_page_cache_hits, 1);
+    assert_eq!(second.debug.decoded_page_cache_misses, 0);
+    assert_eq!(second.debug.scoring_cache_misses, 1);
     assert_eq!(second.debug.returned_items, 1);
+    assert_eq!(first.relevant_memory, third.relevant_memory);
+    assert_eq!(first.debug.score_details, third.debug.score_details);
+    assert_eq!(third.debug.scoring_cache_hits, 1);
+    assert_eq!(third.debug.scoring_cache_misses, 0);
 }
 
 #[test]
@@ -1121,6 +1129,27 @@ fn recall_debug_includes_timing_breakdown_and_counters() {
     assert_eq!(packet.debug.returned_items, 1);
     assert!(packet.debug.total_recall_micros >= packet.debug.context_packet_build_micros);
     assert!(packet.debug.total_recall_micros >= packet.debug.reranking_micros);
+    let debug_json = serde_json::to_value(&packet.debug).unwrap();
+    for field in [
+        "page_file_read_load_micros",
+        "page_decode_micros",
+        "scoring_cache_build_micros",
+        "cell_filtering_micros",
+        "reranking_micros",
+        "context_packet_build_micros",
+        "decoded_page_cache_hits",
+        "decoded_page_cache_misses",
+        "scoring_cache_hits",
+        "scoring_cache_misses",
+    ] {
+        assert!(
+            debug_json
+                .get(field)
+                .and_then(|value| value.as_u64())
+                .is_some(),
+            "missing non-negative debug field {field}"
+        );
+    }
 }
 
 #[test]
@@ -2182,6 +2211,32 @@ fn validate_deep_reads_page_files_not_decoded_page_cache() {
         .errors
         .iter()
         .any(|error| error.contains("corrupted page payload checksum")));
+}
+
+#[test]
+fn rebuild_indexes_reads_page_files_not_decoded_page_cache() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let packet = engine
+        .recall(RecallRequest::new(
+            "How should the agent answer technical questions?",
+        ))
+        .unwrap();
+    assert_eq!(packet.debug.loaded_pages, 1);
+
+    let page_file = engine.inspect().unwrap().page_catalog.pages[0].file.clone();
+    let page_path = dir.path().join("pages").join(page_file);
+    let mut bytes = fs::read(&page_path).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    fs::write(&page_path, bytes).unwrap();
+
+    let err = engine.rebuild_catalog_and_indexes().unwrap_err();
+
+    assert!(err.to_string().contains("corrupted page payload checksum"));
 }
 
 #[test]

@@ -86,6 +86,7 @@ struct RecallBenchRun {
     candidate_page_index_lookup_micros: MetricSamples,
     page_file_read_load_micros: MetricSamples,
     page_decode_micros: MetricSamples,
+    scoring_cache_build_micros: MetricSamples,
     cell_filtering_micros: MetricSamples,
     reranking_micros: MetricSamples,
     context_packet_build_micros: MetricSamples,
@@ -104,6 +105,10 @@ struct RecallBenchRun {
     cells_ranked: MetricSamples,
     sealed_cells_scanned: MetricSamples,
     returned_items: MetricSamples,
+    decoded_page_cache_hits: MetricSamples,
+    decoded_page_cache_misses: MetricSamples,
+    scoring_cache_hits: MetricSamples,
+    scoring_cache_misses: MetricSamples,
     first_repeat_candidate_pages: BTreeMap<String, Vec<u64>>,
 }
 
@@ -418,6 +423,7 @@ fn run_recall_bench(
         candidate_page_index_lookup_micros: MetricSamples::default(),
         page_file_read_load_micros: MetricSamples::default(),
         page_decode_micros: MetricSamples::default(),
+        scoring_cache_build_micros: MetricSamples::default(),
         cell_filtering_micros: MetricSamples::default(),
         reranking_micros: MetricSamples::default(),
         context_packet_build_micros: MetricSamples::default(),
@@ -436,6 +442,10 @@ fn run_recall_bench(
         cells_ranked: MetricSamples::default(),
         sealed_cells_scanned: MetricSamples::default(),
         returned_items: MetricSamples::default(),
+        decoded_page_cache_hits: MetricSamples::default(),
+        decoded_page_cache_misses: MetricSamples::default(),
+        scoring_cache_hits: MetricSamples::default(),
+        scoring_cache_misses: MetricSamples::default(),
         first_repeat_candidate_pages: BTreeMap::new(),
     };
 
@@ -471,6 +481,8 @@ fn run_recall_bench(
                 .record_u64(packet.debug.page_file_read_load_micros);
             run.page_decode_micros
                 .record_u64(packet.debug.page_decode_micros);
+            run.scoring_cache_build_micros
+                .record_u64(packet.debug.scoring_cache_build_micros);
             run.cell_filtering_micros
                 .record_u64(packet.debug.cell_filtering_micros);
             run.reranking_micros
@@ -499,6 +511,14 @@ fn run_recall_bench(
             run.sealed_cells_scanned
                 .record_usize(packet.debug.sealed_cells_scanned);
             run.returned_items.record_usize(packet.debug.returned_items);
+            run.decoded_page_cache_hits
+                .record_usize(packet.debug.decoded_page_cache_hits);
+            run.decoded_page_cache_misses
+                .record_usize(packet.debug.decoded_page_cache_misses);
+            run.scoring_cache_hits
+                .record_usize(packet.debug.scoring_cache_hits);
+            run.scoring_cache_misses
+                .record_usize(packet.debug.scoring_cache_misses);
 
             if repeat == 0 {
                 run.first_repeat_candidate_pages
@@ -743,6 +763,7 @@ fn recall_to_json(run: &RecallBenchRun) -> serde_json::Value {
             "candidate_page_index_lookup": run.candidate_page_index_lookup_micros.to_json(),
             "page_file_read_load": run.page_file_read_load_micros.to_json(),
             "page_decode": run.page_decode_micros.to_json(),
+            "scoring_cache_build": run.scoring_cache_build_micros.to_json(),
             "cell_filtering": run.cell_filtering_micros.to_json(),
             "reranking": run.reranking_micros.to_json(),
             "context_packet_build": run.context_packet_build_micros.to_json(),
@@ -762,6 +783,10 @@ fn recall_to_json(run: &RecallBenchRun) -> serde_json::Value {
         "cells_ranked": run.cells_ranked.to_json(),
         "sealed_cells_scanned": run.sealed_cells_scanned.to_json(),
         "returned_items": run.returned_items.to_json(),
+        "decoded_page_cache_hits": run.decoded_page_cache_hits.to_json(),
+        "decoded_page_cache_misses": run.decoded_page_cache_misses.to_json(),
+        "scoring_cache_hits": run.scoring_cache_hits.to_json(),
+        "scoring_cache_misses": run.scoring_cache_misses.to_json(),
     })
 }
 

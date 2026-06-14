@@ -304,6 +304,29 @@ fn synthetic_benchmark_outputs_valid_core_metrics() {
             mode["recall_modes"]["focused"]["timing_breakdown_micros"]["page_decode"]["count"],
             8
         );
+        assert_eq!(
+            mode["recall_modes"]["focused"]["timing_breakdown_micros"]["scoring_cache_build"]
+                ["count"],
+            8
+        );
+        assert!(
+            mode["recall_modes"]["focused"]["decoded_page_cache_hits"]["count"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert!(
+            mode["recall_modes"]["focused"]["decoded_page_cache_misses"]["count"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert!(
+            mode["recall_modes"]["focused"]["scoring_cache_misses"]["count"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
         assert!(
             mode["recall_modes"]["focused"]["pages_considered"]["count"]
                 .as_u64()
