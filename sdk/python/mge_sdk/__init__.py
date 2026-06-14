@@ -6,7 +6,75 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Literal, Mapping, Sequence, TypedDict, cast
+
+
+RecallMode = Literal["focused", "broad", "full_scope", "full-scope"]
+
+
+class RememberOptions(TypedDict, total=False):
+    kind: str
+    scope: str
+    markers: list[str]
+    trust: str
+    sensitivity: str
+    status: str
+    subject: str
+
+
+class ContextMemoryItem(TypedDict, total=False):
+    kind: str
+    content: str
+    trust: str
+    status: str
+    scope: str
+    sensitivity: str
+    markers: list[str]
+
+
+class ContextPacketDebug(TypedDict, total=False):
+    recall_mode: str
+    max_items: int
+    index_kind: str
+    returned_items: int
+    total_recall_micros: int
+
+
+class ContextPacket(TypedDict, total=False):
+    query: str
+    relevant_memory: list[ContextMemoryItem]
+    constraints: list[str]
+    warnings: list[str]
+    debug: ContextPacketDebug
+
+
+class StoreStats(TypedDict, total=False):
+    hot_cells: int
+    sealed_pages: int
+    sealed_cells: int
+    marker_count: int
+    current_index_kind: str
+    store_size_bytes: int
+
+
+class ValidationReport(TypedDict, total=False):
+    ok: bool
+    index_kind: str
+    checked_hot_cells: int
+    checked_sealed_pages: int
+    checked_sealed_cells: int
+    errors: list[str]
+    warnings: list[str]
+
+
+class McpError(TypedDict, total=False):
+    code: int
+    message: str
+    tool_name: str
+    recoverable: bool
+    protocol_version: str
+    integration_schema_version: int
+    details: Mapping[str, Any]
 
 
 class MgeCommandError(RuntimeError):
@@ -24,6 +92,23 @@ class MgeCommandError(RuntimeError):
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+
+
+class MgeProtocolError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        code: int,
+        message: str,
+        tool_name: str,
+        recoverable: bool,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(f"{tool_name}: {message}")
+        self.code = code
+        self.tool_name = tool_name
+        self.recoverable = recoverable
+        self.details = details or {}
 
 
 class MemoryGenomeClient:
@@ -87,12 +172,12 @@ class MemoryGenomeClient:
         self,
         query: str = "",
         *,
-        mode: str = "focused",
+        mode: RecallMode = "focused",
         scope: str | None = None,
         markers: Iterable[str] = (),
         max_items: int = 5,
         kind: str | None = None,
-    ) -> Mapping[str, Any]:
+    ) -> ContextPacket:
         args = ["recall"]
         if query:
             args.append(query)
@@ -103,7 +188,7 @@ class MemoryGenomeClient:
             args.extend(["--kind", kind])
         for marker in markers:
             args.extend(["--marker", marker])
-        return self._run_json(args)
+        return cast(ContextPacket, self._run_json(args))
 
     def seal(self) -> Mapping[str, Any]:
         return self._run_json(["seal"])
@@ -111,14 +196,14 @@ class MemoryGenomeClient:
     def checkpoint(self) -> Mapping[str, Any]:
         return self._run_json(["checkpoint", "--json"])
 
-    def stats(self) -> Mapping[str, Any]:
-        return self._run_json(["stats", "--json"])
+    def stats(self) -> StoreStats:
+        return cast(StoreStats, self._run_json(["stats", "--json"]))
 
-    def validate(self, *, deep: bool = False) -> Mapping[str, Any]:
+    def validate(self, *, deep: bool = False) -> ValidationReport:
         args = ["validate", "--json"]
         if deep:
             args.insert(1, "--deep")
-        return self._run_json(args, allow_failure=True)
+        return cast(ValidationReport, self._run_json(args, allow_failure=True))
 
     def rebuild_indexes(self) -> Mapping[str, Any]:
         return self._run_json(["rebuild-indexes", "--json"])
@@ -169,4 +254,46 @@ def _default_command() -> list[str]:
     return ["mge"]
 
 
-__all__ = ["MemoryGenomeClient", "MgeCommandError"]
+def result_or_raise_mcp_error(response: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return JSON-RPC result or raise a typed protocol error.
+
+    This helper is for callers that talk directly to `mge-mcp-server`.
+    """
+
+    error = response.get("error")
+    if isinstance(error, Mapping):
+        typed_error = cast(McpError, error)
+        raise MgeProtocolError(
+            code=int(typed_error.get("code", -32000)),
+            message=str(typed_error.get("message", "unknown MCP error")),
+            tool_name=str(typed_error.get("tool_name", "unknown")),
+            recoverable=bool(typed_error.get("recoverable", False)),
+            details=typed_error.get("details"),
+        )
+
+    result = response.get("result")
+    if isinstance(result, Mapping):
+        return result
+
+    raise MgeProtocolError(
+        code=-32603,
+        message="JSON-RPC response has no result or structured error",
+        tool_name="unknown",
+        recoverable=False,
+    )
+
+
+__all__ = [
+    "ContextMemoryItem",
+    "ContextPacket",
+    "ContextPacketDebug",
+    "McpError",
+    "MemoryGenomeClient",
+    "MgeCommandError",
+    "MgeProtocolError",
+    "RecallMode",
+    "RememberOptions",
+    "StoreStats",
+    "ValidationReport",
+    "result_or_raise_mcp_error",
+]

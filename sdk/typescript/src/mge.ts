@@ -4,6 +4,9 @@ import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
+export const PROTOCOL_VERSION = "mge-jsonrpc-1";
+export const INTEGRATION_SCHEMA_VERSION = 1;
+
 export type RecallMode = "focused" | "broad" | "full_scope" | "full-scope";
 
 export interface MemoryGenomeClientOptions {
@@ -29,6 +32,71 @@ export interface RecallOptions {
   kind?: string;
 }
 
+export interface ContextMemoryItem {
+  kind: string;
+  content: string;
+  trust: string;
+  status: string;
+  scope: string;
+  sensitivity: string;
+  markers: string[];
+}
+
+export interface ContextPacketDebug {
+  recall_mode?: string;
+  max_items?: number;
+  index_kind?: string;
+  returned_items?: number;
+  total_recall_micros?: number;
+  score_details?: unknown[];
+  [key: string]: unknown;
+}
+
+export interface ContextPacket {
+  query: string;
+  relevant_memory: ContextMemoryItem[];
+  constraints: string[];
+  warnings: string[];
+  debug: ContextPacketDebug;
+}
+
+export interface StoreStats {
+  hot_cells: number;
+  sealed_pages: number;
+  sealed_cells: number;
+  marker_count: number;
+  current_index_kind: string;
+  store_size_bytes: number;
+  [key: string]: unknown;
+}
+
+export interface ValidationReport {
+  ok: boolean;
+  index_kind: string;
+  checked_hot_cells: number;
+  checked_sealed_pages: number;
+  checked_sealed_cells: number;
+  errors: string[];
+  warnings: string[];
+}
+
+export interface McpStructuredError {
+  code: number;
+  message: string;
+  tool_name: string;
+  recoverable: boolean;
+  protocol_version: string;
+  integration_schema_version: number;
+  details?: Record<string, unknown>;
+}
+
+export interface McpJsonRpcResponse<T = unknown> {
+  jsonrpc: "2.0";
+  id?: unknown;
+  result?: T;
+  error?: McpStructuredError;
+}
+
 export class MemoryGenomeCommandError extends Error {
   command: string[];
   status: number | null;
@@ -41,6 +109,21 @@ export class MemoryGenomeCommandError extends Error {
     this.status = status;
     this.stdout = stdout;
     this.stderr = stderr;
+  }
+}
+
+export class MemoryGenomeProtocolError extends Error {
+  code: number;
+  toolName: string;
+  recoverable: boolean;
+  details?: Record<string, unknown>;
+
+  constructor(error: McpStructuredError) {
+    super(`${error.tool_name}: ${error.message}`);
+    this.code = error.code;
+    this.toolName = error.tool_name;
+    this.recoverable = error.recoverable;
+    this.details = error.details;
   }
 }
 
@@ -89,7 +172,7 @@ export class MemoryGenomeClient {
     return Number(match[1]);
   }
 
-  recall(query = "", options: RecallOptions = {}): any {
+  recall(query = "", options: RecallOptions = {}): ContextPacket {
     const args = ["recall"];
     if (query.length > 0) {
       args.push(query);
@@ -113,19 +196,19 @@ export class MemoryGenomeClient {
     return this.runJson(args);
   }
 
-  seal(): any {
+  seal(): unknown {
     return this.runJson(["seal"]);
   }
 
-  checkpoint(): any {
+  checkpoint(): unknown {
     return this.runJson(["checkpoint", "--json"]);
   }
 
-  stats(): any {
+  stats(): StoreStats {
     return this.runJson(["stats", "--json"]);
   }
 
-  validate(options: { deep?: boolean } = {}): any {
+  validate(options: { deep?: boolean } = {}): ValidationReport {
     const args = ["validate", "--json"];
     if (options.deep) {
       args.splice(1, 0, "--deep");
@@ -133,7 +216,7 @@ export class MemoryGenomeClient {
     return this.runJson(args, true);
   }
 
-  rebuildIndexes(): any {
+  rebuildIndexes(): unknown {
     return this.runJson(["rebuild-indexes", "--json"]);
   }
 
@@ -179,4 +262,21 @@ function commandFromEnv(): string[] {
     return configured.trim().split(/\s+/);
   }
   return ["mge"];
+}
+
+export function resultOrThrowMcpError<T>(response: McpJsonRpcResponse<T>): T {
+  if (response.error) {
+    throw new MemoryGenomeProtocolError(response.error);
+  }
+  if (response.result !== undefined) {
+    return response.result;
+  }
+  throw new MemoryGenomeProtocolError({
+    code: -32603,
+    message: "JSON-RPC response has no result or structured error",
+    tool_name: "unknown",
+    recoverable: false,
+    protocol_version: PROTOCOL_VERSION,
+    integration_schema_version: INTEGRATION_SCHEMA_VERSION,
+  });
 }
