@@ -10,6 +10,7 @@ use crate::errors::{MgeError, Result};
 use crate::indexes::QueryMode;
 use crate::markers::canonicalize_marker_value;
 use crate::models::{current_timestamp, CellId, MarkerId, MemoryCell, MemoryKind, MemoryStatus};
+use crate::retrieval::CachedCellScoringData;
 use crate::security::RecallPolicy;
 
 pub type ScopeId = String;
@@ -20,6 +21,7 @@ const HOT_SNAPSHOT_VERSION: u32 = 1;
 #[derive(Clone, Debug, Default)]
 pub struct HotMemoryLayer {
     pub cells_by_id: BTreeMap<CellId, MemoryCell>,
+    scoring_by_id: BTreeMap<CellId, CachedCellScoringData>,
     pub marker_to_cells: BTreeMap<MarkerId, Vec<CellId>>,
     pub scope_to_cells: BTreeMap<ScopeId, Vec<CellId>>,
     pub kind_to_cells: BTreeMap<KindId, Vec<CellId>>,
@@ -60,14 +62,17 @@ impl HotMemoryLayer {
     }
 
     pub fn insert(&mut self, cell: MemoryCell) {
+        let scoring = CachedCellScoringData::from_cell(&cell);
         if let Some(previous) = self.cells_by_id.insert(cell.id, cell.clone()) {
             self.remove_from_indexes(&previous);
         }
+        self.scoring_by_id.insert(cell.id, scoring);
         self.add_to_indexes(&cell);
     }
 
     pub fn clear(&mut self) {
         self.cells_by_id.clear();
+        self.scoring_by_id.clear();
         self.marker_to_cells.clear();
         self.scope_to_cells.clear();
         self.kind_to_cells.clear();
@@ -84,6 +89,10 @@ impl HotMemoryLayer {
 
     pub fn cell(&self, cell_id: CellId) -> Option<&MemoryCell> {
         self.cells_by_id.get(&cell_id)
+    }
+
+    pub(crate) fn scoring(&self, cell_id: CellId) -> Option<&CachedCellScoringData> {
+        self.scoring_by_id.get(&cell_id)
     }
 
     pub fn all_cells(&self) -> Vec<MemoryCell> {
@@ -519,6 +528,7 @@ fn unique_archive_path(archive_dir: &Path, timestamp: i64) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{MemoryValue, SensitivityLevel, TrustLevel};
 
     #[test]
     fn archive_path_uses_suffix_when_timestamp_name_exists() {
@@ -544,5 +554,31 @@ mod tests {
             third.file_name().and_then(|name| name.to_str()),
             Some("hot_123456_2.mgl")
         );
+    }
+
+    #[test]
+    fn hot_layer_builds_and_clears_runtime_scoring_cache() {
+        let cell = MemoryCell::new(
+            1,
+            MemoryKind::ProjectFact,
+            Some("answer style".to_string()),
+            MemoryValue::Text("concise technical response".to_string()),
+            "global".to_string(),
+            MemoryStatus::Active,
+            TrustLevel::ToolObserved,
+            SensitivityLevel::Public,
+            vec![11, 12],
+            None,
+            Vec::new(),
+        );
+        let mut layer = HotMemoryLayer::from_cells(vec![cell]);
+
+        let scoring = layer.scoring(1).expect("hot scoring cache exists");
+        assert!(scoring.value_tokens.iter().any(|token| token == "concise"));
+        assert!(scoring.subject_tokens.iter().any(|token| token == "answer"));
+
+        layer.clear();
+        assert!(layer.scoring(1).is_none());
+        assert!(layer.is_empty());
     }
 }

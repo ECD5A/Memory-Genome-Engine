@@ -888,7 +888,11 @@ impl MemoryEngine {
             if let Some(score_detail) = match request.mode {
                 RecallMode::FullScope => full_scope_cell_debug_with_filter(cell, &filter_context),
                 RecallMode::Focused | RecallMode::Broad => {
-                    score_cell_debug_with_context(cell, &scoring_context)
+                    if let Some(cached) = self.hot.scoring(cell_id) {
+                        score_cell_debug_with_cached_context(cell, &scoring_context, cached)
+                    } else {
+                        score_cell_debug_with_context(cell, &scoring_context)
+                    }
                 }
             } {
                 ranked.push(RankedCellHandle {

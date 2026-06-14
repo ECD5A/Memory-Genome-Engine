@@ -134,6 +134,7 @@ JSON policy:
   - `scope_to_cells: ScopeId -> Vec<CellId>`
   - `kind_to_cells: KindId -> Vec<CellId>`
   - `status_to_cells: Status -> Vec<CellId>`
+- `HotMemoryLayer` также держит runtime-only derived scoring data per hot cell для focused/broad hot recall. Этот cache пересобирается из hot log/snapshot recovery, обновляется на `remember` и очищается на `seal`; он не пишется в `hot/hot.mgl`.
 - `MemoryEngine::open_at` / `init_at` теперь один раз читают `hot/hot.mgl` и восстанавливают L1 RAM layer из durable binary log.
 - Hot memory теперь работает по RAM-first модели: `remember` сразу обновляет `HotMemoryLayer` и ставит cell в queue для hot-log persistence; `recall` не ждёт диск.
 - Pending hot events flush через queued persistence path на `checkpoint`, `seal` и normal engine drop boundaries.
@@ -272,6 +273,13 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - repeated focused exact timing: total 20894 us, page decode 2953 us, scoring cache build 6125 us, cell filtering 7715 us, ContextPacket build 530 us.
   - repeated broad exact timing: total 6439 us, page decode 0 us, scoring cache build 0 us, cell filtering 2475 us, ContextPacket build 505 us.
   - subset check: focused exact candidates subset of binary_fuse candidates passed.
+- Hot scoring cache benchmark command: passed на том же generated corpus shape, 36 files, 748536 imported bytes, 960 chunks.
+  - hot focused exact: 44978 us -> 4082 us.
+  - hot broad exact: 45374 us -> 4718 us.
+  - hot full-scope exact: 4218 us -> 4047 us.
+  - sealed repeated focused exact stayed comparable: 20894 us -> 21144 us.
+  - sealed repeated broad exact stayed comparable: 6439 us -> 6669 us.
+  - subset check: focused exact candidates subset of binary_fuse candidates passed.
 - Benchmark harness CLI smoke command: passed.
   - config: 120 cells, 12 sealed pages, 4 logical scopes, 5 markers per cell, 4 marker groups, 4 targeted queries, 2 noise queries, 3 repeats, seed 7.
   - exact_marker_page: remember avg 8367 us, seal avg 61834 us, focused recall avg 5270 us, broad recall avg 12575 us, full-scope recall avg 1764 us, index lookup avg 1 us, page decode avg 391 us, ContextPacket build avg 944 us, storage 108585 bytes.
@@ -381,6 +389,10 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - Добавлен decision-ready `comparison` summary для exact vs BinaryFuse по hot/cold/repeated recall и focused/broad/full-scope modes.
   - Repeated sealed recall summary теперь показывает total recall, query marker extraction, hot lookup, index lookup, page read/load, page decode, scoring cache build, cell filtering, reranking и ContextPacket build по recall mode.
   - Existing detailed `modes` output оставлен без изменений; это только форма отчёта, а не изменение retrieval/storage behavior.
+- L1 Hot RAM scoring cache package: passed.
+  - Hot focused/broad recall теперь переиспользует `CachedCellScoringData`, построенный на `remember`/hot recovery, вместо tokenization hot cell value/subject на каждый recall.
+  - Runtime scoring data очищается через `HotMemoryLayer::clear()` при seal и не сохраняется в `hot/hot.mgl` или snapshots как отдельный storage format.
+  - Correctness tests прошли для cache build/clear, hot recall, reopen recovery, seal clearing, full-scope behavior и no JSON runtime storage regression.
 - L1 Hot RAM layer package: passed.
   - `HotMemoryLayer` индексирует hot cells в RAM по cell id, marker id, canonical scope, kind и status.
   - Correctness tests прошли для immediate recall после remember, reopen recovery из `hot/hot.mgl`, очистки hot после seal, sealed recall после seal, full-scope hot+sealed recall и default status exclusion before scoring.
