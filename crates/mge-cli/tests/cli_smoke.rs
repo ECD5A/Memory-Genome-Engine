@@ -377,14 +377,23 @@ fn corpus_benchmark_outputs_valid_core_metrics() {
     )
     .unwrap();
     fs::write(corpus.join("ignored.bin"), [0, 159, 146, 150]).unwrap();
+    let outside = dir.path().join("outside.md");
+    fs::write(
+        &outside,
+        "# Outside\n\nThis file must not be followed through a symlink.\n",
+    )
+    .unwrap();
+    let symlink_created = create_file_symlink(&outside, &corpus.join("outside-link.md")).is_ok();
 
     let store_root = dir.path().join("corpus-bench-store");
     let output = Command::new(env!("CARGO_BIN_EXE_mge-corpus-bench"))
         .args([
-            "--corpus-root",
+            "--corpus",
             corpus.to_str().unwrap(),
             "--store-root",
             store_root.to_str().unwrap(),
+            "--profile",
+            "small",
             "--max-files",
             "8",
             "--max-bytes",
@@ -393,12 +402,16 @@ fn corpus_benchmark_outputs_valid_core_metrics() {
             "10000",
             "--chunk-bytes",
             "256",
+            "--chunk-lines",
+            "2",
             "--targeted-queries",
             "2",
             "--noise-queries",
             "1",
             "--repeats",
             "2",
+            "--seed",
+            "7",
         ])
         .output()
         .unwrap();
@@ -412,8 +425,25 @@ fn corpus_benchmark_outputs_valid_core_metrics() {
 
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     let chunks = report["corpus"]["chunks_created"].as_u64().unwrap();
+    assert_eq!(report["corpus_config"]["profile"], "small");
+    assert_eq!(report["corpus_config"]["generated"], false);
+    assert_eq!(report["corpus_config"]["chunk_lines"], 2);
+    assert_eq!(report["corpus_config"]["seed"], 7);
+    assert_eq!(report["generated_corpus"]["enabled"], false);
     assert!(report["corpus"]["files_imported"].as_u64().unwrap() >= 3);
     assert!(chunks >= 3);
+    assert!(
+        report["corpus"]["skipped"]["unsupported_extensions"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
+    if symlink_created {
+        assert!(
+            report["corpus"]["skipped"]["symlinks"].as_u64().unwrap() >= 1,
+            "symlink should be skipped instead of followed"
+        );
+    }
     assert_eq!(
         report["subset_check"]["focused_exact_candidates_subset_of_binary_fuse_candidates"],
         true
@@ -492,6 +522,25 @@ fn corpus_benchmark_outputs_valid_core_metrics() {
             .any(|entry| entry["component"].as_str().is_some()
                 && entry["avg_micros"].as_u64().is_some())
     );
+    assert!(report["recommendation"]["main_bottleneck"]
+        .as_str()
+        .is_some());
+    assert!(report["recommendation"]["signals"]["binary_fuse_helped"]
+        .as_bool()
+        .is_some());
+    assert!(
+        report["recommendation"]["shares_percent"]["sealed_repeated_focused_exact"]["page_decode"]
+            .as_u64()
+            .is_some()
+    );
+    assert!(report["recommendation"]["human_summary"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|line| line
+            .as_str()
+            .unwrap_or("")
+            .contains("Suggested next core step")));
 
     let modes = report["modes"].as_array().unwrap();
     assert_eq!(modes.len(), 2);
@@ -535,6 +584,138 @@ fn corpus_benchmark_outputs_valid_core_metrics() {
         assert!(!mode_root.join("manifest.json").exists());
         assert!(!mode_root.join("hot").join("hot_cells.jsonl").exists());
     }
+}
+
+#[cfg(unix)]
+fn create_file_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(windows)]
+fn create_file_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_file(target, link)
+}
+
+#[test]
+fn corpus_benchmark_generated_small_profile_outputs_recommendation() {
+    let dir = tempdir().unwrap();
+    let store_root = dir.path().join("generated-small-store");
+    let output = Command::new(env!("CARGO_BIN_EXE_mge-corpus-bench"))
+        .args([
+            "--generated",
+            "--profile",
+            "small",
+            "--store-root",
+            store_root.to_str().unwrap(),
+            "--max-files",
+            "12",
+            "--max-bytes",
+            "120000",
+            "--max-file-bytes",
+            "40000",
+            "--targeted-queries",
+            "3",
+            "--noise-queries",
+            "1",
+            "--repeats",
+            "1",
+            "--seed",
+            "3",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "mge-corpus-bench generated small failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["corpus_config"]["generated"], true);
+    assert_eq!(report["corpus_config"]["profile"], "small");
+    assert_eq!(report["generated_corpus"]["enabled"], true);
+    assert!(
+        report["generated_corpus"]["categories"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 5
+    );
+    assert!(report["corpus"]["extensions_count"].as_u64().unwrap() >= 4);
+    assert!(
+        report["corpus"]["skipped"]["unsupported_extensions"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
+    assert_eq!(
+        report["subset_check"]["focused_exact_candidates_subset_of_binary_fuse_candidates"],
+        true
+    );
+    assert!(report["recommendation"]["suggested_next_core_step"]
+        .as_str()
+        .is_some());
+    assert!(store_root.join("generated-corpus").is_dir());
+    assert!(store_root
+        .join("exact_marker_page")
+        .join("manifest.mgm")
+        .is_file());
+    assert!(!store_root
+        .join("exact_marker_page")
+        .join("manifest.json")
+        .exists());
+}
+
+#[test]
+fn corpus_benchmark_generated_medium_profile_accepts_overrides() {
+    let dir = tempdir().unwrap();
+    let store_root = dir.path().join("generated-medium-store");
+    let output = Command::new(env!("CARGO_BIN_EXE_mge-corpus-bench"))
+        .args([
+            "--generated",
+            "--profile",
+            "medium",
+            "--store-root",
+            store_root.to_str().unwrap(),
+            "--max-files",
+            "10",
+            "--max-bytes",
+            "100000",
+            "--max-file-bytes",
+            "30000",
+            "--chunk-lines",
+            "4",
+            "--targeted-queries",
+            "2",
+            "--noise-queries",
+            "1",
+            "--repeats",
+            "1",
+            "--seed",
+            "11",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "mge-corpus-bench generated medium failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["corpus_config"]["profile"], "medium");
+    assert_eq!(report["corpus_config"]["max_files"], 10);
+    assert_eq!(report["corpus_config"]["chunk_lines"], 4);
+    assert!(report["corpus"]["files_imported"].as_u64().unwrap() > 0);
+    assert!(
+        report["recommendation"]["signals"]["repeated_recall_locality_benefit_percent"]
+            .as_i64()
+            .is_some()
+    );
 }
 
 fn run_mge(store: &Path, args: &[&str]) -> Output {

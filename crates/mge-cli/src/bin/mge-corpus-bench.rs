@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use mge_core::{
     CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine, MemoryKind,
     MemoryStatus, MemoryValue, PageClustererKind, PageCodecKind, RecallMode, RecallRequest,
@@ -24,38 +24,83 @@ const SKIPPED_DIRS: &[&str] = &[
     "build",
 ];
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum BenchProfile {
+    Small,
+    Medium,
+    CodeHeavy,
+    DocsHeavy,
+    Mixed,
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "mge-corpus-bench",
     about = "Local corpus Memory Genome Engine core benchmark harness"
 )]
 struct Args {
-    #[arg(long)]
-    corpus_root: PathBuf,
+    #[arg(
+        long = "corpus-root",
+        visible_alias = "corpus",
+        required_unless_present = "generated"
+    )]
+    corpus_root: Option<PathBuf>,
 
     #[arg(long)]
     store_root: PathBuf,
 
-    #[arg(long, default_value_t = 200)]
+    #[arg(long)]
+    generated: bool,
+
+    #[arg(long, value_enum, default_value_t = BenchProfile::Mixed)]
+    profile: BenchProfile,
+
+    #[arg(long)]
+    max_files: Option<usize>,
+
+    #[arg(long)]
+    max_bytes: Option<usize>,
+
+    #[arg(long)]
+    max_file_bytes: Option<usize>,
+
+    #[arg(long)]
+    chunk_bytes: Option<usize>,
+
+    #[arg(long)]
+    chunk_lines: Option<usize>,
+
+    #[arg(long)]
+    targeted_queries: Option<usize>,
+
+    #[arg(long)]
+    noise_queries: Option<usize>,
+
+    #[arg(long)]
+    repeats: Option<usize>,
+
+    #[arg(long, default_value_t = 0)]
+    seed: u64,
+}
+
+#[derive(Clone, Debug)]
+struct BenchConfig {
+    profile: BenchProfile,
     max_files: usize,
-
-    #[arg(long, default_value_t = 8 * 1024 * 1024)]
     max_bytes: usize,
-
-    #[arg(long, default_value_t = 512 * 1024)]
     max_file_bytes: usize,
-
-    #[arg(long, default_value_t = 1_200)]
     chunk_bytes: usize,
-
-    #[arg(long, default_value_t = 8)]
+    chunk_lines: Option<usize>,
     targeted_queries: usize,
-
-    #[arg(long, default_value_t = 2)]
     noise_queries: usize,
-
-    #[arg(long, default_value_t = 3)]
     repeats: usize,
+    seed: u64,
+}
+
+#[derive(Clone, Debug, Default)]
+struct GeneratedCorpusStats {
+    files_written: usize,
+    categories: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -160,17 +205,19 @@ struct ModeRun {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    validate_args(&args)?;
+    let config = BenchConfig::from_args(&args);
+    validate_args(&args, &config)?;
 
-    let corpus_root = fs::canonicalize(&args.corpus_root)
-        .with_context(|| format!("failed to canonicalize {}", args.corpus_root.display()))?;
-    ensure_store_root_is_safe(&corpus_root, &args.store_root)?;
+    let (corpus_root, generated_corpus) = prepare_corpus_root(&args, &config)?;
+    if !args.generated {
+        ensure_store_root_is_safe(&corpus_root, &args.store_root)?;
+    }
 
-    let (cells, corpus_stats) = load_corpus(&corpus_root, &args)?;
+    let (cells, corpus_stats) = load_corpus(&corpus_root, &config)?;
     if cells.is_empty() {
         bail!("corpus produced no importable chunks");
     }
-    let queries = build_queries(&cells, &args);
+    let queries = build_queries(&cells, &config);
     if queries.is_empty() {
         bail!("corpus produced no benchmark queries");
     }
@@ -178,14 +225,14 @@ fn main() -> Result<()> {
     let exact = run_mode(
         &args.store_root,
         IndexKind::ExactMarkerPage,
-        &args,
+        &config,
         &cells,
         &queries,
     )?;
     let binary = run_mode(
         &args.store_root,
         IndexKind::BinaryFusePage,
-        &args,
+        &config,
         &cells,
         &queries,
     )?;
@@ -203,20 +250,26 @@ fn main() -> Result<()> {
             "corpus_root": corpus_root,
             "store_root": args.store_root,
             "corpus_config": {
-                "max_files": args.max_files,
-                "max_bytes": args.max_bytes,
-                "max_file_bytes": args.max_file_bytes,
-                "chunk_bytes": args.chunk_bytes,
-                "targeted_queries": args.targeted_queries,
-                "noise_queries": args.noise_queries,
-                "repeats": args.repeats,
+                "profile": config.profile.as_str(),
+                "generated": args.generated,
+                "seed": config.seed,
+                "max_files": config.max_files,
+                "max_bytes": config.max_bytes,
+                "max_file_bytes": config.max_file_bytes,
+                "chunk_bytes": config.chunk_bytes,
+                "chunk_lines": config.chunk_lines,
+                "targeted_queries": config.targeted_queries,
+                "noise_queries": config.noise_queries,
+                "repeats": config.repeats,
                 "allowed_extensions": ALLOWED_EXTENSIONS,
             },
+            "generated_corpus": generated_corpus_to_json(&generated_corpus),
             "corpus": corpus_to_json(&corpus_stats),
             "subset_check": {
                 "focused_exact_candidates_subset_of_binary_fuse_candidates": subset_check,
             },
             "comparison": comparison_to_json(&exact, &binary),
+            "recommendation": recommendation_to_json(&exact, &binary),
             "modes": [
                 mode_to_json(&exact),
                 mode_to_json(&binary),
@@ -227,23 +280,125 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn validate_args(args: &Args) -> Result<()> {
-    if args.max_files == 0 {
+impl BenchProfile {
+    fn defaults(self) -> BenchConfig {
+        match self {
+            Self::Small => BenchConfig {
+                profile: self,
+                max_files: 18,
+                max_bytes: 512 * 1024,
+                max_file_bytes: 96 * 1024,
+                chunk_bytes: 900,
+                chunk_lines: Some(18),
+                targeted_queries: 4,
+                noise_queries: 1,
+                repeats: 2,
+                seed: 0,
+            },
+            Self::Medium => BenchConfig {
+                profile: self,
+                max_files: 80,
+                max_bytes: 4 * 1024 * 1024,
+                max_file_bytes: 256 * 1024,
+                chunk_bytes: 1_000,
+                chunk_lines: Some(24),
+                targeted_queries: 8,
+                noise_queries: 2,
+                repeats: 3,
+                seed: 0,
+            },
+            Self::CodeHeavy => BenchConfig {
+                profile: self,
+                max_files: 96,
+                max_bytes: 4 * 1024 * 1024,
+                max_file_bytes: 192 * 1024,
+                chunk_bytes: 900,
+                chunk_lines: Some(32),
+                targeted_queries: 10,
+                noise_queries: 2,
+                repeats: 3,
+                seed: 0,
+            },
+            Self::DocsHeavy => BenchConfig {
+                profile: self,
+                max_files: 72,
+                max_bytes: 5 * 1024 * 1024,
+                max_file_bytes: 384 * 1024,
+                chunk_bytes: 1_600,
+                chunk_lines: Some(18),
+                targeted_queries: 8,
+                noise_queries: 2,
+                repeats: 3,
+                seed: 0,
+            },
+            Self::Mixed => BenchConfig {
+                profile: self,
+                max_files: 200,
+                max_bytes: 8 * 1024 * 1024,
+                max_file_bytes: 512 * 1024,
+                chunk_bytes: 1_200,
+                chunk_lines: None,
+                targeted_queries: 8,
+                noise_queries: 2,
+                repeats: 3,
+                seed: 0,
+            },
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Medium => "medium",
+            Self::CodeHeavy => "code-heavy",
+            Self::DocsHeavy => "docs-heavy",
+            Self::Mixed => "mixed",
+        }
+    }
+}
+
+impl BenchConfig {
+    fn from_args(args: &Args) -> Self {
+        let mut config = args.profile.defaults();
+        config.max_files = args.max_files.unwrap_or(config.max_files);
+        config.max_bytes = args.max_bytes.unwrap_or(config.max_bytes);
+        config.max_file_bytes = args.max_file_bytes.unwrap_or(config.max_file_bytes);
+        config.chunk_bytes = args.chunk_bytes.unwrap_or(config.chunk_bytes);
+        config.chunk_lines = args.chunk_lines.or(config.chunk_lines);
+        config.targeted_queries = args.targeted_queries.unwrap_or(config.targeted_queries);
+        config.noise_queries = args.noise_queries.unwrap_or(config.noise_queries);
+        config.repeats = args.repeats.unwrap_or(config.repeats);
+        config.seed = args.seed;
+        config
+    }
+}
+
+fn validate_args(args: &Args, config: &BenchConfig) -> Result<()> {
+    if !args.generated && args.corpus_root.is_none() {
+        bail!("--corpus-root/--corpus is required unless --generated is used");
+    }
+    if args.generated && args.corpus_root.is_some() {
+        bail!("--generated cannot be combined with --corpus-root/--corpus");
+    }
+    if config.max_files == 0 {
         bail!("--max-files must be greater than 0");
     }
-    if args.max_bytes == 0 {
+    if config.max_bytes == 0 {
         bail!("--max-bytes must be greater than 0");
     }
-    if args.max_file_bytes == 0 {
+    if config.max_file_bytes == 0 {
         bail!("--max-file-bytes must be greater than 0");
     }
-    if args.chunk_bytes < 128 {
+    if config.chunk_bytes < 128 {
         bail!("--chunk-bytes must be at least 128");
     }
-    if args.repeats == 0 {
+    if config.chunk_lines == Some(0) {
+        bail!("--chunk-lines must be greater than 0");
+    }
+    if config.repeats == 0 {
         bail!("--repeats must be greater than 0");
     }
-    if args.targeted_queries == 0 && args.noise_queries == 0 {
+    if config.targeted_queries == 0 && config.noise_queries == 0 {
         bail!("at least one targeted or noise query is required");
     }
     if args.store_root.exists() {
@@ -253,6 +408,25 @@ fn validate_args(args: &Args) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn prepare_corpus_root(
+    args: &Args,
+    config: &BenchConfig,
+) -> Result<(PathBuf, Option<GeneratedCorpusStats>)> {
+    if args.generated {
+        let corpus_root = args.store_root.join("generated-corpus");
+        let stats = generate_diverse_corpus(&corpus_root, config)?;
+        return Ok((corpus_root, Some(stats)));
+    }
+
+    let corpus_root = args
+        .corpus_root
+        .as_ref()
+        .context("--corpus-root/--corpus is required")?;
+    let corpus_root = fs::canonicalize(corpus_root)
+        .with_context(|| format!("failed to canonicalize {}", corpus_root.display()))?;
+    Ok((corpus_root, None))
 }
 
 fn ensure_store_root_is_safe(corpus_root: &Path, store_root: &Path) -> Result<()> {
@@ -274,13 +448,155 @@ fn ensure_store_root_is_safe(corpus_root: &Path, store_root: &Path) -> Result<()
     Ok(())
 }
 
-fn load_corpus(corpus_root: &Path, args: &Args) -> Result<(Vec<CellSpec>, CorpusStats)> {
+fn generate_diverse_corpus(
+    corpus_root: &Path,
+    config: &BenchConfig,
+) -> Result<GeneratedCorpusStats> {
+    fs::create_dir_all(corpus_root)?;
+    let mut stats = GeneratedCorpusStats::default();
+    let target_files = config.max_files.min(match config.profile {
+        BenchProfile::Small => 18,
+        BenchProfile::Medium => 48,
+        BenchProfile::CodeHeavy => 54,
+        BenchProfile::DocsHeavy => 42,
+        BenchProfile::Mixed => 60,
+    });
+
+    let templates: &[(&str, &str, &str)] = match config.profile {
+        BenchProfile::CodeHeavy => &[
+            ("rust", "src/rust", "rs"),
+            ("python", "src/python", "py"),
+            ("typescript", "web", "ts"),
+            ("javascript", "web", "js"),
+            ("config", "config", "toml"),
+            ("markdown", "docs", "md"),
+            ("noise", "noise", "txt"),
+        ],
+        BenchProfile::DocsHeavy => &[
+            ("markdown", "docs/notes", "md"),
+            ("long_text", "docs/long", "txt"),
+            ("fragment", "fragments", "md"),
+            ("config", "config", "json"),
+            ("rust", "src/rust", "rs"),
+            ("noise", "noise", "txt"),
+        ],
+        _ => &[
+            ("markdown", "docs/notes", "md"),
+            ("rust", "src/rust", "rs"),
+            ("python", "src/python", "py"),
+            ("typescript", "web", "ts"),
+            ("javascript", "web", "js"),
+            ("config", "config", "toml"),
+            ("long_text", "docs/long", "txt"),
+            ("fragment", "fragments", "md"),
+            ("noise", "noise", "txt"),
+        ],
+    };
+
+    for index in 0..target_files {
+        let template =
+            templates[(index + seed_offset(config.seed, templates.len())) % templates.len()];
+        write_generated_file(corpus_root, template, index, config.seed)?;
+        stats.files_written += 1;
+        stats.categories.insert(template.0.to_string());
+    }
+
+    let binary_dir = corpus_root.join("noise");
+    fs::create_dir_all(&binary_dir)?;
+    fs::write(binary_dir.join("ignored-binary.bin"), [0, 159, 146, 150])?;
+    stats.files_written += 1;
+    stats.categories.insert("binary_skipped".to_string());
+
+    Ok(stats)
+}
+
+fn write_generated_file(
+    corpus_root: &Path,
+    template: (&str, &str, &str),
+    index: usize,
+    seed: u64,
+) -> Result<()> {
+    let (category, dir, extension) = template;
+    let dir = corpus_root.join(dir);
+    fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{category}-{index:03}.{extension}"));
+    let content = generated_content(category, extension, index, seed);
+    fs::write(path, content)?;
+    Ok(())
+}
+
+fn generated_content(category: &str, extension: &str, index: usize, seed: u64) -> String {
+    let topic = [
+        "marker genome",
+        "sealed recall",
+        "page catalog",
+        "context packet",
+        "hot memory",
+        "binary fuse",
+        "validation rebuild",
+        "runtime cache",
+    ][(index + seed_offset(seed, 8)) % 8];
+    let scope = format!("generated_scope_{}", index % 6);
+    let repeated =
+        format!("{topic} {topic} {scope} benchmark recall scoring cache candidate page metadata ");
+
+    match (category, extension) {
+        ("rust", "rs") => format!(
+            "pub fn generated_case_{index}() -> &'static str {{\n    \"{repeated}\"\n}}\n\n#[test]\nfn generated_test_{index}() {{ assert!(generated_case_{index}().contains(\"recall\")); }}\n"
+        ),
+        ("python", "py") => format!(
+            "def generated_case_{index}():\n    value = \"{repeated}\"\n    return value.split()\n\nclass MemoryCase{index}:\n    scope = \"{scope}\"\n"
+        ),
+        ("typescript", "ts") => format!(
+            "export const generatedCase{index} = {{ scope: \"{scope}\", topic: \"{topic}\", text: \"{repeated}\" }};\nexport function recallCase{index}() {{ return generatedCase{index}.text; }}\n"
+        ),
+        ("javascript", "js") => format!(
+            "const generatedCase{index} = {{ scope: \"{scope}\", topic: \"{topic}\", text: \"{repeated}\" }};\nmodule.exports = generatedCase{index};\n"
+        ),
+        ("config", "toml") => format!(
+            "[generated.case_{index}]\nscope = \"{scope}\"\ntopic = \"{topic}\"\nnotes = \"{repeated}\"\n"
+        ),
+        ("config", "json") => format!(
+            "{{\n  \"scope\": \"{scope}\",\n  \"topic\": \"{topic}\",\n  \"notes\": \"{repeated}\"\n}}\n"
+        ),
+        ("long_text", "txt") => {
+            let mut text = String::new();
+            for line in 0..48 {
+                text.push_str(&format!(
+                    "Long document {index} line {line}: {repeated} unrelated background terms alpha beta gamma delta.\n"
+                ));
+            }
+            text
+        }
+        ("fragment", "md") => (0..18)
+            .map(|line| format!("- short note {index}.{line}: {topic} {scope}\n"))
+            .collect(),
+        ("noise", "txt") => (0..24)
+            .map(|line| {
+                format!("unrelated noise {index}.{line}: weather music archive random phrase without project markers\n")
+            })
+            .collect(),
+        _ => format!(
+            "# Generated note {index}\n\nScope `{scope}` keeps {topic} benchmark material.\n\n{repeated}\n\n## Details\n\n- candidate pages\n- scoring cache\n- context packet\n"
+        ),
+    }
+}
+
+fn seed_offset(seed: u64, modulo: usize) -> usize {
+    if modulo == 0 {
+        0
+    } else {
+        usize::try_from(seed % u64::try_from(modulo).unwrap_or(1)).unwrap_or(0)
+    }
+}
+
+fn load_corpus(corpus_root: &Path, config: &BenchConfig) -> Result<(Vec<CellSpec>, CorpusStats)> {
     let mut stats = CorpusStats::default();
     let mut cells = Vec::new();
     let mut stack = vec![corpus_root.to_path_buf()];
 
     while let Some(dir) = stack.pop() {
-        if stats.files_imported >= args.max_files || stats.bytes_imported >= args.max_bytes {
+        if stats.files_imported >= config.max_files || stats.bytes_imported >= config.max_bytes {
             break;
         }
 
@@ -288,7 +604,8 @@ fn load_corpus(corpus_root: &Path, args: &Args) -> Result<(Vec<CellSpec>, Corpus
         entries.sort_by_key(|entry| entry.path());
 
         for entry in entries {
-            if stats.files_imported >= args.max_files || stats.bytes_imported >= args.max_bytes {
+            if stats.files_imported >= config.max_files || stats.bytes_imported >= config.max_bytes
+            {
                 break;
             }
 
@@ -322,11 +639,11 @@ fn load_corpus(corpus_root: &Path, args: &Args) -> Result<(Vec<CellSpec>, Corpus
                 stats.skipped_empty_files += 1;
                 continue;
             }
-            if file_bytes > args.max_file_bytes {
+            if file_bytes > config.max_file_bytes {
                 stats.skipped_oversized_files += 1;
                 continue;
             }
-            if stats.bytes_imported.saturating_add(file_bytes) > args.max_bytes {
+            if stats.bytes_imported.saturating_add(file_bytes) > config.max_bytes {
                 stats.skipped_by_byte_limit += 1;
                 continue;
             }
@@ -341,7 +658,7 @@ fn load_corpus(corpus_root: &Path, args: &Args) -> Result<(Vec<CellSpec>, Corpus
                 .strip_prefix(corpus_root)
                 .unwrap_or(&path)
                 .to_path_buf();
-            let chunks = chunk_text(&text, args.chunk_bytes);
+            let chunks = chunk_text(&text, config);
             if chunks.is_empty() {
                 stats.skipped_empty_files += 1;
                 continue;
@@ -402,7 +719,46 @@ fn allowed_extension(path: &Path) -> Option<String> {
         .then_some(extension)
 }
 
-fn chunk_text(text: &str, max_chunk_bytes: usize) -> Vec<String> {
+fn chunk_text(text: &str, config: &BenchConfig) -> Vec<String> {
+    if let Some(max_chunk_lines) = config.chunk_lines {
+        return chunk_text_by_lines(text, max_chunk_lines, config.chunk_bytes);
+    }
+
+    chunk_text_by_bytes(text, config.chunk_bytes)
+}
+
+fn chunk_text_by_lines(text: &str, max_chunk_lines: usize, max_chunk_bytes: usize) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    let mut current_lines = 0usize;
+
+    for line in text.lines() {
+        if line.len() > max_chunk_bytes {
+            push_non_empty(&mut chunks, &mut current);
+            current_lines = 0;
+            split_long_line(line, max_chunk_bytes, &mut chunks);
+            continue;
+        }
+
+        let additional = line.len() + usize::from(!current.is_empty());
+        if (!current.is_empty() && current_lines >= max_chunk_lines)
+            || (!current.is_empty() && current.len() + additional > max_chunk_bytes)
+        {
+            push_non_empty(&mut chunks, &mut current);
+            current_lines = 0;
+        }
+        if !current.is_empty() {
+            current.push('\n');
+        }
+        current.push_str(line);
+        current_lines += 1;
+    }
+
+    push_non_empty(&mut chunks, &mut current);
+    chunks
+}
+
+fn chunk_text_by_bytes(text: &str, max_chunk_bytes: usize) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut current = String::new();
 
@@ -457,16 +813,23 @@ fn split_long_line(line: &str, max_chunk_bytes: usize, chunks: &mut Vec<String>)
     }
 }
 
-fn build_queries(cells: &[CellSpec], args: &Args) -> Vec<QuerySpec> {
+fn build_queries(cells: &[CellSpec], config: &BenchConfig) -> Vec<QuerySpec> {
     let mut queries = Vec::new();
+    let mut unique_cells = Vec::new();
     let mut seen_markers = BTreeSet::new();
     for cell in cells {
-        if queries.len() >= args.targeted_queries {
-            break;
-        }
         if !seen_markers.insert(cell.query_marker.clone()) {
             continue;
         }
+        unique_cells.push(cell);
+    }
+
+    let offset = seed_offset(config.seed, unique_cells.len());
+    for index in 0..unique_cells.len() {
+        if queries.len() >= config.targeted_queries {
+            break;
+        }
+        let cell = unique_cells[(offset + index) % unique_cells.len()];
         queries.push(QuerySpec {
             name: format!("target_{:03}", queries.len()),
             query_text: cell.query_text.clone(),
@@ -479,7 +842,7 @@ fn build_queries(cells: &[CellSpec], args: &Args) -> Vec<QuerySpec> {
         .first()
         .map(|cell| cell.scope.clone())
         .unwrap_or_else(|| "corpus:empty".to_string());
-    for index in 0..args.noise_queries {
+    for index in 0..config.noise_queries {
         queries.push(QuerySpec {
             name: format!("noise_{index:03}"),
             query_text: format!("corpus unmatched noise {index:03}"),
@@ -494,7 +857,7 @@ fn build_queries(cells: &[CellSpec], args: &Args) -> Vec<QuerySpec> {
 fn run_mode(
     root: &Path,
     index_kind: IndexKind,
-    args: &Args,
+    config: &BenchConfig,
     cells: &[CellSpec],
     queries: &[QuerySpec],
 ) -> Result<ModeRun> {
@@ -518,10 +881,11 @@ fn run_mode(
         remember_latency_micros.record_elapsed(started);
     }
 
-    let hot_focused_recall = run_recall_bench(&engine, RecallMode::Focused, args.repeats, queries)?;
-    let hot_broad_recall = run_recall_bench(&engine, RecallMode::Broad, args.repeats, queries)?;
+    let hot_focused_recall =
+        run_recall_bench(&engine, RecallMode::Focused, config.repeats, queries)?;
+    let hot_broad_recall = run_recall_bench(&engine, RecallMode::Broad, config.repeats, queries)?;
     let hot_full_scope_recall =
-        run_recall_bench(&engine, RecallMode::FullScope, args.repeats, queries)?;
+        run_recall_bench(&engine, RecallMode::FullScope, config.repeats, queries)?;
 
     let mut seal_latency_micros = MetricSamples::default();
     let seal_started = Instant::now();
@@ -533,17 +897,17 @@ fn run_mode(
     let validate_after_rebuild_ok = engine.validate_deep()?.ok;
 
     let sealed_cold_focused_recall =
-        run_cold_recall_bench(&mode_root, RecallMode::Focused, args.repeats, queries)?;
+        run_cold_recall_bench(&mode_root, RecallMode::Focused, config.repeats, queries)?;
     let sealed_cold_broad_recall =
-        run_cold_recall_bench(&mode_root, RecallMode::Broad, args.repeats, queries)?;
+        run_cold_recall_bench(&mode_root, RecallMode::Broad, config.repeats, queries)?;
     let sealed_cold_full_scope_recall =
-        run_cold_recall_bench(&mode_root, RecallMode::FullScope, args.repeats, queries)?;
+        run_cold_recall_bench(&mode_root, RecallMode::FullScope, config.repeats, queries)?;
     let sealed_repeated_focused_recall =
-        run_recall_bench(&engine, RecallMode::Focused, args.repeats, queries)?;
+        run_recall_bench(&engine, RecallMode::Focused, config.repeats, queries)?;
     let sealed_repeated_broad_recall =
-        run_recall_bench(&engine, RecallMode::Broad, args.repeats, queries)?;
+        run_recall_bench(&engine, RecallMode::Broad, config.repeats, queries)?;
     let sealed_repeated_full_scope_recall =
-        run_recall_bench(&engine, RecallMode::FullScope, args.repeats, queries)?;
+        run_recall_bench(&engine, RecallMode::FullScope, config.repeats, queries)?;
 
     let stats = engine.stats()?;
     let catalog = engine.inspect()?.page_catalog;
@@ -801,6 +1165,21 @@ fn corpus_to_json(stats: &CorpusStats) -> serde_json::Value {
     })
 }
 
+fn generated_corpus_to_json(stats: &Option<GeneratedCorpusStats>) -> serde_json::Value {
+    match stats {
+        Some(stats) => json!({
+            "enabled": true,
+            "files_written": stats.files_written,
+            "categories": stats.categories,
+        }),
+        None => json!({
+            "enabled": false,
+            "files_written": 0,
+            "categories": [],
+        }),
+    }
+}
+
 fn mode_to_json(mode: &ModeRun) -> serde_json::Value {
     json!({
         "index_kind": mode.index_kind,
@@ -835,6 +1214,154 @@ fn mode_to_json(mode: &ModeRun) -> serde_json::Value {
                 "full_scope": recall_to_json(&mode.sealed_repeated_full_scope_recall),
             },
         },
+    })
+}
+
+fn recommendation_to_json(exact: &ModeRun, binary: &ModeRun) -> serde_json::Value {
+    let hot_focused = exact.hot_focused_recall.total_recall_micros.avg();
+    let sealed_cold = exact.sealed_cold_focused_recall.total_recall_micros.avg();
+    let sealed_repeated = exact
+        .sealed_repeated_focused_recall
+        .total_recall_micros
+        .avg();
+    let binary_repeated = binary
+        .sealed_repeated_focused_recall
+        .total_recall_micros
+        .avg();
+
+    let page_decode = exact
+        .sealed_repeated_focused_recall
+        .page_decode_micros
+        .avg();
+    let scoring_cache_build = exact
+        .sealed_repeated_focused_recall
+        .scoring_cache_build_micros
+        .avg();
+    let cell_filtering = exact
+        .sealed_repeated_focused_recall
+        .cell_filtering_micros
+        .avg();
+    let context_packet_build = exact
+        .sealed_repeated_focused_recall
+        .context_packet_build_micros
+        .avg();
+
+    let page_decode_share = percent_of(page_decode, sealed_repeated);
+    let scoring_cache_build_share = percent_of(scoring_cache_build, sealed_repeated);
+    let cell_filtering_share = percent_of(cell_filtering, sealed_repeated);
+    let context_packet_build_share = percent_of(context_packet_build, sealed_repeated);
+    let scoring_filtering_share = percent_of(
+        scoring_cache_build.saturating_add(cell_filtering),
+        sealed_repeated,
+    );
+    let repeated_locality_benefit = percent_reduction(sealed_cold, sealed_repeated);
+    let binary_fuse_delta = signed_percent_delta(binary_repeated, sealed_repeated);
+
+    let hot_bottleneck = hot_focused > sealed_repeated.saturating_mul(80) / 100;
+    let binary_fuse_helped = binary_repeated > 0 && binary_repeated < sealed_repeated * 95 / 100;
+    let page_decode_dominates = page_decode_share >= 40;
+    let scoring_filtering_dominates = scoring_filtering_share >= 45;
+    let context_packet_build_dominates = context_packet_build_share >= 30;
+
+    let repeated_top = top_component(&[
+        ("page_decode", page_decode),
+        ("scoring_cache_build", scoring_cache_build),
+        ("cell_filtering", cell_filtering),
+        ("context_packet_build", context_packet_build),
+    ]);
+    let cold_top = top_component(&[
+        (
+            "page_decode",
+            exact.sealed_cold_focused_recall.page_decode_micros.avg(),
+        ),
+        (
+            "scoring_cache_build",
+            exact
+                .sealed_cold_focused_recall
+                .scoring_cache_build_micros
+                .avg(),
+        ),
+        (
+            "cell_filtering",
+            exact.sealed_cold_focused_recall.cell_filtering_micros.avg(),
+        ),
+        (
+            "context_packet_build",
+            exact
+                .sealed_cold_focused_recall
+                .context_packet_build_micros
+                .avg(),
+        ),
+    ]);
+
+    let suggested_next_core_step = if hot_bottleneck {
+        "measure L1 Hot RAM on a larger real corpus before changing sealed-page policy"
+    } else if page_decode_dominates {
+        "evaluate decoded page cache policy on real workloads before custom page codec design"
+    } else if scoring_filtering_dominates {
+        "profile scoring/filtering on real workloads before considering page format changes"
+    } else if context_packet_build_dominates {
+        "profile ContextPacket construction and output shaping on real workloads"
+    } else if repeated_locality_benefit < 20 {
+        "collect a larger real corpus benchmark; cache locality is not yet proving much benefit"
+    } else {
+        "run the same profile against a larger local corpus before changing core architecture"
+    };
+
+    let human_summary = vec![
+        format!(
+            "Hot focused recall avg is {hot_focused} us; sealed repeated focused avg is {sealed_repeated} us."
+        ),
+        format!(
+            "Sealed cold focused avg is {sealed_cold} us; repeated locality benefit is {repeated_locality_benefit}%."
+        ),
+        format!(
+            "Repeated focused shares: page_decode={page_decode_share}%, scoring_cache_build={scoring_cache_build_share}%, cell_filtering={cell_filtering_share}%, context_packet_build={context_packet_build_share}%."
+        ),
+        format!(
+            "BinaryFuse focused repeated delta is {binary_fuse_delta}% vs exact; helped={binary_fuse_helped}."
+        ),
+        format!("Suggested next core step: {suggested_next_core_step}."),
+    ];
+
+    json!({
+        "main_bottleneck": repeated_top.0,
+        "sealed_cold_bottleneck": cold_top.0,
+        "sealed_repeated_bottleneck": repeated_top.0,
+        "suggested_next_core_step": suggested_next_core_step,
+        "signals": {
+            "hot_recall_bottleneck": hot_bottleneck,
+            "binary_fuse_helped": binary_fuse_helped,
+            "binary_fuse_delta_percent": binary_fuse_delta,
+            "page_decode_dominates": page_decode_dominates,
+            "scoring_filtering_dominates": scoring_filtering_dominates,
+            "context_packet_build_dominates": context_packet_build_dominates,
+            "repeated_recall_locality_benefit_percent": repeated_locality_benefit,
+        },
+        "shares_percent": {
+            "sealed_repeated_focused_exact": {
+                "page_decode": page_decode_share,
+                "scoring_cache_build": scoring_cache_build_share,
+                "cell_filtering": cell_filtering_share,
+                "scoring_plus_filtering": scoring_filtering_share,
+                "context_packet_build": context_packet_build_share,
+            },
+        },
+        "workload_shape": {
+            "storage_size_bytes": {
+                "exact_marker_page": exact.storage_size_bytes,
+                "binary_fuse_page": binary.storage_size_bytes,
+            },
+            "avg_page_size_bytes": {
+                "exact_marker_page": exact.avg_encoded_page_bytes,
+                "binary_fuse_page": binary.avg_encoded_page_bytes,
+            },
+            "avg_cells_per_page": {
+                "exact_marker_page": exact.avg_cells_per_page,
+                "binary_fuse_page": binary.avg_cells_per_page,
+            },
+        },
+        "human_summary": human_summary,
     })
 }
 
@@ -1142,6 +1669,40 @@ fn average_usize(total: usize, count: usize) -> u64 {
     } else {
         u64::try_from(total / count).unwrap_or(u64::MAX)
     }
+}
+
+fn percent_of(part: u64, total: u64) -> u64 {
+    if total == 0 {
+        0
+    } else {
+        part.saturating_mul(100) / total
+    }
+}
+
+fn percent_reduction(before: u64, after: u64) -> i64 {
+    if before == 0 {
+        return 0;
+    }
+    let before = i128::from(before);
+    let after = i128::from(after);
+    i64::try_from(((before - after) * 100) / before).unwrap_or(0)
+}
+
+fn signed_percent_delta(value: u64, baseline: u64) -> i64 {
+    if baseline == 0 {
+        return 0;
+    }
+    let value = i128::from(value);
+    let baseline = i128::from(baseline);
+    i64::try_from(((value - baseline) * 100) / baseline).unwrap_or(0)
+}
+
+fn top_component<'a>(components: &[(&'a str, u64)]) -> (&'a str, u64) {
+    components
+        .iter()
+        .copied()
+        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(left.0)))
+        .unwrap_or(("none", 0))
 }
 
 fn elapsed_micros(started: Instant) -> u64 {

@@ -137,8 +137,11 @@ Core benchmark/smoke harness:
 
 ```bash
 cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --scopes 16 --markers-per-cell 5 --marker-groups 12 --targeted-queries 6 --noise-queries 3 --repeats 5 --seed 1
-cargo run -p mge-cli --bin mge-corpus-bench -- --corpus-root . --store-root ../mge-corpus-bench-store --max-files 200 --max-bytes 8388608 --repeats 3
+cargo run -p mge-cli --bin mge-corpus-bench -- --corpus . --store-root ../mge-corpus-bench-store --profile mixed --max-files 200 --max-bytes 8388608 --chunk-lines 24 --repeats 3 --seed 1
+cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile small --store-root ../mge-generated-bench-store --repeats 2 --seed 7
 ```
+
+`mge-corpus-bench` читает только локальные text/code corpus files, пропускает symlinks и неподдерживаемые binary extensions, пишет только в `--store-root`, сравнивает exact vs Binary Fuse и выводит JSON benchmark/debug output с human-readable recommendation section.
 
 Для явного marker search используйте `--marker`:
 

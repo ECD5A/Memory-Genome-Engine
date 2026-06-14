@@ -421,6 +421,11 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
     - binary_fuse repeated broad: 14459 -> 7151 us.
     - exact focused cell filtering: 12212 -> 9134 us; scoring cache build rose 6742 -> 8031 us because the per-cell cached token set is built once.
   - `sealed_cells_skipped_before_token_scoring` showed only 43 cells skipped vs 484 token-scored on this corpus, so extra metadata/filter pruning was not the right next optimization.
+- Real-workload corpus benchmark readiness package: in progress.
+  - `mge-corpus-bench` now accepts the real-workload command shape with visible `--corpus` alias, `--profile small|medium|code-heavy|docs-heavy|mixed`, `--chunk-lines`, and `--seed` while preserving existing `--corpus-root` and `--chunk-bytes`.
+  - Added `--generated` diverse local corpus mode with markdown notes, Rust/Python/TypeScript/JS/config/long-text/fragment/noise files under `--store-root/generated-corpus`.
+  - Added recommendation JSON with machine-readable bottleneck signals and human-readable summary lines: hot bottleneck, sealed cold/repeated bottleneck, BinaryFuse usefulness, page decode/scoring/filtering/ContextPacket shares, repeated locality benefit, and suggested next core step.
+  - Safety remains local-only: no download, no corpus execution, symlinks skipped, unsupported binary extensions skipped before read, corpus files not modified, stores written under `--store-root`.
 - L1 Hot RAM scoring cache package: passed.
   - Hot focused/broad recall now reuses `CachedCellScoringData` built at `remember`/hot recovery time instead of tokenizing hot cell value/subject on every recall.
   - Runtime scoring data is cleared with `HotMemoryLayer::clear()` during seal and is not persisted into `hot/hot.mgl` or snapshots as a separate storage format.
