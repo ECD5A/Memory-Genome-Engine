@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.1%20prototype-blue)](PROJECT_STATUS.ru.md)
+[![Status](https://img.shields.io/badge/status-Mandate%201%20closure-blue)](PROJECT_STATUS.ru.md)
 [![Interface](https://img.shields.io/badge/interface-CLI%20%7C%20Core%20API-informational)](crates/)
 [![Storage](https://img.shields.io/badge/storage-cells%20%2B%20markers%20%2B%20pages-6f42c1)](docs/ARCHITECTURE.ru.md)
 
@@ -41,7 +41,9 @@ Cells -> Marker Genome -> Hot Memory -> Sealed Pages -> Candidate Page Index -> 
 
 - [Архитектура](docs/ARCHITECTURE.ru.md)
 - [Дорожная карта](docs/ROADMAP.ru.md)
+- [Бенчмарки](docs/BENCHMARKS.ru.md)
 - [Базовое использование](examples/basic_usage.ru.md)
+- [Rust API example](examples/basic_usage.rs)
 - [Статус проекта](PROJECT_STATUS.ru.md)
 
 ## Почему Не Markdown
@@ -143,6 +145,8 @@ cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile small --sto
 
 `mge-corpus-bench` читает только локальные text/code corpus files, пропускает symlinks и неподдерживаемые binary extensions, пишет только в `--store-root`, сравнивает exact vs Binary Fuse и выводит JSON benchmark/debug output с human-readable recommendation section.
 
+Benchmark reports объяснены в [Бенчмарках](docs/BENCHMARKS.ru.md). JSON benchmark output - это report/debug output, а не runtime storage.
+
 Для явного marker search используйте `--marker`:
 
 ```bash
@@ -189,6 +193,8 @@ tests/
 
 ## Текущие Ограничения
 
+- Mandate 1 core находится в closure phase: storage, L1 Hot RAM, sealed pages, indexes, validation/rebuild, CLI и benchmark foundation готовы.
+- Большой user-provided corpus всё ещё полезен перед любым дальнейшим scoring/filtering cleanup.
 - Нет GUI.
 - Нет chatbot.
 - Нет vector database.

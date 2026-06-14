@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.1%20prototype-blue)](PROJECT_STATUS.md)
+[![Status](https://img.shields.io/badge/status-Mandate%201%20closure-blue)](PROJECT_STATUS.md)
 [![Interface](https://img.shields.io/badge/interface-CLI%20%7C%20Core%20API-informational)](crates/)
 [![Storage](https://img.shields.io/badge/storage-cells%20%2B%20markers%20%2B%20pages-6f42c1)](docs/ARCHITECTURE.md)
 
@@ -41,7 +41,9 @@ More detail:
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Roadmap](docs/ROADMAP.md)
+- [Benchmarks](docs/BENCHMARKS.md)
 - [Basic usage](examples/basic_usage.md)
+- [Rust API example](examples/basic_usage.rs)
 - [Project status](PROJECT_STATUS.md)
 
 ## Why Not Markdown
@@ -143,6 +145,8 @@ cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile small --sto
 
 `mge-corpus-bench` reads only local text/code corpus files, skips symlinks and unsupported binary extensions, writes only under `--store-root`, compares exact vs Binary Fuse, and emits JSON benchmark/debug output with a human-readable recommendation section.
 
+Benchmark reports are explained in [Benchmarks](docs/BENCHMARKS.md). JSON benchmark output is report/debug output only, not runtime storage.
+
 Use `--marker` on recall for explicit marker search:
 
 ```bash
@@ -189,6 +193,8 @@ tests/
 
 ## Current Limits
 
+- Mandate 1 core is in closure phase: storage, L1 Hot RAM, sealed pages, indexes, validation/rebuild, CLI, and benchmark foundation are ready.
+- A larger user-provided corpus is still useful before any further scoring/filtering cleanup.
 - No GUI.
 - No chatbot.
 - No vector database.

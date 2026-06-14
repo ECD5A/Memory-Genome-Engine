@@ -41,7 +41,7 @@ JSON policy:
 | --- | --- | --- |
 | v0.1 core/CLI | Done / hardening | Rust core, CLI, cells, markers, hot memory, sealed pages, exact index, recall, context packets работают. |
 | v0.2 storage/index foundation | Done / hardening | Binary runtime storage layout, MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in и validation hardening сделаны. |
-| v0.2 remaining | In progress | Benchmark-driven reranking и compact storage/index hardening. |
+| v0.2 remaining | Closure phase | Benchmark foundation готов; осталось docs/API polish и прогон большого user-provided corpus. |
 | v0.3 SDK/MCP | Not started | Python/TypeScript/MCP только после стабилизации Rust core API. |
 | v0.4 security | Foundation only | Interfaces/policy есть; real encryption/session unlock/blind markers ещё не начаты. |
 | v0.5 safety/search | Partial foundation | Policy/capabilities есть; poisoning/conflict/vector reranking ещё не начаты. |
@@ -51,6 +51,58 @@ JSON policy:
 - Довести v0.1/v0.2 core/storage/index foundation до состояния, где runtime path быстрый и компактный.
 - Держать JSON вне internal runtime storage; использовать его только для explicit debug output и structured input parsing.
 - Держать реализацию детерминированной, локальной, компактной, marker/page based и готовой к будущим encryption, SDK и MCP.
+
+## Mandate 1 Closure Status
+
+Mandate 1 находится в closure phase. Developer-ready core функционально готов после docs/API cleanup и финального benchmark pass.
+
+Готово:
+
+- Binary runtime storage layout реализован и валидируется.
+- L1 Hot RAM indexes и RAM-first durability/recovery реализованы.
+- `MarkerGenome` явный, а `MemoryCell.markers` сохранён как flattened compatibility/index view.
+- Sealed pages, page catalog metadata, metadata pruning, decoded page cache и runtime scoring cache реализованы.
+- `ExactMarkerPageIndex` остаётся default; `BinaryFusePageIndex` остаётся optional и benchmark-gated.
+- `validate --deep` и `rebuild-indexes` работают без переписывания sealed page payloads.
+- CLI workflow и Rust core API usable для init/open, remember, recall, seal, checkpoint, validate и rebuild.
+- `mge-synthetic-bench` и `mge-corpus-bench` готовы для generated и local real-workload measurements.
+
+Последняя проверка:
+
+- `cargo fmt`: passed.
+- `cargo test`: passed, 115 tests total.
+- CLI smoke: passed.
+- Synthetic benchmark smoke: passed, exact/BinaryFuse subset check true.
+- Generated corpus profiles `small`, `medium`, `code-heavy`, `docs-heavy` и `mixed`: passed.
+- Repo-local corpus: passed на 38 files, 622884 bytes, 794 chunks, subset check true.
+
+Benchmark decision summary:
+
+- L1 Hot RAM не является bottleneck.
+- Sealed repeated recall достаточно стабилен для developer-ready core.
+- BinaryFuse иногда помогает, но недостаточно стабильно, чтобы заменить exact.
+- Page decode share сейчас не обосновывает custom codec work.
+- Scoring/filtering - единственный повторяющийся bottleneck signal, но нужен большой user-provided corpus перед дальнейшим cleanup.
+
+Closure benchmark summary, exact baseline:
+
+- Generated profiles прошли: `small`, `medium`, `code-heavy`, `docs-heavy`, `mixed`.
+- Generated repeated focused recall range: 1596-2713 us; hot focused range: 261-420 us.
+- Generated page decode share range: 8-14%; scoring/filtering share range: 15-31%; ContextPacket share range: 4-6%.
+- Repo-local corpus: 38 files, 622884 bytes, 794 chunks, repeated focused 9647 us, repeated broad 15867 us, repeated full-scope 7804 us.
+- Repo-local shares: page decode 13%, scoring/filtering 23%, ContextPacket 2%; repeated locality benefit 39%.
+- Repo-local BinaryFuse repeated focused: 8778 us vs exact 9647 us, но BinaryFuse остаётся optional, потому что profile results mixed.
+
+Оставшиеся closure gaps:
+
+- Прогнать большой user-provided corpus, если он доступен.
+- Держать `docs/BENCHMARKS.md` и `docs/BENCHMARKS.ru.md` актуальными по мере изменения benchmark output.
+- Поддерживать минимальный Rust API example в `examples/basic_usage.rs`.
+- Optional scoring/filtering cleanup только если большой real corpus подтвердит тот же bottleneck.
+
+Recommended next mandate после closure:
+
+- Mandate 2 должен быть Agent Integration / SDK / MCP только после owner acceptance финальных corpus results.
 
 ## Сделано
 
