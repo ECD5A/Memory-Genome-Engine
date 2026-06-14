@@ -265,7 +265,6 @@ fn synthetic_benchmark_outputs_valid_core_metrics() {
         report["subset_check"]["focused_exact_candidates_subset_of_binary_fuse_candidates"],
         true
     );
-
     let modes = report["modes"].as_array().unwrap();
     assert_eq!(modes.len(), 2);
     assert_eq!(modes[0]["index_kind"], "exact_marker_page");
@@ -418,6 +417,51 @@ fn corpus_benchmark_outputs_valid_core_metrics() {
     assert_eq!(
         report["subset_check"]["focused_exact_candidates_subset_of_binary_fuse_candidates"],
         true
+    );
+    assert_eq!(
+        report["comparison"]["sealed_cold_avg_micros"]["focused"]["exact_marker_page"]
+            .as_u64()
+            .is_some(),
+        true
+    );
+    assert_eq!(
+        report["comparison"]["sealed_cold_avg_micros"]["broad"]["binary_fuse_page"]
+            .as_u64()
+            .is_some(),
+        true
+    );
+    assert_eq!(
+        report["comparison"]["sealed_repeated_avg_micros"]["full_scope"]["exact_marker_page"]
+            .as_u64()
+            .is_some(),
+        true
+    );
+    assert_eq!(
+        report["comparison"]["sealed_repeated_timing_avg_micros"]["focused"]["page_decode"]
+            ["exact_marker_page"]
+            .as_u64()
+            .is_some(),
+        true
+    );
+    assert_eq!(
+        report["comparison"]["sealed_repeated_timing_avg_micros"]["focused"]["scoring_cache_build"]
+            ["binary_fuse_page"]
+            .as_u64()
+            .is_some(),
+        true
+    );
+    assert_eq!(
+        report["comparison"]["sealed_repeated_timing_avg_micros"]["focused"]
+            ["context_packet_build"]["exact_marker_page"]
+            .as_u64()
+            .is_some(),
+        true
+    );
+    assert!(
+        report["comparison"]["page_shape"]["avg_encoded_page_bytes"]["exact_marker_page"]
+            .as_u64()
+            .unwrap()
+            > 0
     );
 
     let modes = report["modes"].as_array().unwrap();

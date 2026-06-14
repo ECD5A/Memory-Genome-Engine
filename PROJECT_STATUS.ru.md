@@ -177,6 +177,7 @@ JSON policy:
 - Добавлен synthetic benchmark tool: `cargo run -p mge-cli --bin mge-synthetic-bench`.
 - Synthetic benchmark сравнивает `exact_marker_page` и opt-in `binary_fuse_page` на одинаковых generated stores и проверяет `exact_candidates ⊆ binary_fuse_candidates`.
 - Synthetic benchmark harness теперь показывает remember, seal, hot focused/broad/full-scope recall до seal, sealed focused/broad/full-scope recall после seal, index lookup, page decode, ContextPacket build, candidate pages, pages pruned by metadata, hot total/candidate/scanned cells, cells scanned, returned items, storage size, seal hot-clear correctness и p50/p95/avg metrics where practical.
+- Corpus benchmark comparison output теперь содержит прямые exact-vs-Binary-Fuse summaries для hot/cold/repeated focused/broad/full-scope recall, repeated timing breakdowns, ContextPacket build time, storage size, average encoded page size и average cells per page.
 - Index/filter minimalism задокументирован: L1 Hot RAM использует только exact mutable indexes; L2 использует `ExactMarkerPageIndex` по умолчанию и `BinaryFusePageIndex` как единственный optional static probabilistic filter backend.
 - Hot log archiving теперь использует уникальные archive names, если несколько seals попадают в одно timestamp window.
 - Добавлены `ValidationReport` и CLI `validate` как read-only consistency checks для manifest, catalog, pages, page checksums, marker references и candidate index coverage.
@@ -262,6 +263,14 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 - Latest canonicalization benchmark smoke command: passed на 24 local files, 250192 imported bytes, 229 chunks.
   - exact_marker_page: cold focused avg 30434 us, repeated focused avg 18186 us, repeated broad avg 3729 us, page decode avg 2518 us, scoring cache build avg 6149 us, cell filtering avg 6770 us.
   - binary_fuse_page: repeated focused avg 17851 us, repeated broad avg 3395 us, page decode avg 2529 us, scoring cache build avg 6040 us, cell filtering avg 6839 us.
+  - subset check: focused exact candidates subset of binary_fuse candidates passed.
+- Safe generated corpus benchmark command: passed на 36 generated files, 748536 imported bytes, 960 chunks, avg chunk 774 bytes, avg markers per cell 4, 6 scopes, 6 extensions.
+  - storage: exact 2567669 bytes, binary_fuse 2584948 bytes, avg encoded page 54594 bytes, avg cells/page 43.64.
+  - hot recall avg: focused exact 44978 us / binary 44729 us, broad exact 45374 us / binary 45176 us, full-scope exact 4218 us / binary 4085 us.
+  - sealed cold avg: focused exact 69505 us / binary 69090 us, broad exact 70348 us / binary 69116 us, full-scope exact 21184 us / binary 21303 us.
+  - sealed repeated avg: focused exact 20894 us / binary 20718 us, broad exact 6439 us / binary 6507 us, full-scope exact 6655 us / binary 6627 us.
+  - repeated focused exact timing: total 20894 us, page decode 2953 us, scoring cache build 6125 us, cell filtering 7715 us, ContextPacket build 530 us.
+  - repeated broad exact timing: total 6439 us, page decode 0 us, scoring cache build 0 us, cell filtering 2475 us, ContextPacket build 505 us.
   - subset check: focused exact candidates subset of binary_fuse candidates passed.
 - Benchmark harness CLI smoke command: passed.
   - config: 120 cells, 12 sealed pages, 4 logical scopes, 5 markers per cell, 4 marker groups, 4 targeted queries, 2 noise queries, 3 repeats, seed 7.
@@ -368,6 +377,10 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
     - exact cell filtering: 7943 us -> 6770 us.
     - binary repeated focused: 20497 us -> 17851 us.
   - Recall/storage architecture unchanged; новые filters, codec, storage layout, SDK, UI, vector DB или JSON runtime storage не добавлялись.
+- Corpus benchmark summary package: passed.
+  - Добавлен decision-ready `comparison` summary для exact vs BinaryFuse по hot/cold/repeated recall и focused/broad/full-scope modes.
+  - Repeated sealed recall summary теперь показывает total recall, query marker extraction, hot lookup, index lookup, page read/load, page decode, scoring cache build, cell filtering, reranking и ContextPacket build по recall mode.
+  - Existing detailed `modes` output оставлен без изменений; это только форма отчёта, а не изменение retrieval/storage behavior.
 - L1 Hot RAM layer package: passed.
   - `HotMemoryLayer` индексирует hot cells в RAM по cell id, marker id, canonical scope, kind и status.
   - Correctness tests прошли для immediate recall после remember, reopen recovery из `hot/hot.mgl`, очистки hot после seal, sealed recall после seal, full-scope hot+sealed recall и default status exclusion before scoring.

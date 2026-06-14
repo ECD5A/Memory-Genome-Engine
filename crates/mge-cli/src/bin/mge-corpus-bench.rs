@@ -834,16 +834,95 @@ fn comparison_to_json(exact: &ModeRun, binary: &ModeRun) -> serde_json::Value {
     json!({
         "remember_avg_micros": pair_json(&exact.remember_latency_micros, &binary.remember_latency_micros),
         "seal_avg_micros": pair_json(&exact.seal_latency_micros, &binary.seal_latency_micros),
+        "hot_avg_micros": recall_totals_by_mode_json(
+            &exact.hot_focused_recall,
+            &exact.hot_broad_recall,
+            &exact.hot_full_scope_recall,
+            &binary.hot_focused_recall,
+            &binary.hot_broad_recall,
+            &binary.hot_full_scope_recall,
+        ),
+        "sealed_cold_avg_micros": recall_totals_by_mode_json(
+            &exact.sealed_cold_focused_recall,
+            &exact.sealed_cold_broad_recall,
+            &exact.sealed_cold_full_scope_recall,
+            &binary.sealed_cold_focused_recall,
+            &binary.sealed_cold_broad_recall,
+            &binary.sealed_cold_full_scope_recall,
+        ),
+        "sealed_repeated_avg_micros": recall_totals_by_mode_json(
+            &exact.sealed_repeated_focused_recall,
+            &exact.sealed_repeated_broad_recall,
+            &exact.sealed_repeated_full_scope_recall,
+            &binary.sealed_repeated_focused_recall,
+            &binary.sealed_repeated_broad_recall,
+            &binary.sealed_repeated_full_scope_recall,
+        ),
+        "sealed_repeated_timing_avg_micros": {
+            "focused": recall_timing_pair_json(
+                &exact.sealed_repeated_focused_recall,
+                &binary.sealed_repeated_focused_recall,
+            ),
+            "broad": recall_timing_pair_json(
+                &exact.sealed_repeated_broad_recall,
+                &binary.sealed_repeated_broad_recall,
+            ),
+            "full_scope": recall_timing_pair_json(
+                &exact.sealed_repeated_full_scope_recall,
+                &binary.sealed_repeated_full_scope_recall,
+            ),
+        },
         "sealed_cold_focused_avg_micros": pair_json(&exact.sealed_cold_focused_recall.total_recall_micros, &binary.sealed_cold_focused_recall.total_recall_micros),
         "sealed_repeated_focused_avg_micros": pair_json(&exact.sealed_repeated_focused_recall.total_recall_micros, &binary.sealed_repeated_focused_recall.total_recall_micros),
         "sealed_repeated_broad_avg_micros": pair_json(&exact.sealed_repeated_broad_recall.total_recall_micros, &binary.sealed_repeated_broad_recall.total_recall_micros),
         "page_decode_avg_micros": pair_json(&exact.sealed_repeated_focused_recall.page_decode_micros, &binary.sealed_repeated_focused_recall.page_decode_micros),
         "scoring_cache_build_avg_micros": pair_json(&exact.sealed_repeated_focused_recall.scoring_cache_build_micros, &binary.sealed_repeated_focused_recall.scoring_cache_build_micros),
         "cell_filtering_avg_micros": pair_json(&exact.sealed_repeated_focused_recall.cell_filtering_micros, &binary.sealed_repeated_focused_recall.cell_filtering_micros),
+        "context_packet_build_avg_micros": pair_json(&exact.sealed_repeated_focused_recall.context_packet_build_micros, &binary.sealed_repeated_focused_recall.context_packet_build_micros),
+        "page_shape": {
+            "avg_cells_per_page": {
+                "exact_marker_page": exact.avg_cells_per_page,
+                "binary_fuse_page": binary.avg_cells_per_page,
+            },
+            "avg_encoded_page_bytes": {
+                "exact_marker_page": exact.avg_encoded_page_bytes,
+                "binary_fuse_page": binary.avg_encoded_page_bytes,
+            },
+        },
         "storage_size_bytes": {
             "exact_marker_page": exact.storage_size_bytes,
             "binary_fuse_page": binary.storage_size_bytes,
         },
+    })
+}
+
+fn recall_totals_by_mode_json(
+    exact_focused: &RecallBenchRun,
+    exact_broad: &RecallBenchRun,
+    exact_full_scope: &RecallBenchRun,
+    binary_focused: &RecallBenchRun,
+    binary_broad: &RecallBenchRun,
+    binary_full_scope: &RecallBenchRun,
+) -> serde_json::Value {
+    json!({
+        "focused": pair_json(&exact_focused.total_recall_micros, &binary_focused.total_recall_micros),
+        "broad": pair_json(&exact_broad.total_recall_micros, &binary_broad.total_recall_micros),
+        "full_scope": pair_json(&exact_full_scope.total_recall_micros, &binary_full_scope.total_recall_micros),
+    })
+}
+
+fn recall_timing_pair_json(exact: &RecallBenchRun, binary: &RecallBenchRun) -> serde_json::Value {
+    json!({
+        "total_recall": pair_json(&exact.total_recall_micros, &binary.total_recall_micros),
+        "query_marker_extraction": pair_json(&exact.query_marker_extraction_micros, &binary.query_marker_extraction_micros),
+        "hot_memory_lookup": pair_json(&exact.hot_memory_lookup_micros, &binary.hot_memory_lookup_micros),
+        "candidate_page_index_lookup": pair_json(&exact.candidate_page_index_lookup_micros, &binary.candidate_page_index_lookup_micros),
+        "page_file_read_load": pair_json(&exact.page_file_read_load_micros, &binary.page_file_read_load_micros),
+        "page_decode": pair_json(&exact.page_decode_micros, &binary.page_decode_micros),
+        "scoring_cache_build": pair_json(&exact.scoring_cache_build_micros, &binary.scoring_cache_build_micros),
+        "cell_filtering": pair_json(&exact.cell_filtering_micros, &binary.cell_filtering_micros),
+        "reranking": pair_json(&exact.reranking_micros, &binary.reranking_micros),
+        "context_packet_build": pair_json(&exact.context_packet_build_micros, &binary.context_packet_build_micros),
     })
 }
 
