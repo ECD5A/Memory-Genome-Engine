@@ -6,10 +6,10 @@ use std::path::Path;
 use mge_core::binary::{self, CodecId, FileKind};
 use mge_core::{
     build_context_packet, build_pages_from_cells, build_pages_with_clusterer, canonicalize_marker,
-    marker_strings_for_cell_fields, score_cell_debug, AgentCapabilities, AgentCapability,
-    AuditEvent, AuditLogger, BinaryFusePageIndex, CandidateIndexData, CandidatePageIndex,
-    CompressionKind, Compressor, ContextDebugInfo, DurabilityPolicy, ExactMarkerPageIndex,
-    HotCandidateQuery, HotMemoryLayer, IndexKind, InitOptions, MarkerGenome,
+    marker_strings_for_cell_fields, score_cell_debug, tokenize_keywords, AgentCapabilities,
+    AgentCapability, AuditEvent, AuditLogger, BinaryFusePageIndex, CandidateIndexData,
+    CandidatePageIndex, CompressionKind, Compressor, ContextDebugInfo, DurabilityPolicy,
+    ExactMarkerPageIndex, HotCandidateQuery, HotMemoryLayer, IndexKind, InitOptions, MarkerGenome,
     MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
     MessagePackPageCodec, NoopAuditLogger, PageBuildOptions, PageCatalog, PageCatalogEntry,
     PageClustererKind, PageCodec, PageCodecKind, QueryMode, RecallMode, RecallPolicy,
@@ -28,6 +28,14 @@ fn marker_canonicalization() {
     assert_eq!(
         canonicalize_marker("answer style").unwrap(),
         "tag:answer_style"
+    );
+}
+
+#[test]
+fn keyword_tokenization_normalizes_ascii_without_duplicates() {
+    assert_eq!(
+        tokenize_keywords("Rust APIs, APIs and policies with Tests"),
+        vec!["rust", "api", "policy", "test"]
     );
 }
 

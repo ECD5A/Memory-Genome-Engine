@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
@@ -286,6 +287,35 @@ pub fn extract_query_marker_strings(query: &str) -> Vec<String> {
 }
 
 pub fn tokenize_keywords(text: &str) -> Vec<String> {
+    if text.is_ascii() {
+        return tokenize_keywords_ascii(text);
+    }
+
+    tokenize_keywords_unicode(text)
+}
+
+fn tokenize_keywords_ascii(text: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut tokens = Vec::new();
+    let mut token_start = None;
+
+    for (index, byte) in text.bytes().enumerate() {
+        if byte.is_ascii_alphanumeric() {
+            if token_start.is_none() {
+                token_start = Some(index);
+            }
+        } else if let Some(start) = token_start.take() {
+            push_ascii_token(&mut tokens, &mut seen, &text[start..index]);
+        }
+    }
+    if let Some(start) = token_start {
+        push_ascii_token(&mut tokens, &mut seen, &text[start..]);
+    }
+
+    tokens
+}
+
+fn tokenize_keywords_unicode(text: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut tokens = Vec::new();
     let mut current = String::new();
@@ -294,37 +324,47 @@ pub fn tokenize_keywords(text: &str) -> Vec<String> {
         if ch.is_ascii_alphanumeric() {
             current.push(ch);
         } else {
-            push_token(&mut tokens, &mut seen, &current);
+            push_normalized_token(&mut tokens, &mut seen, &current);
             current.clear();
         }
     }
-    push_token(&mut tokens, &mut seen, &current);
+    push_normalized_token(&mut tokens, &mut seen, &current);
 
     tokens
 }
 
-fn push_token(tokens: &mut Vec<String>, seen: &mut HashSet<String>, raw: &str) {
+fn push_ascii_token(tokens: &mut Vec<String>, seen: &mut HashSet<String>, raw: &str) {
+    let normalized = if raw.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        Cow::Owned(raw.to_ascii_lowercase())
+    } else {
+        Cow::Borrowed(raw)
+    };
+    push_normalized_token(tokens, seen, normalized.as_ref());
+}
+
+fn push_normalized_token(tokens: &mut Vec<String>, seen: &mut HashSet<String>, raw: &str) {
     if raw.len() < 2 || is_stopword(raw) {
         return;
     }
 
     let token = singularize(raw);
-    if token.len() < 2 || is_stopword(token.as_str()) {
+    let token = token.as_ref();
+    if token.len() < 2 || is_stopword(token) || seen.contains(token) {
         return;
     }
 
-    if seen.insert(token.clone()) {
-        tokens.push(token);
-    }
+    let token = token.to_string();
+    seen.insert(token.clone());
+    tokens.push(token);
 }
 
-fn singularize(raw: &str) -> String {
+fn singularize(raw: &str) -> Cow<'_, str> {
     if raw.len() > 4 && raw.ends_with("ies") {
-        format!("{}y", &raw[..raw.len() - 3])
+        Cow::Owned(format!("{}y", &raw[..raw.len() - 3]))
     } else if raw.len() > 3 && raw.ends_with('s') && !raw.ends_with("ss") {
-        raw[..raw.len() - 1].to_string()
+        Cow::Borrowed(&raw[..raw.len() - 1])
     } else {
-        raw.to_string()
+        Cow::Borrowed(raw)
     }
 }
 
@@ -406,12 +446,44 @@ fn push_limited_tag_tokens(
     Ok(())
 }
 
-const STOPWORDS: &[&str] = &[
-    "a", "an", "and", "are", "as", "at", "be", "by", "can", "do", "for", "from", "has", "have",
-    "how", "i", "in", "is", "it", "of", "on", "or", "should", "that", "the", "this", "to", "was",
-    "what", "when", "where", "which", "who", "why", "with", "you", "your",
-];
-
 fn is_stopword(value: &str) -> bool {
-    STOPWORDS.contains(&value)
+    matches!(
+        value,
+        "a" | "an"
+            | "and"
+            | "are"
+            | "as"
+            | "at"
+            | "be"
+            | "by"
+            | "can"
+            | "do"
+            | "for"
+            | "from"
+            | "has"
+            | "have"
+            | "how"
+            | "i"
+            | "in"
+            | "is"
+            | "it"
+            | "of"
+            | "on"
+            | "or"
+            | "should"
+            | "that"
+            | "the"
+            | "this"
+            | "to"
+            | "was"
+            | "what"
+            | "when"
+            | "where"
+            | "which"
+            | "who"
+            | "why"
+            | "with"
+            | "you"
+            | "your"
+    )
 }

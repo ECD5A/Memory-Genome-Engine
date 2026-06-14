@@ -88,6 +88,7 @@ JSON policy:
 - `MarkerGenome` отдаёт all marker IDs, system marker IDs, custom marker IDs, ключевые system markers, page-summary markers и deterministic fingerprint.
 - L1 Hot RAM indexes, page grouping, page summaries, recall filtering/scoring, markdown export и validation теперь используют genome-compatible marker access, сохраняя старые vec-style records.
 - Recall hot path теперь использует borrowed `MemoryValue` text где возможно, static stopword lookup для tokenization, более дешёвую scope filtering и single-pass ContextPacket assembly, чтобы уменьшить allocations и temporary rebuilds.
+- Keyword tokenization теперь имеет ASCII fast path для обычного text/code corpus, уменьшая временные string allocations без изменения normalized token output.
 - Engine recall ranking теперь использует lightweight ranked cell handles для hot/sealed candidates, поэтому `MemoryCell` больше не clone-ится для каждого scored candidate до reranking.
 - ContextPacket output по-прежнему allocates только returned items; marker string vectors и content strings строятся после final ranking и dedupe.
 - Добавлена документация:
@@ -247,12 +248,16 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 110 tests total (13 CLI unit tests + 6 CLI integration tests + 1 core unit test + 90 core integration tests).
+- `cargo test`: passed, 111 tests total (13 CLI unit tests + 6 CLI integration tests + 1 core unit test + 91 core integration tests).
 - Validation/rebuild tests: passed для clean deep validation, corrupted/mismatched catalog summaries, missing exact index restore, active Binary Fuse index restore, recall after rebuild, hot memory untouched и no JSON/JSONL runtime storage regression.
 - Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.
 - Benchmark harness integration smoke test: passed для exact + Binary Fuse modes и required metrics.
 - Corpus benchmark integration smoke test: passed for local corpus import, exact + Binary Fuse modes, cold/repeated recall metrics, validation/rebuild checks, subset check, and no JSON/JSONL runtime storage regression.
+- Latest corpus benchmark smoke command: passed на 24 local files, 246015 imported bytes, 225 chunks.
+  - exact_marker_page: cold focused avg 33769 us, repeated focused avg 20853 us, repeated broad avg 3761 us, page decode avg 2481 us, scoring cache build avg 7652 us, cell filtering avg 7943 us.
+  - binary_fuse_page: repeated focused avg 20497 us, repeated broad avg 3483 us, page decode avg 2476 us, scoring cache build avg 7648 us, cell filtering avg 7919 us.
+  - subset check: focused exact candidates subset of binary_fuse candidates passed.
 - Benchmark harness CLI smoke command: passed.
   - config: 120 cells, 12 sealed pages, 4 logical scopes, 5 markers per cell, 4 marker groups, 4 targeted queries, 2 noise queries, 3 repeats, seed 7.
   - exact_marker_page: remember avg 8367 us, seal avg 61834 us, focused recall avg 5270 us, broad recall avg 12575 us, full-scope recall avg 1764 us, index lookup avg 1 us, page decode avg 391 us, ContextPacket build avg 944 us, storage 108585 bytes.
@@ -341,6 +346,14 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - binary repeated focused: total 24266 us, page decode 2442 us, scoring cache build 9741 us, cell filtering 9653 us.
   - repeated broad loaded about 3 pages / 78 cells on this limited repo corpus; metadata pruning kept broad recall small.
   - Current real-ish bottleneck: cell filtering/scoring and scoring-cache construction dominate repeated focused recall; cold focused recall is dominated by filtering plus page decode.
+- ASCII tokenizer hot-path package: passed.
+  - `tokenize_keywords` теперь использует byte-level ASCII fast path для обычного text/code corpus и сохраняет Unicode fallback, совместимый с предыдущей реализацией.
+  - Временные token strings теперь по возможности создаются только после stopword/singularization/dedup checks.
+  - Corpus before/after на сопоставимом 24-file repo corpus smoke:
+    - before exact repeated focused: total 26480 us, scoring cache build 10116 us, cell filtering 10619 us.
+    - after exact repeated focused: total 20853 us, scoring cache build 7652 us, cell filtering 7943 us.
+    - after binary repeated focused: total 20497 us, scoring cache build 7648 us, cell filtering 7919 us.
+  - Recall/storage architecture unchanged; новые filters, codec, storage layout, SDK, UI, vector DB или JSON runtime storage не добавлялись.
 - L1 Hot RAM layer package: passed.
   - `HotMemoryLayer` индексирует hot cells в RAM по cell id, marker id, canonical scope, kind и status.
   - Correctness tests прошли для immediate recall после remember, reopen recovery из `hot/hot.mgl`, очистки hot после seal, sealed recall после seal, full-scope hot+sealed recall и default status exclusion before scoring.
