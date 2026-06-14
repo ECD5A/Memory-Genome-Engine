@@ -1154,6 +1154,8 @@ fn recall_debug_includes_timing_breakdown_and_counters() {
         "decoded_page_cache_misses",
         "scoring_cache_hits",
         "scoring_cache_misses",
+        "sealed_cells_skipped_before_token_scoring",
+        "sealed_cells_token_scored",
     ] {
         assert!(
             debug_json

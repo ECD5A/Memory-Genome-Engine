@@ -957,6 +957,8 @@ impl MemoryEngine {
         let mut decoded_page_cache_misses = 0usize;
         let mut scoring_cache_hits = 0usize;
         let mut scoring_cache_misses = 0usize;
+        let mut sealed_cells_skipped_before_token_scoring = 0usize;
+        let mut sealed_cells_token_scored = 0usize;
         let mut loaded_pages_by_id = BTreeMap::new();
         let include_scoring_cache = !matches!(request.mode, RecallMode::FullScope);
         for page_id in &candidate_pages {
@@ -999,11 +1001,13 @@ impl MemoryEngine {
                     }
                     RecallMode::Focused | RecallMode::Broad => {
                         if !scoring_context.permits_cell(cell) {
+                            sealed_cells_skipped_before_token_scoring += 1;
                             None
                         } else if let Some((cached, build_micros)) = scoring_cache
                             .as_ref()
                             .and_then(|cache| cache.cell_with_timing(cell_index, cell))
                         {
+                            sealed_cells_token_scored += 1;
                             scoring_cache_build_micros =
                                 scoring_cache_build_micros.saturating_add(build_micros);
                             score_permitted_cell_debug_with_cached_context(
@@ -1012,6 +1016,7 @@ impl MemoryEngine {
                                 cached,
                             )
                         } else {
+                            sealed_cells_token_scored += 1;
                             score_permitted_cell_debug_with_context(cell, &scoring_context)
                         }
                     }
@@ -1071,6 +1076,8 @@ impl MemoryEngine {
             cells_decoded,
             cells_filtered,
             cells_ranked,
+            sealed_cells_skipped_before_token_scoring,
+            sealed_cells_token_scored,
             false_positive_candidate_pages,
             total_candidates: ranked.len(),
             returned_items: 0,

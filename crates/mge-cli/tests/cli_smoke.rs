@@ -475,6 +475,14 @@ fn corpus_benchmark_outputs_valid_core_metrics() {
             .as_u64()
             .is_some()
     );
+    assert!(report["comparison"]["sealed_repeated_locality"]["focused"]
+        ["sealed_cells_skipped_before_token_scoring"]["exact_marker_page"]
+        .as_u64()
+        .is_some());
+    assert!(report["comparison"]["sealed_repeated_locality"]["focused"]
+        ["sealed_cells_token_scored"]["binary_fuse_page"]
+        .as_u64()
+        .is_some());
     assert!(
         report["comparison"]["top_bottlenecks_avg_micros"]["exact_marker_page"]
             ["sealed_repeated_focused"]

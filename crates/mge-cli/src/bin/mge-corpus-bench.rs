@@ -124,6 +124,8 @@ struct RecallBenchRun {
     cells_decoded: MetricSamples,
     cells_filtered: MetricSamples,
     cells_ranked: MetricSamples,
+    sealed_cells_skipped_before_token_scoring: MetricSamples,
+    sealed_cells_token_scored: MetricSamples,
     returned_items: MetricSamples,
     decoded_page_cache_hits: MetricSamples,
     decoded_page_cache_misses: MetricSamples,
@@ -687,6 +689,8 @@ impl RecallBenchRun {
             cells_decoded: MetricSamples::default(),
             cells_filtered: MetricSamples::default(),
             cells_ranked: MetricSamples::default(),
+            sealed_cells_skipped_before_token_scoring: MetricSamples::default(),
+            sealed_cells_token_scored: MetricSamples::default(),
             returned_items: MetricSamples::default(),
             decoded_page_cache_hits: MetricSamples::default(),
             decoded_page_cache_misses: MetricSamples::default(),
@@ -737,6 +741,10 @@ impl RecallBenchRun {
         self.cells_filtered
             .record_usize(packet.debug.cells_filtered);
         self.cells_ranked.record_usize(packet.debug.cells_ranked);
+        self.sealed_cells_skipped_before_token_scoring
+            .record_usize(packet.debug.sealed_cells_skipped_before_token_scoring);
+        self.sealed_cells_token_scored
+            .record_usize(packet.debug.sealed_cells_token_scored);
         self.returned_items
             .record_usize(packet.debug.returned_items);
         self.decoded_page_cache_hits
@@ -964,6 +972,14 @@ fn recall_locality_pair_json(exact: &RecallBenchRun, binary: &RecallBenchRun) ->
         "pages_pruned_by_metadata": pair_json(&exact.pages_pruned_by_metadata, &binary.pages_pruned_by_metadata),
         "cells_decoded": pair_json(&exact.cells_decoded, &binary.cells_decoded),
         "cells_ranked": pair_json(&exact.cells_ranked, &binary.cells_ranked),
+        "sealed_cells_skipped_before_token_scoring": pair_json(
+            &exact.sealed_cells_skipped_before_token_scoring,
+            &binary.sealed_cells_skipped_before_token_scoring,
+        ),
+        "sealed_cells_token_scored": pair_json(
+            &exact.sealed_cells_token_scored,
+            &binary.sealed_cells_token_scored,
+        ),
         "returned_items": pair_json(&exact.returned_items, &binary.returned_items),
     })
 }
@@ -1035,6 +1051,8 @@ fn recall_to_json(run: &RecallBenchRun) -> serde_json::Value {
         "cells_decoded": run.cells_decoded.to_json(),
         "cells_filtered": run.cells_filtered.to_json(),
         "cells_ranked": run.cells_ranked.to_json(),
+        "sealed_cells_skipped_before_token_scoring": run.sealed_cells_skipped_before_token_scoring.to_json(),
+        "sealed_cells_token_scored": run.sealed_cells_token_scored.to_json(),
         "returned_items": run.returned_items.to_json(),
         "decoded_page_cache_hits": run.decoded_page_cache_hits.to_json(),
         "decoded_page_cache_misses": run.decoded_page_cache_misses.to_json(),

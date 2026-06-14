@@ -181,6 +181,7 @@ JSON policy:
 - Synthetic benchmark harness теперь показывает remember, seal, hot focused/broad/full-scope recall до seal, sealed focused/broad/full-scope recall после seal, index lookup, page decode, ContextPacket build, candidate pages, pages pruned by metadata, hot total/candidate/scanned cells, cells scanned, returned items, storage size, seal hot-clear correctness и p50/p95/avg metrics where practical.
 - Corpus benchmark comparison output теперь содержит прямые exact-vs-Binary-Fuse summaries для hot/cold/repeated focused/broad/full-scope recall, repeated timing breakdowns, ContextPacket build time, storage size, average encoded page size и average cells per page.
 - Corpus benchmark comparison output теперь также содержит repeated recall locality summaries и top timing bottlenecks для hot focused, sealed cold focused, sealed repeated focused и sealed repeated broad workloads.
+- Recall debug и corpus benchmark output теперь показывают sealed cells, пропущенные до token scoring, и sealed cells, которые реально дошли до token scoring.
 - Index/filter minimalism задокументирован: L1 Hot RAM использует только exact mutable indexes; L2 использует `ExactMarkerPageIndex` по умолчанию и `BinaryFusePageIndex` как единственный optional static probabilistic filter backend.
 - Hot log archiving теперь использует уникальные archive names, если несколько seals попадают в одно timestamp window.
 - Добавлены `ValidationReport` и CLI `validate` как read-only consistency checks для manifest, catalog, pages, page checksums, marker references и candidate index coverage.
@@ -401,6 +402,10 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
   - Добавлен `sealed_repeated_locality` с decoded page cache hits/misses, scoring cache hits/misses, pages loaded/pruned, cells decoded/ranked и returned items.
   - Добавлен `top_bottlenecks_avg_micros` для основных hot/cold/repeated workloads, отсортированный по average component time.
   - Это только форма отчёта; recall, storage, indexes, filters и ContextPacket output не менялись.
+- Sealed token-scoring counter package: passed.
+  - `ContextDebugInfo` теперь содержит `sealed_cells_skipped_before_token_scoring` и `sealed_cells_token_scored`.
+  - `mge-corpus-bench` записывает эти counters в per-mode output и exact-vs-BinaryFuse locality summaries.
+  - Это только debug/reporting; storage layout, recall results, validation, rebuild-indexes и caches не менялись.
 - L1 Hot RAM scoring cache package: passed.
   - Hot focused/broad recall теперь переиспользует `CachedCellScoringData`, построенный на `remember`/hot recovery, вместо tokenization hot cell value/subject на каждый recall.
   - Runtime scoring data очищается через `HotMemoryLayer::clear()` при seal и не сохраняется в `hot/hot.mgl` или snapshots как отдельный storage format.

@@ -90,6 +90,10 @@ pub struct ContextDebugInfo {
     pub cells_filtered: usize,
     #[serde(default)]
     pub cells_ranked: usize,
+    #[serde(default)]
+    pub sealed_cells_skipped_before_token_scoring: usize,
+    #[serde(default)]
+    pub sealed_cells_token_scored: usize,
     pub false_positive_candidate_pages: usize,
     pub total_candidates: usize,
     #[serde(default)]
