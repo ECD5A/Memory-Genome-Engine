@@ -88,6 +88,8 @@ JSON policy:
 - `MarkerGenome` отдаёт all marker IDs, system marker IDs, custom marker IDs, ключевые system markers, page-summary markers и deterministic fingerprint.
 - L1 Hot RAM indexes, page grouping, page summaries, recall filtering/scoring, markdown export и validation теперь используют genome-compatible marker access, сохраняя старые vec-style records.
 - Recall hot path теперь использует borrowed `MemoryValue` text где возможно, static stopword lookup для tokenization, более дешёвую scope filtering и single-pass ContextPacket assembly, чтобы уменьшить allocations и temporary rebuilds.
+- Engine recall ranking теперь использует lightweight ranked cell handles для hot/sealed candidates, поэтому `MemoryCell` больше не clone-ится для каждого scored candidate до reranking.
+- ContextPacket output по-прежнему allocates только returned items; marker string vectors и content strings строятся после final ranking и dedupe.
 - Добавлена документация:
   - `README.md`
   - `README.ru.md`
@@ -244,7 +246,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Статус Проверки
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 107 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 88 core integration tests).
+- `cargo test`: passed, 108 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 89 core integration tests).
 - Validation/rebuild tests: passed для clean deep validation, corrupted/mismatched catalog summaries, missing exact index restore, active Binary Fuse index restore, recall after rebuild, hot memory untouched и no JSON/JSONL runtime storage regression.
 - Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.

@@ -94,6 +94,8 @@ JSON policy:
 - `MarkerGenome` exposes all marker IDs, system marker IDs, custom marker IDs, key system markers, page-summary markers, and a deterministic fingerprint.
 - L1 Hot RAM indexes, page grouping, page summaries, recall filtering/scoring, markdown export, and validation now use genome-compatible marker access while preserving old vec-style records.
 - Recall hot path now uses borrowed `MemoryValue` text where possible, static stopword lookup for tokenization, cheaper scoped filtering, and single-pass ContextPacket assembly to reduce allocations and temporary rebuilds.
+- Engine recall ranking now uses lightweight ranked cell handles for hot/sealed candidates, so `MemoryCell` is not cloned for every scored candidate before reranking.
+- ContextPacket output still allocates only the returned items; marker string vectors and content strings are built after final ranking and dedupe.
 - Documentation added:
   - `README.md`
   - `docs/ARCHITECTURE.md`
@@ -247,7 +249,7 @@ cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --sco
 ## Verification Status
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 107 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 88 core integration tests).
+- `cargo test`: passed, 108 tests total (13 CLI unit tests + 5 CLI integration tests + 1 core unit test + 89 core integration tests).
 - Validation/rebuild tests: passed for clean deep validation, corrupted/mismatched catalog summaries, missing exact index restore, active Binary Fuse index restore, recall after rebuild, hot memory untouched, and no JSON/JSONL runtime storage regression.
 - Recall modes tests: passed for focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering, and no JSON/JSONL runtime storage regression.
 - Recall modes CLI smoke command: passed for `--mode broad`, `--mode full-scope --scope`, and full-scope missing-scope failure.

@@ -1082,6 +1082,25 @@ fn recall_from_sealed_pages() {
 }
 
 #[test]
+fn sealed_recall_context_output_is_stable_after_cache_hit() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let request = RecallRequest::new("How should the agent answer technical questions?");
+    let first = engine.recall(request.clone()).unwrap();
+    let second = engine.recall(request).unwrap();
+
+    assert_eq!(first.relevant_memory, second.relevant_memory);
+    assert_eq!(first.constraints, second.constraints);
+    assert_eq!(first.warnings, second.warnings);
+    assert_eq!(first.debug.score_details, second.debug.score_details);
+    assert_eq!(second.debug.loaded_pages, 1);
+    assert_eq!(second.debug.returned_items, 1);
+}
+
+#[test]
 fn recall_debug_includes_timing_breakdown_and_counters() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();

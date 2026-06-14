@@ -25,15 +25,15 @@ use crate::models::{
     current_timestamp, CellId, MarkerGenome, MarkerId, MemoryCell, MemoryKind, MemorySource,
     MemoryStatus, MemoryValue, PageId, RecallMode, SensitivityLevel, TrustLevel,
 };
-use crate::packet::{ContextDebugInfo, ContextPacket};
+use crate::packet::{ContextDebugInfo, ContextMemoryItem, ContextPacket, ContextScoreDebugItem};
 use crate::pages::{
     attach_page_checksum, build_pages_with_kind, decode_page_with, encode_page_with,
     page_checksum_matches, page_file_name, MemoryPage, PageBuildOptions, PageCatalog,
     PageCatalogEntry, PageClustererKind, PageCodecKind,
 };
 use crate::retrieval::{
-    build_context_packet, full_scope_cell_debug_with_filter, score_cell_debug_with_context,
-    RankedCell, RecallFilterContext, RecallRequest, Retriever, ScoringContext,
+    full_scope_cell_debug_with_filter, score_cell_debug_with_context, RecallFilterContext,
+    RecallRequest, Retriever, ScoringContext,
 };
 use crate::security::{AuditEvent, AuditLogger, NoSecurity, NoopAuditLogger, SecurityProvider};
 
@@ -439,6 +439,21 @@ struct RebuildPageRead {
 }
 
 #[derive(Clone, Debug)]
+struct RankedCellHandle {
+    source: RankedCellSource,
+    cell_id: CellId,
+    updated_at: i64,
+    score: i64,
+    score_detail: ContextScoreDebugItem,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RankedCellSource {
+    Hot(CellId),
+    Sealed { page_id: PageId, cell_index: usize },
+}
+
+#[derive(Clone, Debug)]
 struct PagePruneContext {
     query_marker_ids: Vec<MarkerId>,
     explicit_marker_ids: Vec<MarkerId>,
@@ -840,8 +855,10 @@ impl MemoryEngine {
                     score_cell_debug_with_context(cell, &scoring_context)
                 }
             } {
-                ranked.push(RankedCell {
-                    cell: cell.clone(),
+                ranked.push(RankedCellHandle {
+                    source: RankedCellSource::Hot(cell.id),
+                    cell_id: cell.id,
+                    updated_at: cell.updated_at,
                     score: score_detail.score,
                     score_detail,
                 });
@@ -883,6 +900,7 @@ impl MemoryEngine {
         let mut false_positive_candidate_pages = 0;
         let mut page_file_read_load_micros = 0u64;
         let mut page_decode_micros = 0u64;
+        let mut loaded_pages_by_id = BTreeMap::new();
         for page_id in &candidate_pages {
             let Some(entry) = entries_by_id.get(page_id) else {
                 continue;
@@ -902,7 +920,7 @@ impl MemoryEngine {
             cells_decoded += page.cells.len();
             let before_page_candidates = ranked.len();
             let filtering_started = Instant::now();
-            for cell in &page.cells {
+            for (cell_index, cell) in page.cells.iter().enumerate() {
                 if let Some(score_detail) = match request.mode {
                     RecallMode::FullScope => {
                         full_scope_cell_debug_with_filter(cell, &filter_context)
@@ -911,14 +929,20 @@ impl MemoryEngine {
                         score_cell_debug_with_context(cell, &scoring_context)
                     }
                 } {
-                    ranked.push(RankedCell {
-                        cell: cell.clone(),
+                    ranked.push(RankedCellHandle {
+                        source: RankedCellSource::Sealed {
+                            page_id: page.page_id,
+                            cell_index,
+                        },
+                        cell_id: cell.id,
+                        updated_at: cell.updated_at,
                         score: score_detail.score,
                         score_detail,
                     });
                 }
                 cells_evaluated += 1;
             }
+            loaded_pages_by_id.insert(page.page_id, page);
             cell_filtering_micros =
                 cell_filtering_micros.saturating_add(elapsed_micros(filtering_started));
             if ranked.len() == before_page_candidates {
@@ -935,8 +959,8 @@ impl MemoryEngine {
             right
                 .score
                 .cmp(&left.score)
-                .then_with(|| right.cell.updated_at.cmp(&left.cell.updated_at))
-                .then_with(|| left.cell.id.cmp(&right.cell.id))
+                .then_with(|| right.updated_at.cmp(&left.updated_at))
+                .then_with(|| left.cell_id.cmp(&right.cell_id))
         });
         let reranking_micros = elapsed_micros(reranking_started);
 
@@ -986,12 +1010,138 @@ impl MemoryEngine {
         })?;
 
         let context_packet_started = Instant::now();
-        let mut packet =
-            build_context_packet(request.query, &ranked, &self.dictionary, debug, max_items);
+        let mut packet = self.build_context_packet_from_ranked_handles(
+            request.query,
+            &ranked,
+            &loaded_pages_by_id,
+            debug,
+            max_items,
+        )?;
         packet.debug.context_packet_build_micros = elapsed_micros(context_packet_started);
         packet.debug.total_recall_micros = elapsed_micros(total_recall_started);
 
         Ok(packet)
+    }
+
+    fn build_context_packet_from_ranked_handles(
+        &self,
+        query: String,
+        ranked: &[RankedCellHandle],
+        sealed_pages: &BTreeMap<PageId, Arc<MemoryPage>>,
+        debug: ContextDebugInfo,
+        max_items: usize,
+    ) -> Result<ContextPacket> {
+        let mut seen_cell_ids = BTreeSet::new();
+        let mut total_candidates = 0;
+        let mut relevant_memory = Vec::with_capacity(max_items.min(ranked.len()));
+        let mut score_details = Vec::with_capacity(max_items.min(ranked.len()));
+
+        for ranked in ranked {
+            if !seen_cell_ids.insert(ranked.cell_id) {
+                continue;
+            }
+            total_candidates += 1;
+
+            if relevant_memory.len() < max_items {
+                let cell = self.resolve_ranked_cell_handle(ranked, sealed_pages)?;
+                let mut seen_marker_ids = BTreeSet::new();
+                let mut markers = Vec::new();
+                cell.for_each_marker_id_for_indexing(|marker_id| {
+                    if seen_marker_ids.insert(marker_id) {
+                        if let Some(marker) = self.dictionary.marker(marker_id) {
+                            markers.push(marker.to_string());
+                        }
+                    }
+                });
+
+                relevant_memory.push(ContextMemoryItem {
+                    kind: cell.kind,
+                    content: cell.value.to_plain_text(),
+                    trust: cell.trust,
+                    status: cell.status,
+                    scope: cell.scope.clone(),
+                    sensitivity: cell.sensitivity,
+                    markers,
+                });
+                score_details.push(ranked.score_detail.clone());
+            }
+        }
+
+        let includes_deprecated_or_rejected = relevant_memory.iter().any(|item| {
+            matches!(
+                item.status,
+                MemoryStatus::Deprecated | MemoryStatus::Rejected | MemoryStatus::Superseded
+            )
+        });
+        let includes_secret_references = relevant_memory
+            .iter()
+            .any(|item| item.sensitivity == SensitivityLevel::SecretReference);
+
+        let mut constraints = Vec::new();
+        let mut warnings = Vec::new();
+        if relevant_memory.is_empty() {
+            warnings.push("No relevant memory matched the query.".to_string());
+        }
+        if includes_deprecated_or_rejected {
+            warnings.push(
+                "Deprecated, rejected, or superseded memories were included by explicit policy."
+                    .to_string(),
+            );
+        } else {
+            constraints
+                .push("Do not use deprecated, rejected, or superseded memories.".to_string());
+        }
+        if includes_secret_references {
+            warnings.push("SecretReference cells were included by explicit policy.".to_string());
+        } else {
+            constraints.push("Do not expose secret_reference cells.".to_string());
+        }
+        let returned_items = relevant_memory.len();
+
+        Ok(ContextPacket {
+            query,
+            relevant_memory,
+            constraints,
+            warnings,
+            debug: ContextDebugInfo {
+                total_candidates,
+                returned_items,
+                score_details,
+                ..debug
+            },
+        })
+    }
+
+    fn resolve_ranked_cell_handle<'a>(
+        &'a self,
+        ranked: &RankedCellHandle,
+        sealed_pages: &'a BTreeMap<PageId, Arc<MemoryPage>>,
+    ) -> Result<&'a MemoryCell> {
+        match ranked.source {
+            RankedCellSource::Hot(cell_id) => self.hot.cell(cell_id).ok_or_else(|| {
+                MgeError::InvalidInput(format!("ranked hot cell {cell_id} is missing"))
+            }),
+            RankedCellSource::Sealed {
+                page_id,
+                cell_index,
+            } => {
+                let page = sealed_pages.get(&page_id).ok_or_else(|| {
+                    MgeError::InvalidInput(format!("ranked sealed page {page_id} is missing"))
+                })?;
+                let cell = page.cells.get(cell_index).ok_or_else(|| {
+                    MgeError::InvalidInput(format!(
+                        "ranked sealed cell index {cell_index} is missing from page {page_id}"
+                    ))
+                })?;
+                if cell.id != ranked.cell_id {
+                    return Err(MgeError::InvalidInput(format!(
+                        "ranked sealed cell id mismatch on page {page_id}: expected {}, found {}",
+                        ranked.cell_id, cell.id
+                    )));
+                }
+                Ok(cell)
+            }
+        }
     }
 
     pub fn seal(&mut self) -> Result<SealReport> {
