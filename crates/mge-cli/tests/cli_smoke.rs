@@ -193,6 +193,46 @@ fn cli_tui_help_is_available_without_starting_interactive_terminal() {
 }
 
 #[test]
+fn cli_setup_help_and_safe_first_run_workflow_are_available() {
+    let help = Command::new(env!("CARGO_BIN_EXE_mge"))
+        .args(["setup", "--help"])
+        .output()
+        .unwrap();
+
+    assert!(
+        help.status.success(),
+        "mge setup --help failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&help.stdout),
+        String::from_utf8_lossy(&help.stderr)
+    );
+    let help_stdout = String::from_utf8_lossy(&help.stdout);
+    assert!(help_stdout.contains("--encrypted"));
+    assert!(help_stdout.contains("--passphrase-env"));
+
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    let setup = run_mge(&store, &["setup"]);
+    let setup_stdout = String::from_utf8_lossy(&setup.stdout);
+    assert!(setup_stdout.contains("Memory Genome setup"));
+    assert!(setup_stdout.contains("security: unencrypted"));
+    assert!(store.join("manifest.mgm").is_file());
+
+    let second = run_mge(&store, &["setup"]);
+    assert!(String::from_utf8_lossy(&second.stdout).contains("already initialized"));
+}
+
+#[test]
+fn cli_setup_encrypted_requires_passphrase_env() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+
+    let failed = run_mge_failure(&store, &["setup", "--encrypted"]);
+
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("--passphrase-env"));
+    assert!(!store.join("manifest.mgm").exists());
+}
+
+#[test]
 fn cli_doctor_reports_unencrypted_store_status() {
     let dir = tempdir().unwrap();
     let store = dir.path().join(".memory-genome");

@@ -31,6 +31,10 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
             tr(app.language, TKey::ImportUnavailable),
             theme::muted(),
         )),
+        Line::from(Span::styled(
+            tr(app.language, TKey::MarkdownPlaintextWarning),
+            theme::warning(),
+        )),
     ];
     frame.render_widget(
         screens::paragraph(actions, tr(app.language, TKey::ExportImportMarkdown)),

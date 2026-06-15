@@ -20,6 +20,7 @@ Memory = Cells + Markers + Pages + Filters + Context Packets
 
 - Rust core library: `mge-core`.
 - Human terminal interface: `mge tui`.
+- First-run setup helper: `mge setup`.
 - CLI и local JSON-RPC adapter: `mge`, `mge-mcp-server`.
 - Thin Python и TypeScript SDK wrappers поверх Rust CLI.
 - L1 Hot RAM layer с durable binary hot log.
@@ -35,7 +36,7 @@ Memory = Cells + Markers + Pages + Filters + Context Packets
 
 ```bash
 cargo build
-cargo run -p mge-cli -- init --profile fast
+cargo run -p mge-cli -- setup
 cargo run -p mge-cli -- remember "User prefers concise technical explanations" --kind user_preference --scope global --trust user_confirmed
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 cargo run -p mge-cli -- seal

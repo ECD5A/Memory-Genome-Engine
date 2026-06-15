@@ -30,6 +30,7 @@ pub struct TuiOptions {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Screen {
+    Setup,
     Dashboard,
     Recall,
     AddMemory,
@@ -96,6 +97,11 @@ impl TuiApp {
     pub fn new(options: TuiOptions) -> Self {
         let service = AppService::new(options.store, options.passphrase_env);
         let dashboard = service.dashboard();
+        let initial_screen = if dashboard.doctor.initialized {
+            Screen::Dashboard
+        } else {
+            Screen::Setup
+        };
         let mut settings = TuiSettings::default();
         if let Some(stats) = &dashboard.stats {
             settings.index_kind = stats.current_index_kind;
@@ -103,7 +109,7 @@ impl TuiApp {
         Self {
             service,
             language: Language::En,
-            screen: Screen::Dashboard,
+            screen: initial_screen,
             previous_screen: Screen::Dashboard,
             dashboard,
             dashboard_selected: 0,
@@ -207,6 +213,7 @@ fn draw(frame: &mut Frame<'_>, app: &TuiApp) {
     }
 
     match app.screen {
+        Screen::Setup => screens::setup::render(frame, app, area),
         Screen::Dashboard => screens::dashboard::render(frame, app, area),
         Screen::Recall => screens::recall::render(frame, app, area),
         Screen::AddMemory => screens::add_memory::render(frame, app, area),
@@ -237,6 +244,7 @@ fn handle_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
     }
 
     match app.screen {
+        Screen::Setup => handle_setup_key(app, key),
         Screen::Dashboard => handle_dashboard_key(app, key),
         Screen::Recall => handle_recall_key(app, key),
         Screen::AddMemory => handle_add_memory_key(app, key),
@@ -246,6 +254,49 @@ fn handle_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
         Screen::ExportImport => handle_export_key(app, key),
         Screen::Settings => handle_settings_key(app, key),
         Screen::Help => handle_help_key(app, key),
+    }
+}
+
+fn handle_setup_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
+    const ROWS: usize = 5;
+    match key.code {
+        KeyCode::Up => input::move_up(&mut app.form_selected, ROWS),
+        KeyCode::Down => input::move_down(&mut app.form_selected, ROWS),
+        KeyCode::Enter => match app.form_selected {
+            0 => run_setup(app, false),
+            1 => run_setup(app, true),
+            2 => match app.service.doctor(true) {
+                Ok(report) => {
+                    app.dashboard.doctor = report;
+                    app.set_status(BadgeKind::Ok, tr(app.language, TKey::DeepDoctor));
+                }
+                Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
+            },
+            3 => app.open_screen(Screen::Dashboard),
+            4 => app.open_screen(Screen::Help),
+            _ => {}
+        },
+        KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(false),
+        _ => {}
+    }
+    Ok(true)
+}
+
+fn run_setup(app: &mut TuiApp, encrypted: bool) {
+    match app.service.setup_fast(encrypted) {
+        Ok(report) => {
+            let message = if report.already_initialized {
+                tr(app.language, TKey::SetupAlreadyInitialized)
+            } else {
+                tr(app.language, TKey::SetupReady)
+            };
+            app.set_status(BadgeKind::Ok, message);
+            app.refresh_dashboard();
+            if app.dashboard.doctor.initialized {
+                app.open_screen(Screen::Dashboard);
+            }
+        }
+        Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
     }
 }
 
@@ -614,5 +665,30 @@ mod tests {
         assert!(settings.human_dashboard);
         assert!(settings.markdown_export);
         assert!(!settings.debug_json_output);
+    }
+
+    #[test]
+    fn new_tui_opens_setup_for_missing_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = TuiApp::new(TuiOptions {
+            store: dir.path().join(".memory-genome"),
+            passphrase_env: None,
+        });
+
+        assert_eq!(app.screen, Screen::Setup);
+    }
+
+    #[test]
+    fn new_tui_opens_dashboard_for_initialized_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join(".memory-genome");
+        AppService::new(&store, None).setup_fast(false).unwrap();
+
+        let app = TuiApp::new(TuiOptions {
+            store,
+            passphrase_env: None,
+        });
+
+        assert_eq!(app.screen, Screen::Dashboard);
     }
 }

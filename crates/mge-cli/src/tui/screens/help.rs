@@ -16,17 +16,22 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
         Line::from(tr(app.language, TKey::HelpText)),
         Line::from(""),
         Line::from(tr(app.language, TKey::HelpWorkflow)),
+        Line::from(tr(app.language, TKey::FirstRunHelp)),
         Line::from(tr(app.language, TKey::HelpLanguage)),
         Line::from(tr(app.language, TKey::HelpSafety)),
+        Line::from(tr(app.language, TKey::EncryptedSetupHint)),
+        Line::from(tr(app.language, TKey::McpSdkGuidance)),
+        Line::from(tr(app.language, TKey::MarkdownPlaintextWarning)),
         Line::from(""),
         Line::from(format!(
             "- {} / {} / {}",
+            tr(app.language, TKey::SetupStore),
             tr(app.language, TKey::RecallMemory),
             tr(app.language, TKey::AddMemoryCell),
-            tr(app.language, TKey::SealHotMemory)
         )),
         Line::from(format!(
-            "- {} / {} / {}",
+            "- {} / {} / {} / {}",
+            tr(app.language, TKey::SealHotMemory),
             tr(app.language, TKey::StoreStatus),
             tr(app.language, TKey::BenchmarkIndexes),
             tr(app.language, TKey::ExportImportMarkdown)

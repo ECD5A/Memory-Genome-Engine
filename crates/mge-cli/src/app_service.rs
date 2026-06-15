@@ -33,6 +33,57 @@ impl AppService {
         &self.store
     }
 
+    pub fn passphrase_env_name(&self) -> Option<&str> {
+        self.passphrase_env.as_deref()
+    }
+
+    pub fn setup_fast(&self, encrypted: bool) -> Result<SetupReport> {
+        if self.store.join("manifest.mgm").exists() {
+            return Ok(SetupReport {
+                store_path: self.store.clone(),
+                already_initialized: true,
+                encrypted,
+                passphrase_env: self.passphrase_env.clone(),
+                profile: "fast".to_string(),
+            });
+        }
+
+        let passphrase = if encrypted {
+            if self.passphrase_env.is_none() {
+                bail!("encrypted setup requires --passphrase-env <ENV_VAR_NAME>");
+            }
+            passphrase_from_env(self.passphrase_env.as_deref())?
+        } else {
+            None
+        };
+
+        MemoryEngine::init_with_options_and_passphrase(
+            &self.store,
+            InitOptions {
+                page_codec: PageCodecKind::MessagePack,
+                compression: CompressionKind::Zstd,
+                index_kind: IndexKind::ExactMarkerPage,
+                page_clusterer: PageClustererKind::ScopeKind,
+                durability: Default::default(),
+                security_mode: if encrypted {
+                    SecurityMode::Encrypted
+                } else {
+                    SecurityMode::Unencrypted
+                },
+            },
+            passphrase.as_deref(),
+        )
+        .with_context(|| format!("failed to initialize {}", self.store.display()))?;
+
+        Ok(SetupReport {
+            store_path: self.store.clone(),
+            already_initialized: false,
+            encrypted,
+            passphrase_env: self.passphrase_env.clone(),
+            profile: "fast".to_string(),
+        })
+    }
+
     pub fn stats(&self) -> Result<StoreStats> {
         self.open_engine()?.stats().map_err(Into::into)
     }
@@ -159,6 +210,61 @@ impl AppService {
 pub struct DashboardSummary {
     pub doctor: DoctorReport,
     pub stats: Option<StoreStats>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SetupReport {
+    pub store_path: PathBuf,
+    pub already_initialized: bool,
+    pub encrypted: bool,
+    pub passphrase_env: Option<String>,
+    pub profile: String,
+}
+
+impl SetupReport {
+    pub fn to_human_text(&self) -> String {
+        let state = if self.already_initialized {
+            "already initialized"
+        } else {
+            "initialized"
+        };
+        let mode = if self.encrypted {
+            "encrypted"
+        } else {
+            "unencrypted"
+        };
+        let mut output = format!(
+            "\
+Memory Genome setup
+store: {}
+state: {}
+profile: {}
+security: {}
+",
+            self.store_path.display(),
+            state,
+            self.profile,
+            mode
+        );
+        if self.encrypted {
+            output.push_str(&format!(
+                "passphrase env: {}\n",
+                self.passphrase_env
+                    .as_deref()
+                    .unwrap_or("<missing; rerun with --passphrase-env>")
+            ));
+        }
+        output.push_str(
+            "\
+next steps:
+- mge tui
+- mge remember \"useful memory\" --kind project_fact --scope global
+- mge recall \"useful memory\"
+- mge-mcp-server for local JSON-RPC agent hosts
+",
+        );
+        output
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -690,5 +796,31 @@ mod tests {
         assert_eq!(input.scope, "global");
         assert_eq!(input.kind, "temporary_note");
         assert_eq!(input.status, "active");
+    }
+
+    #[test]
+    fn setup_fast_initializes_unencrypted_store_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join(".memory-genome");
+        let service = AppService::new(&store, None);
+
+        let report = service.setup_fast(false).unwrap();
+
+        assert!(!report.already_initialized);
+        assert!(!report.encrypted);
+        assert!(store.join("manifest.mgm").is_file());
+
+        let second = service.setup_fast(false).unwrap();
+        assert!(second.already_initialized);
+    }
+
+    #[test]
+    fn setup_fast_encrypted_requires_passphrase_env_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = AppService::new(dir.path().join(".memory-genome"), None);
+
+        let err = service.setup_fast(true).unwrap_err();
+
+        assert!(err.to_string().contains("--passphrase-env"));
     }
 }

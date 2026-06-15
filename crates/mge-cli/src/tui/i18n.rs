@@ -33,6 +33,7 @@ pub enum TKey {
     BenchmarkIndexes,
     ExportImportMarkdown,
     Settings,
+    SetupStore,
     Help,
     Exit,
     StorePath,
@@ -117,6 +118,16 @@ pub enum TKey {
     ReadOnlyImportNote,
     ApplyIndexKind,
     OperationStatus,
+    InitFastStore,
+    InitEncryptedStore,
+    SetupAlreadyInitialized,
+    SetupReady,
+    PassphraseEnv,
+    MgeSetupCommand,
+    McpSdkGuidance,
+    MarkdownPlaintextWarning,
+    EncryptedSetupHint,
+    FirstRunHelp,
 }
 
 #[cfg(test)]
@@ -131,6 +142,7 @@ pub const ALL_KEYS: &[TKey] = &[
     TKey::BenchmarkIndexes,
     TKey::ExportImportMarkdown,
     TKey::Settings,
+    TKey::SetupStore,
     TKey::Help,
     TKey::Exit,
     TKey::StorePath,
@@ -215,6 +227,16 @@ pub const ALL_KEYS: &[TKey] = &[
     TKey::ReadOnlyImportNote,
     TKey::ApplyIndexKind,
     TKey::OperationStatus,
+    TKey::InitFastStore,
+    TKey::InitEncryptedStore,
+    TKey::SetupAlreadyInitialized,
+    TKey::SetupReady,
+    TKey::PassphraseEnv,
+    TKey::MgeSetupCommand,
+    TKey::McpSdkGuidance,
+    TKey::MarkdownPlaintextWarning,
+    TKey::EncryptedSetupHint,
+    TKey::FirstRunHelp,
 ];
 
 pub fn tr(language: Language, key: TKey) -> &'static str {
@@ -230,6 +252,7 @@ pub fn tr(language: Language, key: TKey) -> &'static str {
             TKey::BenchmarkIndexes => "Benchmark indexes",
             TKey::ExportImportMarkdown => "Export / import Markdown",
             TKey::Settings => "Settings",
+            TKey::SetupStore => "Setup store",
             TKey::Help => "Help",
             TKey::Exit => "Exit",
             TKey::StorePath => "Store path",
@@ -324,6 +347,24 @@ pub fn tr(language: Language, key: TKey) -> &'static str {
             TKey::ReadOnlyImportNote => "Markdown import is not implemented.",
             TKey::ApplyIndexKind => "Apply index kind",
             TKey::OperationStatus => "Operation status",
+            TKey::InitFastStore => "Initialize fast local store",
+            TKey::InitEncryptedStore => "Initialize encrypted store",
+            TKey::SetupAlreadyInitialized => "Store is already initialized.",
+            TKey::SetupReady => "Store is ready.",
+            TKey::PassphraseEnv => "Passphrase env",
+            TKey::MgeSetupCommand => "Use `mge setup` for non-interactive first-run setup.",
+            TKey::McpSdkGuidance => {
+                "Agent hosts can use `mge-mcp-server`; Python/TypeScript SDKs wrap the Rust CLI."
+            }
+            TKey::MarkdownPlaintextWarning => {
+                "Markdown export is human-readable plaintext. Do not export secrets unless intended."
+            }
+            TKey::EncryptedSetupHint => {
+                "Encrypted setup requires --passphrase-env. The passphrase value is read from the environment, not typed into the TUI."
+            }
+            TKey::FirstRunHelp => {
+                "First run: initialize a store, add memory, recall it, then checkpoint or seal."
+            }
         },
         Language::Ru => match key {
             TKey::ProductName => "Memory Genome Engine",
@@ -336,6 +377,7 @@ pub fn tr(language: Language, key: TKey) -> &'static str {
             TKey::BenchmarkIndexes => "Бенчмарк индексов",
             TKey::ExportImportMarkdown => "Экспорт / импорт Markdown",
             TKey::Settings => "Настройки",
+            TKey::SetupStore => "Настроить хранилище",
             TKey::Help => "Помощь",
             TKey::Exit => "Выход",
             TKey::StorePath => "Путь хранилища",
@@ -432,6 +474,24 @@ pub fn tr(language: Language, key: TKey) -> &'static str {
             TKey::ReadOnlyImportNote => "Markdown import ещё не реализован.",
             TKey::ApplyIndexKind => "Применить тип индекса",
             TKey::OperationStatus => "Статус операции",
+            TKey::InitFastStore => "Инициализировать быстрый локальный store",
+            TKey::InitEncryptedStore => "Инициализировать encrypted store",
+            TKey::SetupAlreadyInitialized => "Store уже инициализирован.",
+            TKey::SetupReady => "Store готов.",
+            TKey::PassphraseEnv => "Passphrase env",
+            TKey::MgeSetupCommand => "Для неинтерактивного первого запуска используйте `mge setup`.",
+            TKey::McpSdkGuidance => {
+                "Agent hosts могут использовать `mge-mcp-server`; Python/TypeScript SDK оборачивают Rust CLI."
+            }
+            TKey::MarkdownPlaintextWarning => {
+                "Markdown export - человекочитаемый plaintext. Не экспортируйте секреты без явного намерения."
+            }
+            TKey::EncryptedSetupHint => {
+                "Encrypted setup требует --passphrase-env. Значение passphrase читается из environment, а не вводится в TUI."
+            }
+            TKey::FirstRunHelp => {
+                "Первый запуск: инициализируйте store, добавьте память, выполните recall, затем checkpoint или seal."
+            }
         },
     }
 }
@@ -452,5 +512,30 @@ mod tests {
     fn language_toggles_without_restart_state() {
         assert_eq!(Language::En.toggle(), Language::Ru);
         assert_eq!(Language::Ru.toggle(), Language::En);
+    }
+
+    #[test]
+    fn russian_translations_do_not_contain_common_utf8_mojibake() {
+        let suspicious = [
+            "\u{0420}\u{203a}",
+            "\u{0420}\u{045f}",
+            "\u{0420}\u{201d}",
+            "\u{0421}\u{045a}",
+            "\u{0432}\u{2020}",
+            "\u{0432}\u{2014}",
+            "\u{0432}\u{045a}",
+        ];
+        for key in ALL_KEYS {
+            let value = tr(Language::Ru, *key);
+            for marker in suspicious {
+                assert!(
+                    !value.contains(marker),
+                    "translation {:?} contains mojibake marker {:?}: {}",
+                    key,
+                    marker,
+                    value
+                );
+            }
+        }
     }
 }

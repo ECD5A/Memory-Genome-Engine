@@ -49,6 +49,7 @@ cargo test -p mge-cli --test cli_smoke rust_agent_host_cli_example_smoke -- --ex
 
 ```bash
 cargo run -p mge-cli -- init --profile fast
+cargo run -p mge-cli -- setup --help
 cargo run -p mge-cli -- remember "release smoke memory" --kind project_fact --scope release --trust tool_observed
 cargo run -p mge-cli -- recall "release smoke"
 cargo run -p mge-cli -- doctor --store .memory-genome --deep
@@ -188,6 +189,7 @@ Safety rules для corpus benchmark:
 - `cargo test` passes.
 - CLI smoke passes.
 - TUI help smoke (`mge tui --help`) passes.
+- Setup help smoke (`mge setup --help`) passes.
 - Encrypted smoke passes, если менялись security docs или encrypted storage.
 - MCP/SDK smoke passes, если менялись integration docs или wrappers.
 - `mge doctor --deep` проходит для unencrypted и encrypted smoke stores.

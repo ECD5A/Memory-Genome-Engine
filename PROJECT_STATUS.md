@@ -124,8 +124,10 @@ Product UI / Packaging is in progress.
 Current package:
 
 - Human-first terminal interface through `mge tui` using `ratatui` + `crossterm`.
+- First-run setup helper through `mge setup` and a first-launch TUI setup screen.
 - TUI screens for dashboard, recall, add memory, seal/checkpoint, status/diagnostics, index benchmark, Markdown export/import status, settings, and help.
 - Runtime EN/RU language switching with F1, L/l, and Д/д.
+- Safe encrypted setup guidance through `--passphrase-env`; passphrases are read from the environment, not typed into the TUI.
 - Thin `mge-cli` app service layer shared by the TUI and CLI-oriented diagnostics.
 - Read-only `mge doctor` diagnostics for store structure, manifest/security state, required files, optional unlock, and explicit deep validation.
 - Repo-local release build scripts:
@@ -165,6 +167,7 @@ Latest Mandate 4 TUI/package verification:
 - `cargo build -p mge-cli --bins`: passed.
 - CLI quickstart smoke: passed on a temporary store.
 - TUI help smoke: `cargo run -p mge-cli -- tui --help` passed.
+- Setup help smoke: `cargo run -p mge-cli -- setup --help` passed.
 
 Previous packaging/dev UX baseline from the release-script pass remains relevant:
 

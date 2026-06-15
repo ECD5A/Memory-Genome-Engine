@@ -6,6 +6,7 @@ pub mod help;
 pub mod recall;
 pub mod seal;
 pub mod settings;
+pub mod setup;
 pub mod status;
 
 use ratatui::layout::{Alignment, Rect};

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::{bail, Context, Result};
-use app_service::doctor_report;
+use app_service::{doctor_report, AppService};
 use clap::{Parser, Subcommand};
 use mge_core::{
     CellId, CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine, MemoryKind,
@@ -188,6 +188,13 @@ enum Commands {
     Export {
         #[arg(long, default_value = "markdown")]
         format: String,
+
+        #[arg(long)]
+        passphrase_env: Option<String>,
+    },
+    Setup {
+        #[arg(long)]
+        encrypted: bool,
 
         #[arg(long)]
         passphrase_env: Option<String>,
@@ -553,6 +560,14 @@ fn main() -> Result<()> {
                 }
                 other => bail!("unsupported export format: {other}; supported: markdown, json"),
             }
+        }
+        Commands::Setup {
+            encrypted,
+            passphrase_env,
+        } => {
+            let service = AppService::new(cli.store.clone(), passphrase_env);
+            let report = service.setup_fast(encrypted)?;
+            print!("{}", report.to_human_text());
         }
         Commands::Tui { passphrase_env } => {
             tui::run(tui::TuiOptions {

@@ -49,6 +49,7 @@ cargo test -p mge-cli --test cli_smoke rust_agent_host_cli_example_smoke -- --ex
 
 ```bash
 cargo run -p mge-cli -- init --profile fast
+cargo run -p mge-cli -- setup --help
 cargo run -p mge-cli -- remember "release smoke memory" --kind project_fact --scope release --trust tool_observed
 cargo run -p mge-cli -- recall "release smoke"
 cargo run -p mge-cli -- doctor --store .memory-genome --deep
@@ -188,6 +189,7 @@ Do not start custom page codec work just because MessagePack is present. A custo
 - `cargo test` passes.
 - CLI smoke passes.
 - TUI help smoke (`mge tui --help`) passes.
+- Setup help smoke (`mge setup --help`) passes.
 - Encrypted smoke passes if security docs or encrypted storage changed.
 - MCP/SDK smoke passes if integration docs or wrappers changed.
 - `mge doctor --deep` passes for unencrypted and encrypted smoke stores.

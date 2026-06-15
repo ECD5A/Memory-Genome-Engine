@@ -24,6 +24,15 @@ cargo run -p mge-cli -- tui
 
 Inside the TUI, use arrows, Enter, Space, Esc, F1/L/Д for language, and F2 for help. Scriptable CLI commands remain unchanged.
 
+First-run setup helper:
+
+```bash
+cargo run -p mge-cli -- setup
+cargo run -p mge-cli -- setup --encrypted --passphrase-env MGE_PASSPHRASE
+```
+
+Encrypted setup reads the passphrase from the environment variable name passed to `--passphrase-env`; the passphrase itself is not typed into the TUI or printed.
+
 ## Create A Store
 
 Default store:

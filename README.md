@@ -21,6 +21,7 @@ The engine is local-first. Agents recall relevant memory from the engine instead
 - Rust core library: `mge-core`.
 - CLI and local JSON-RPC adapter: `mge`, `mge-mcp-server`.
 - Human terminal interface: `mge tui`.
+- First-run setup helper: `mge setup`.
 - Thin Python and TypeScript SDK wrappers over the Rust CLI.
 - L1 Hot RAM layer with durable binary hot log.
 - Sealed binary page layer with page catalog and candidate indexes.
@@ -35,7 +36,7 @@ The engine is local-first. Agents recall relevant memory from the engine instead
 
 ```bash
 cargo build
-cargo run -p mge-cli -- init --profile fast
+cargo run -p mge-cli -- setup
 cargo run -p mge-cli -- remember "User prefers concise technical explanations" --kind user_preference --scope global --trust user_confirmed
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 cargo run -p mge-cli -- seal

@@ -6,6 +6,7 @@ use crate::tui::app::TuiApp;
 use crate::tui::i18n::{tr, TKey};
 use crate::tui::screens::{self, action_line, key_value};
 use crate::tui::theme;
+use crate::tui::widgets::status_badge::{badge_line, BadgeKind};
 
 pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     let layout = Layout::default()
@@ -75,6 +76,28 @@ fn render_report(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
             "checked cells",
             validation.checked_sealed_cells.to_string(),
         ));
+    }
+    if !doctor.file_statuses.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("storage files:", theme::muted())));
+        for status in doctor.file_statuses.iter().take(8) {
+            let kind = if status.exists {
+                BadgeKind::Ok
+            } else if status.required {
+                BadgeKind::Error
+            } else {
+                BadgeKind::Warn
+            };
+            let mut message = status.path.clone();
+            if let Some(size) = status.size_bytes {
+                message.push_str(&format!(" ({})", screens::format_bytes(size)));
+            } else if status.is_dir {
+                message.push_str(" (dir)");
+            } else if !status.required {
+                message.push_str(" (optional)");
+            }
+            lines.push(badge_line(app.language, kind, &message));
+        }
     }
     if !doctor.warnings.is_empty() {
         lines.push(Line::from(""));
