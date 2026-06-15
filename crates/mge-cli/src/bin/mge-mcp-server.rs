@@ -457,7 +457,7 @@ fn error_response(err: ToolError, id: Option<Value>) -> JsonRpcResponse {
 }
 
 fn classify_error_kind(message: &str) -> &'static str {
-    if message.contains("invalid params") {
+    if message.contains("invalid params") || is_invalid_enum_value(message) {
         "invalid_params"
     } else if message.contains("failed to open store") {
         "store_open_failed"
@@ -466,6 +466,16 @@ fn classify_error_kind(message: &str) -> &'static str {
     } else {
         "tool_error"
     }
+}
+
+fn is_invalid_enum_value(message: &str) -> bool {
+    message.contains("unknown MemoryKind")
+        || message.contains("unknown TrustLevel")
+        || message.contains("unknown SensitivityLevel")
+        || message.contains("unknown MemoryStatus")
+        || message.contains("unknown RecallMode")
+        || message.contains("unknown index kind")
+        || message.contains("unknown durability policy")
 }
 
 fn tool_schemas() -> Value {

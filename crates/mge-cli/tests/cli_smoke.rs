@@ -343,6 +343,7 @@ fn mcp_server_json_rpc_adapter_supports_agent_workflow() {
     assert_eq!(responses[5]["result"]["validation"]["ok"], true);
     assert_eq!(responses[6]["result"]["rebuild"]["pages_unchanged"], true);
     assert_eq!(responses[7]["result"]["format"], "markdown");
+    assert_eq!(responses[7]["result"]["output_path"], export_path_string);
     assert!(export_path.is_file());
     assert_eq!(responses[8]["error"]["code"], -32000);
     assert_eq!(responses[8]["error"]["tool_name"], "mge_recall");
@@ -422,6 +423,106 @@ fn mcp_server_exposes_stable_schema_and_structured_errors() {
         .as_str()
         .unwrap()
         .contains("missing field `content`"));
+}
+
+#[test]
+fn mcp_server_hardens_error_paths() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    let missing_store = dir.path().join("missing-store");
+    let export_path = dir.path().join("exports").join("explicit-agent-memory.md");
+    let store_path = store.to_string_lossy().to_string();
+    let missing_store_path = missing_store.to_string_lossy().to_string();
+    let export_path_string = export_path.to_string_lossy().to_string();
+
+    run_mge(&store, &["init", "--profile", "fast"]);
+    run_mge(
+        &store,
+        &[
+            "remember",
+            "MCP hardening memory for export path checks",
+            "--kind",
+            "procedure",
+            "--scope",
+            "mcp_hardening",
+            "--trust",
+            "user_confirmed",
+        ],
+    );
+
+    let malformed = run_mcp_raw_lines("{not-json}\n");
+    assert_eq!(malformed.len(), 1);
+    assert_eq!(malformed[0]["error"]["code"], -32700);
+    assert_eq!(malformed[0]["error"]["tool_name"], "unknown");
+    assert_eq!(malformed[0]["error"]["recoverable"], true);
+    assert_eq!(
+        malformed[0]["error"]["details"]["error_kind"],
+        "parse_error"
+    );
+
+    let responses = run_mcp_json_lines(&[
+        json!({
+            "jsonrpc": "2.0",
+            "id": "invalid_mode",
+            "method": "mge_recall",
+            "params": {
+                "store_path": store_path.clone(),
+                "query": "hardening",
+                "mode": "sideways"
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "missing_scope",
+            "method": "mge_recall",
+            "params": {
+                "store_path": store_path.clone(),
+                "mode": "full_scope"
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "invalid_store",
+            "method": "mge_stats",
+            "params": { "store_path": missing_store_path }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "export_path",
+            "method": "mge_export_markdown",
+            "params": {
+                "store_path": store_path,
+                "output_path": export_path_string.clone()
+            }
+        }),
+    ]);
+
+    let invalid_mode = &responses[0]["error"];
+    assert_eq!(invalid_mode["code"], -32602);
+    assert_eq!(invalid_mode["tool_name"], "mge_recall");
+    assert_eq!(invalid_mode["recoverable"], true);
+    assert_eq!(invalid_mode["details"]["error_kind"], "invalid_params");
+
+    let missing_scope = &responses[1]["error"];
+    assert_eq!(missing_scope["code"], -32000);
+    assert_eq!(missing_scope["tool_name"], "mge_recall");
+    assert_eq!(missing_scope["details"]["error_kind"], "invalid_request");
+
+    let invalid_store = &responses[2]["error"];
+    assert_eq!(invalid_store["code"], -32000);
+    assert_eq!(invalid_store["tool_name"], "mge_stats");
+    assert_eq!(invalid_store["recoverable"], true);
+    assert_eq!(invalid_store["details"]["error_kind"], "store_open_failed");
+
+    let export = &responses[3]["result"];
+    assert_eq!(export["tool"], "mge_export_markdown");
+    assert_eq!(export["ok"], true);
+    assert_eq!(export["format"], "markdown");
+    assert_eq!(export["output_path"], export_path_string);
+    assert_eq!(export["json_runtime_storage"], false);
+    assert!(export_path.is_file());
+    assert!(!store.join("manifest.json").exists());
+    assert!(!store.join("hot").join("hot_cells.jsonl").exists());
 }
 
 #[test]
@@ -1257,6 +1358,16 @@ fn run_mge_failure(store: &Path, args: &[&str]) -> Output {
 }
 
 fn run_mcp_json_lines(requests: &[Value]) -> Vec<Value> {
+    let mut input = String::new();
+    for request in requests {
+        input.push_str(&serde_json::to_string(request).unwrap());
+        input.push('\n');
+    }
+
+    run_mcp_raw_lines(&input)
+}
+
+fn run_mcp_raw_lines(input: &str) -> Vec<Value> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_mge-mcp-server"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1266,9 +1377,7 @@ fn run_mcp_json_lines(requests: &[Value]) -> Vec<Value> {
 
     {
         let stdin = child.stdin.as_mut().unwrap();
-        for request in requests {
-            writeln!(stdin, "{}", serde_json::to_string(request).unwrap()).unwrap();
-        }
+        stdin.write_all(input.as_bytes()).unwrap();
     }
 
     let output = child.wait_with_output().unwrap();
