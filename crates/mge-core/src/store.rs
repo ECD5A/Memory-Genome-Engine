@@ -686,6 +686,21 @@ impl MemoryEngine {
         store_root: impl AsRef<Path>,
         passphrase: Option<&str>,
     ) -> Result<Self> {
+        Self::open_at_with_passphrase_recovery(store_root, passphrase, true)
+    }
+
+    pub fn open_at_read_only_with_passphrase(
+        store_root: impl AsRef<Path>,
+        passphrase: Option<&str>,
+    ) -> Result<Self> {
+        Self::open_at_with_passphrase_recovery(store_root, passphrase, false)
+    }
+
+    fn open_at_with_passphrase_recovery(
+        store_root: impl AsRef<Path>,
+        passphrase: Option<&str>,
+        truncate_bad_hot_tail: bool,
+    ) -> Result<Self> {
         let root = store_root.as_ref().to_path_buf();
         let manifest_path = root.join(MANIFEST_FILE);
         if !manifest_path.exists() {
@@ -709,7 +724,7 @@ impl MemoryEngine {
             MarkerDictionary::load_from_path(root.join("dictionary").join(MARKER_DICTIONARY_FILE))?;
         let hot_store = HotStore::new(root.join("hot").join(HOT_LOG_FILE));
         let hot_recovery = hot_store.load_recovering_with_key(session_key.as_ref())?;
-        if hot_recovery.recovered_bad_tail {
+        if truncate_bad_hot_tail && hot_recovery.recovered_bad_tail {
             hot_store.truncate_to_valid_offset(hot_recovery.valid_log_offset)?;
         }
         if let Some(next_cell_id) = hot_recovery

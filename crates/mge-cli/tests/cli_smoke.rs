@@ -175,6 +175,98 @@ fn cli_fast_profile_initializes_compact_storage_defaults() {
 }
 
 #[test]
+fn cli_doctor_reports_unencrypted_store_status() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+
+    run_mge(&store, &["init", "--profile", "fast"]);
+    run_mge(
+        &store,
+        &[
+            "remember",
+            "doctor smoke memory",
+            "--kind",
+            "project_fact",
+            "--scope",
+            "doctor",
+        ],
+    );
+
+    let doctor = run_mge_json(&store, &["doctor", "--json", "--deep"]);
+    assert_eq!(doctor["ok"], true);
+    assert_eq!(doctor["initialized"], true);
+    assert_eq!(doctor["manifest_readable"], true);
+    assert_eq!(doctor["security_mode"], "unencrypted");
+    assert_eq!(doctor["unlock_status"], "not_required");
+    assert_eq!(doctor["deep_validation"]["ok"], true);
+    assert!(doctor["file_statuses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|status| status["path"] == "hot/hot.mgl" && status["exists"] == true));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_mge"))
+        .args(["doctor", "--store"])
+        .arg(&store)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "mge doctor --store failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let doctor_with_local_store_arg: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(doctor_with_local_store_arg["ok"], true);
+}
+
+#[test]
+fn cli_doctor_reports_encrypted_lock_state_and_auth_failures() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    let passphrase_env = "MGE_TEST_DOCTOR_PASSPHRASE";
+    let wrong_passphrase_env = "MGE_TEST_DOCTOR_WRONG_PASSPHRASE";
+    std::env::set_var(passphrase_env, "doctor correct passphrase");
+    std::env::set_var(wrong_passphrase_env, "doctor wrong passphrase");
+
+    run_mge(
+        &store,
+        &["init", "--encrypted", "--passphrase-env", passphrase_env],
+    );
+
+    let locked = run_mge_json(&store, &["doctor", "--json"]);
+    assert_eq!(locked["ok"], true);
+    assert_eq!(locked["security_mode"], "encrypted");
+    assert_eq!(locked["passphrase_required"], true);
+    assert_eq!(locked["key_metadata_present"], true);
+    assert_eq!(locked["unlock_status"], "locked_passphrase_required");
+    assert!(locked["deep_validation"].is_null());
+
+    let unlocked = run_mge_json(
+        &store,
+        &[
+            "doctor",
+            "--json",
+            "--deep",
+            "--passphrase-env",
+            passphrase_env,
+        ],
+    );
+    assert_eq!(unlocked["ok"], true);
+    assert_eq!(unlocked["unlock_status"], "unlocked");
+    assert_eq!(unlocked["deep_validation"]["ok"], true);
+
+    let wrong = run_mge_failure(
+        &store,
+        &["doctor", "--passphrase-env", wrong_passphrase_env],
+    );
+    let stderr = String::from_utf8_lossy(&wrong.stderr);
+    assert!(stderr.contains("auth_failed"));
+    assert!(stderr.contains("authentication failed"));
+}
+
+#[test]
 fn cli_encrypted_init_records_mode_and_locks_payload_commands() {
     let dir = tempdir().unwrap();
     let store = dir.path().join(".memory-genome");
