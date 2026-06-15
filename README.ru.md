@@ -48,8 +48,7 @@ cargo run -p mge-cli -- validate --deep
 - [Архитектура](docs/ARCHITECTURE.ru.md)
 - [Security](docs/SECURITY.ru.md)
 - [Интеграция / MCP / SDK](docs/INTEGRATION.ru.md)
-- [Бенчмарки](docs/BENCHMARKS.ru.md)
-- [Release](docs/RELEASE.ru.md)
+- [Release / Бенчмарки](docs/RELEASE.ru.md)
 - [Статус проекта](PROJECT_STATUS.ru.md)
 
 ## Runtime Storage Policy

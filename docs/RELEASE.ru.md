@@ -95,6 +95,71 @@ cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile small --sto
 
 Benchmark JSON - только report/debug output, не runtime storage.
 
+## Benchmark Workflows
+
+`mge-synthetic-bench` нужен для повторяемой проверки exact-vs-BinaryFuse на generated memory cells:
+
+```bash
+cargo run -p mge-cli --bin mge-synthetic-bench -- \
+  --cells 1200 \
+  --pages 120 \
+  --scopes 16 \
+  --markers-per-cell 5 \
+  --marker-groups 12 \
+  --targeted-queries 6 \
+  --noise-queries 3 \
+  --repeats 5 \
+  --seed 1
+```
+
+`mge-corpus-bench` нужен для local real-workload measurement:
+
+```bash
+cargo run -p mge-cli --bin mge-corpus-bench -- \
+  --corpus <LOCAL_CORPUS_DIR> \
+  --store-root <SAFE_TEMP_STORE_ROOT> \
+  --profile medium \
+  --max-files 300 \
+  --max-bytes 52428800 \
+  --chunk-lines 40 \
+  --repeats 3 \
+  --seed 1
+```
+
+Generated corpus profiles:
+
+```bash
+cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile small --store-root ../mge-bench-small --seed 1
+cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile medium --store-root ../mge-bench-medium --seed 1
+cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile code-heavy --store-root ../mge-bench-code --seed 1
+cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile docs-heavy --store-root ../mge-bench-docs --seed 1
+cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile mixed --store-root ../mge-bench-mixed --seed 1
+```
+
+Safety rules для corpus benchmark:
+
+- читать только local text/code files;
+- пропускать unsupported binary extensions;
+- пропускать symlinks;
+- не исполнять corpus files;
+- не устанавливать dependencies;
+- не менять corpus files;
+- писать generated stores только в `--store-root`.
+
+Как читать report:
+
+- `hot`: recall до seal из L1 Hot RAM.
+- `sealed cold`: открывает store для каждого query; включает open/recovery, page read/decode, filtering, ranking и `ContextPacket` build.
+- `sealed repeated`: использует один engine instance; показывает decoded page cache и runtime scoring cache locality.
+- `locality benefit`: насколько repeated sealed recall быстрее cold sealed recall.
+- `page decode share`: доля repeated focused recall, уходящая на decode loaded sealed pages.
+- `scoring/filtering share`: inclusive bottleneck signal для cell filtering и scoring.
+- `ContextPacket share`: стоимость построения returned memory items и debug details.
+
+`ExactMarkerPageIndex` - default baseline. `BinaryFusePageIndex` - optional probabilistic backend: extra candidate pages допустимы, но exact candidates не должны теряться при корректно построенных filters.
+
+Не начинать custom page codec только потому, что в stack есть MessagePack. Custom codec оправдан только если большой real corpus показывает, что page decode стабильно доминирует в repeated sealed recall, а более простые cache/policy changes проблему не решают.
+
 ## Release Checklist
 
 - Git working tree clean.
@@ -103,7 +168,7 @@ Benchmark JSON - только report/debug output, не runtime storage.
 - CLI smoke passes.
 - Encrypted smoke passes, если менялись security docs или encrypted storage.
 - MCP/SDK smoke passes, если менялись integration docs или wrappers.
-- README, Quickstart, Security, Integration, Benchmarks и Project Status links актуальны.
+- README, Quickstart, Security, Integration, Release и Project Status links актуальны.
 - Secret material не закоммичен.
 - `LICENSE` есть и MIT.
 

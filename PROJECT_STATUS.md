@@ -27,8 +27,7 @@ Current stage:
 - [Architecture](docs/ARCHITECTURE.md): core design and storage/index model.
 - [Security](docs/SECURITY.md): encryption, threat model, plaintext metadata risks.
 - [Integration / MCP / SDK](docs/INTEGRATION.md): agent lifecycle, JSON-RPC adapter contract, and Python/TypeScript thin wrappers.
-- [Benchmarks](docs/BENCHMARKS.md): performance tools and report interpretation.
-- [Release](docs/RELEASE.md): build, smoke, and packaging checks.
+- [Release / Benchmarks](docs/RELEASE.md): build, smoke, packaging checks, performance tools, and report interpretation.
 
 ## Roadmap Snapshot
 

@@ -48,8 +48,7 @@ Full setup and usage: [Quickstart](QUICKSTART.md).
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security](docs/SECURITY.md)
 - [Integration / MCP / SDK](docs/INTEGRATION.md)
-- [Benchmarks](docs/BENCHMARKS.md)
-- [Release](docs/RELEASE.md)
+- [Release / Benchmarks](docs/RELEASE.md)
 - [Project Status](PROJECT_STATUS.md)
 
 ## Runtime Storage Policy
