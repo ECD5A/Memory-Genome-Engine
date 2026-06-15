@@ -144,6 +144,7 @@ fn main() -> Result<()> {
 }
 
 fn handle_line(line: &str) -> JsonRpcResponse {
+    let line = line.trim_start_matches('\u{feff}');
     match serde_json::from_str::<JsonRpcRequest>(line) {
         Ok(request) => {
             let id = request.id.clone();

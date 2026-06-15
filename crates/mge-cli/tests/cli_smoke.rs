@@ -450,6 +450,12 @@ fn mcp_server_hardens_error_paths() {
         ],
     );
 
+    let bom_prefixed = run_mcp_raw_lines(
+        "\u{feff}{\"jsonrpc\":\"2.0\",\"id\":\"bom\",\"method\":\"mge_schema\",\"params\":{}}\n",
+    );
+    assert_eq!(bom_prefixed.len(), 1);
+    assert_eq!(bom_prefixed[0]["result"]["tool"], "mge_schema");
+
     let malformed = run_mcp_raw_lines("{not-json}\n");
     assert_eq!(malformed.len(), 1);
     assert_eq!(malformed[0]["error"]["code"], -32700);
