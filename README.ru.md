@@ -49,8 +49,12 @@ Cells -> Marker Genome -> Hot Memory -> Sealed Pages -> Candidate Page Index -> 
 - [Базовое использование](examples/basic_usage.ru.md)
 - [Agent workflow](examples/agent_workflow.ru.md)
 - [Rust API example](examples/basic_usage.rs)
+- [Rust CLI host example](examples/agent_host_cli.rs)
 - [Python SDK example](examples/python_basic_usage.py)
+- [Python agent host example](examples/python_agent_host.py)
 - [TypeScript SDK example](examples/typescript_basic_usage.ts)
+- [TypeScript agent host example](examples/typescript_agent_host.ts)
+- [MCP JSON-RPC session](examples/mcp_agent_session.jsonl)
 - [Статус проекта](PROJECT_STATUS.ru.md)
 
 ## Почему Не Markdown
@@ -181,6 +185,14 @@ cd sdk/typescript && npm run smoke
 ```
 
 Текущая MCP-ready поверхность - versioned JSON-RPC stdin/stdout adapter с `protocol_version = mge-jsonrpc-1` и `integration_schema_version = 1`. Полная external MCP SDK dependency пока намеренно не добавляется.
+
+Рекомендуемый lifecycle для agent host:
+
+```text
+recall -> local work -> remember -> checkpoint -> recall again -> seal -> validate
+```
+
+Используйте `focused` для узкого next-step context, `broad` для более широкого project/task context, а `full-scope` только с явным `--scope` для scoped review/export flows.
 
 Для явного marker search используйте `--marker`:
 

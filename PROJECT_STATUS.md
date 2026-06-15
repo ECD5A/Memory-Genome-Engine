@@ -118,6 +118,8 @@ Done in Mandate 2 foundation:
 - Added local developer packaging metadata for the thin SDK wrappers: `sdk/python/pyproject.toml`, `sdk/typescript/package.json`, and `sdk/typescript/tsconfig.json`.
 - Hardened MCP adapter tests for malformed JSON, unknown tool names, missing required args, invalid recall modes, `full_scope` without scope, invalid store paths, and explicit Markdown export paths.
 - Documented local SDK installation/use, MCP adapter commands, JSON-RPC workflow examples, troubleshooting, and schema versioning notes.
+- Added runnable local agent host examples for Rust/CLI, Python SDK, TypeScript SDK, and MCP JSON-RPC transcript replay.
+- Added compatibility smoke coverage for a single-process MCP multi-call session, relative and absolute store paths, Python agent host workflow, TypeScript agent host workflow where supported, and Rust CLI host workflow.
 
 Mandate 2 constraints preserved:
 
@@ -129,7 +131,7 @@ Mandate 2 constraints preserved:
 Next Mandate 2 step:
 
 - Keep the current versioned JSON-RPC stdin/stdout adapter as the main local MCP-ready surface; defer any full external MCP SDK dependency until a concrete host integration needs it.
-- Next useful package: host integration examples and contract compatibility checks against a real agent runner, without changing the core.
+- Next useful package: run the JSON-RPC adapter against a real local agent runner/host harness or add package-level release checks for the thin SDKs, without changing the core.
 
 ## Done
 

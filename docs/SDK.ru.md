@@ -18,6 +18,7 @@ examples/python_basic_usage.py
 
 ```bash
 python examples/python_basic_usage.py
+python examples/python_agent_host.py
 ```
 
 Опциональная editable install из репозитория:
@@ -81,6 +82,7 @@ examples/typescript_basic_usage.ts
 
 ```bash
 node examples/typescript_basic_usage.ts
+node examples/typescript_agent_host.ts
 ```
 
 Опциональный package smoke из репозитория:
@@ -142,6 +144,19 @@ Typed SDK surface:
 - validate / validate deep
 - rebuild indexes
 - export Markdown
+
+## Agent Loop Examples
+
+Host examples имитируют локального агента без внешних API:
+
+- Python: `examples/python_agent_host.py`
+- TypeScript: `examples/typescript_agent_host.ts`
+
+Каждый пример следует flow:
+
+```text
+init/open store -> recall focused -> fake local work -> remember -> checkpoint -> recall broad -> seal -> recall sealed -> validate deep
+```
 
 ## Structured Errors
 

@@ -138,6 +138,14 @@ Output содержит `ContextPacket` в `result.context_packet`.
 {"jsonrpc":"2.0","id":8,"method":"mge_export_markdown","params":{"store_path":".memory-genome"}}
 ```
 
+Reusable JSONL transcript лежит здесь:
+
+```text
+examples/mcp_agent_session.jsonl
+```
+
+Перед отправкой lines в `mge-mcp-server` замените `$STORE_PATH` на созданный store path, а `$EXPORT_PATH` на Markdown output path. Transcript включает schema discovery, remember, focused recall, checkpoint, seal, broad recall, deep validate, rebuild indexes, Markdown export и structured invalid-mode error.
+
 ## Safety
 
 - Adapter открывает только explicit `store_path`.

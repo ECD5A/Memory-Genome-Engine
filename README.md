@@ -49,8 +49,12 @@ More detail:
 - [Basic usage](examples/basic_usage.md)
 - [Agent workflow](examples/agent_workflow.md)
 - [Rust API example](examples/basic_usage.rs)
+- [Rust CLI host example](examples/agent_host_cli.rs)
 - [Python SDK example](examples/python_basic_usage.py)
+- [Python agent host example](examples/python_agent_host.py)
 - [TypeScript SDK example](examples/typescript_basic_usage.ts)
+- [TypeScript agent host example](examples/typescript_agent_host.ts)
+- [MCP JSON-RPC session](examples/mcp_agent_session.jsonl)
 - [Project status](PROJECT_STATUS.md)
 
 ## Why Not Markdown
@@ -181,6 +185,14 @@ cd sdk/typescript && npm run smoke
 ```
 
 The current MCP-ready surface is the versioned JSON-RPC stdin/stdout adapter with `protocol_version = mge-jsonrpc-1` and `integration_schema_version = 1`. A full external MCP SDK dependency is intentionally not added yet.
+
+Recommended agent host lifecycle:
+
+```text
+recall -> local work -> remember -> checkpoint -> recall again -> seal -> validate
+```
+
+Use `focused` for narrow next-step context, `broad` for wider project/task context, and `full-scope` only with an explicit `--scope` for scoped review/export flows.
 
 Use `--marker` on recall for explicit marker search:
 

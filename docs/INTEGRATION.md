@@ -21,6 +21,34 @@ recall -> ContextPacket
 5. Agent stores durable lessons, decisions, preferences, or task state through `remember`.
 6. Agent may call `checkpoint` for hot-memory durability or `seal` to move hot cells into sealed pages.
 
+## Agent Host Pattern
+
+The host owns orchestration. Memory Genome Engine owns memory:
+
+```text
+host starts task
+-> recall focused or broad
+-> host does local work using ContextPacket
+-> remember useful result
+-> checkpoint for hot durability
+-> recall again if the task continues
+-> seal when the task/session boundary is stable
+-> validate --deep in smoke or maintenance flows
+```
+
+Use recall modes conservatively:
+
+- `focused`: default for a narrow question, next action, or small tool decision.
+- `broad`: project/module/task planning where the agent needs more related memory.
+- `full_scope`: explicit audit/export/review inside a known scope; always pass `scope`.
+
+Local host examples:
+
+- Rust/CLI process host: `examples/agent_host_cli.rs`
+- Python SDK host: `examples/python_agent_host.py`
+- TypeScript SDK host: `examples/typescript_agent_host.ts`
+- MCP JSON-RPC transcript: `examples/mcp_agent_session.jsonl`
+
 ## ContextPacket Contract
 
 `ContextPacket` is the integration result for recall. It contains:

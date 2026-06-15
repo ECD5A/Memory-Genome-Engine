@@ -83,3 +83,10 @@ client.checkpoint();
 ```
 
 JSON in these examples is protocol/debug output only, not runtime storage.
+
+Runnable local host examples:
+
+- `examples/agent_host_cli.rs`
+- `examples/python_agent_host.py`
+- `examples/typescript_agent_host.ts`
+- `examples/mcp_agent_session.jsonl`

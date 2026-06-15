@@ -18,6 +18,7 @@ Run the example from the repository root:
 
 ```bash
 python examples/python_basic_usage.py
+python examples/python_agent_host.py
 ```
 
 Optional editable install from the repository:
@@ -81,6 +82,7 @@ Run the example with a Node version that supports TypeScript stripping:
 
 ```bash
 node examples/typescript_basic_usage.ts
+node examples/typescript_agent_host.ts
 ```
 
 Optional package smoke from the repository:
@@ -142,6 +144,19 @@ Both wrappers cover:
 - validate / validate deep
 - rebuild indexes
 - export Markdown
+
+## Agent Loop Examples
+
+The host examples simulate a local agent without calling external APIs:
+
+- Python: `examples/python_agent_host.py`
+- TypeScript: `examples/typescript_agent_host.ts`
+
+Each example follows:
+
+```text
+init/open store -> recall focused -> fake local work -> remember -> checkpoint -> recall broad -> seal -> recall sealed -> validate deep
+```
 
 ## Structured Errors
 

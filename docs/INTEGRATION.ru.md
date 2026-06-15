@@ -21,6 +21,34 @@ recall -> ContextPacket
 5. Агент сохраняет важные выводы, решения, preferences или task state через `remember`.
 6. Агент может вызвать `checkpoint` для durable hot memory или `seal`, чтобы перенести hot cells в sealed pages.
 
+## Agent Host Pattern
+
+Host отвечает за orchestration. Memory Genome Engine отвечает за память:
+
+```text
+host starts task
+-> recall focused или broad
+-> host делает local work с ContextPacket
+-> remember useful result
+-> checkpoint для hot durability
+-> recall again, если task продолжается
+-> seal, когда task/session boundary стабилен
+-> validate --deep в smoke или maintenance flows
+```
+
+Recall modes используйте консервативно:
+
+- `focused`: default для узкого вопроса, next action или small tool decision.
+- `broad`: project/module/task planning, когда агенту нужно больше related memory.
+- `full_scope`: explicit audit/export/review внутри известного scope; всегда передавайте `scope`.
+
+Local host examples:
+
+- Rust/CLI process host: `examples/agent_host_cli.rs`
+- Python SDK host: `examples/python_agent_host.py`
+- TypeScript SDK host: `examples/typescript_agent_host.ts`
+- MCP JSON-RPC transcript: `examples/mcp_agent_session.jsonl`
+
 ## ContextPacket Contract
 
 `ContextPacket` - главный результат recall для integration layer. В нём есть:

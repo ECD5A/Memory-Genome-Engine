@@ -138,6 +138,14 @@ A local agent host can exercise the complete integration path with one long-live
 {"jsonrpc":"2.0","id":8,"method":"mge_export_markdown","params":{"store_path":".memory-genome"}}
 ```
 
+A reusable JSONL transcript lives at:
+
+```text
+examples/mcp_agent_session.jsonl
+```
+
+Replace `$STORE_PATH` with a created store path and `$EXPORT_PATH` with a Markdown output path before sending the lines to `mge-mcp-server`. The transcript includes schema discovery, remember, focused recall, checkpoint, seal, broad recall, deep validate, rebuild indexes, Markdown export, and a structured invalid-mode error.
+
 ## Safety
 
 - The adapter opens only explicit `store_path` values.
