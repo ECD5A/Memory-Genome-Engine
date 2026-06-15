@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-Mandate%202%20integration-blue)](PROJECT_STATUS.md)
+[![Status](https://img.shields.io/badge/status-Mandate%203%20security-blue)](PROJECT_STATUS.md)
 [![Interface](https://img.shields.io/badge/interface-CLI%20%7C%20Core%20API-informational)](crates/)
 [![Storage](https://img.shields.io/badge/storage-cells%20%2B%20markers%20%2B%20pages-6f42c1)](docs/ARCHITECTURE.md)
 
@@ -43,6 +43,7 @@ More detail:
 - [Architecture](docs/ARCHITECTURE.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Benchmarks](docs/BENCHMARKS.md)
+- [Security model](docs/SECURITY.md)
 - [Integration](docs/INTEGRATION.md)
 - [MCP adapter](docs/MCP.md)
 - [SDKs](docs/SDK.md)
@@ -67,7 +68,9 @@ Vector search can be added later as a reranker inside already selected candidate
 
 ## Future Security
 
-The storage layer is designed for future page-level encryption, session keys, blind marker indexes, and policy-gated access.
+The storage layer is designed for page-level encryption, session keys, blind marker indexes, and policy-gated access. The Mandate 3 security model is documented in [Security model](docs/SECURITY.md).
+
+Current status: stores are not encrypted yet. `NoSecurity` is an honest pass-through implementation and does not pretend to encrypt.
 
 Future page write flow:
 

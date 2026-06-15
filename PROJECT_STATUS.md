@@ -43,12 +43,12 @@ JSON policy:
 | v0.2 storage/index foundation | Done / hardening | Binary runtime storage layout, MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in, and validation hardening are done. |
 | v0.2 remaining | Closed | Benchmark foundation is ready; further core cleanup is benchmark-gated. |
 | v0.3 SDK/MCP | In progress | Mandate 2 integration foundation is active: MCP-ready adapter and thin Python/TypeScript wrappers are present. |
-| v0.4 security | Foundation only | Interfaces/policy exist; real encryption/session unlock/blind markers are not started. |
+| v0.4 security | In progress | Mandate 3 started with threat model and encryption design; real encryption/session unlock/blind markers are not implemented yet. |
 | v0.5 safety/search | Partial foundation | Policy/capabilities exist; poisoning/conflict/vector reranking are not started. |
 
 ## Current Focus
 
-- Build Mandate 2 agent integration while keeping the Mandate 1 core stable.
+- Build Mandate 3 security/encryption while keeping Mandate 1 core and Mandate 2 integration stable.
 - Keep JSON out of internal runtime storage; use it only for explicit debug output and structured input parsing.
 - Keep the implementation deterministic, local, compact, marker/page based, and ready for later security work.
 
@@ -176,6 +176,48 @@ Known limitations:
 Recommended next mandate:
 
 - Mandate 3 should be an explicit product decision: either real host integration with a chosen agent runner/MCP host, or security/session work. Do not restart core optimization without a benchmark or integration blocker.
+
+## Mandate 3 Security Status
+
+Active mandate: Security / Encryption.
+
+Done in Mandate 3 foundation:
+
+- Added `docs/SECURITY.md` and `docs/SECURITY.ru.md`.
+- Documented the threat model: protected assets, in-scope threats, out-of-scope threats, metadata policy, session model, validation/rebuild behavior, and implementation gates.
+- Documented the encryption design direction before implementation.
+- Reconfirmed that current stores are not encrypted yet and `NoSecurity` is pass-through, not fake encryption.
+- Reconfirmed that JSON/JSONL remain protocol/debug/benchmark output only, not runtime storage.
+
+Security design decisions:
+
+- Protect payload bytes first: `hot/hot.mgl`, `hot/snapshot.mgs`, and `pages/*.mgp`.
+- Keep binary file headers readable for file kind/version/codec/payload length/integrity handling.
+- Allow selected catalog/index metadata to remain plaintext initially for deterministic recall and validation, with risks documented.
+- Do not silently fallback from encrypted mode to plaintext.
+- Existing unencrypted stores must continue to work.
+- Encrypted store conversion must be an explicit future operation, not a silent config flip.
+- Use well-known Rust crypto crates when implementation starts; do not write custom crypto.
+
+Preferred crypto dependency direction:
+
+- AEAD: `chacha20poly1305`, preferably XChaCha20-Poly1305 if available.
+- KDF: `argon2`.
+- Random salt/nonce generation: `rand` or `rand_core`.
+- Memory hygiene: `zeroize` or `secrecy` where practical.
+
+Current limitations:
+
+- Encryption is designed but not implemented.
+- No `mge init --encrypted` yet.
+- No session unlock yet.
+- No locked-store MCP/SDK behavior yet.
+- No blind marker indexes or encrypted indexes yet.
+- Markdown export remains plaintext by design.
+
+Next Mandate 3 step:
+
+- Implement a minimal, tested security configuration and locked-store error path first, then add authenticated encryption for hot log/snapshot payloads. Do not encrypt sealed pages until the metadata/catalog boundary is confirmed in code.
 
 ## Done
 

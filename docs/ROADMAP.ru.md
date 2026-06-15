@@ -50,6 +50,8 @@
 
 ## v0.4
 
+- Security model and threat model. Сделано как foundation в `docs/SECURITY.ru.md`.
+- Encryption design before implementation. Сделано как foundation в `docs/SECURITY.ru.md`.
 - Page-level encryption.
 - Session unlock.
 - Encrypted indexes.

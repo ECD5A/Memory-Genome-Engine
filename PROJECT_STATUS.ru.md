@@ -43,12 +43,12 @@ JSON policy:
 | v0.2 storage/index foundation | Done / hardening | Binary runtime storage layout, MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in и validation hardening сделаны. |
 | v0.2 remaining | Closed | Benchmark foundation готов; дальнейший core cleanup только benchmark-gated. |
 | v0.3 SDK/MCP | In progress | Mandate 2 integration foundation активен: MCP-ready adapter и thin Python/TypeScript wrappers уже есть. |
-| v0.4 security | Foundation only | Interfaces/policy есть; real encryption/session unlock/blind markers ещё не начаты. |
+| v0.4 security | In progress | Mandate 3 начат с threat model и encryption design; real encryption/session unlock/blind markers ещё не реализованы. |
 | v0.5 safety/search | Partial foundation | Policy/capabilities есть; poisoning/conflict/vector reranking ещё не начаты. |
 
 ## Текущий Фокус
 
-- Развивать Mandate 2 agent integration, сохраняя Mandate 1 core стабильным.
+- Развивать Mandate 3 security/encryption, сохраняя Mandate 1 core и Mandate 2 integration стабильными.
 - Держать JSON вне internal runtime storage; использовать его только для explicit debug output и structured input parsing.
 - Держать реализацию детерминированной, локальной, компактной, marker/page based и готовой к будущей security work.
 
@@ -176,6 +176,48 @@ Known limitations:
 Recommended next mandate:
 
 - Mandate 3 должен быть явным product decision: либо real host integration с выбранным agent runner/MCP host, либо security/session work. Core optimization не возобновлять без benchmark или integration blocker.
+
+## Mandate 3 Security Status
+
+Active mandate: Security / Encryption.
+
+Сделано в Mandate 3 foundation:
+
+- Добавлены `docs/SECURITY.md` и `docs/SECURITY.ru.md`.
+- Документирован threat model: protected assets, in-scope threats, out-of-scope threats, metadata policy, session model, validation/rebuild behavior и implementation gates.
+- Документирован encryption design direction перед implementation.
+- Зафиксировано, что current stores ещё не encrypted и `NoSecurity` является pass-through, а не fake encryption.
+- Зафиксировано, что JSON/JSONL остаются только protocol/debug/benchmark output, а не runtime storage.
+
+Security design decisions:
+
+- Сначала защищать payload bytes: `hot/hot.mgl`, `hot/snapshot.mgs` и `pages/*.mgp`.
+- Оставить binary file headers readable для file kind/version/codec/payload length/integrity handling.
+- Разрешить части catalog/index metadata оставаться plaintext на первом этапе ради deterministic recall и validation, с явным описанием risks.
+- Не допускать silent fallback из encrypted mode в plaintext.
+- Existing unencrypted stores должны продолжать работать.
+- Conversion существующего unencrypted store должен быть отдельной future operation, а не silent config flip.
+- При implementation использовать well-known Rust crypto crates; не писать custom crypto.
+
+Preferred crypto dependency direction:
+
+- AEAD: `chacha20poly1305`, preferably XChaCha20-Poly1305 if available.
+- KDF: `argon2`.
+- Random salt/nonce generation: `rand` или `rand_core`.
+- Memory hygiene: `zeroize` или `secrecy`, где practical.
+
+Current limitations:
+
+- Encryption designed, but not implemented.
+- Нет `mge init --encrypted`.
+- Нет session unlock.
+- Нет locked-store MCP/SDK behavior.
+- Нет blind marker indexes или encrypted indexes.
+- Markdown export остаётся plaintext by design.
+
+Next Mandate 3 step:
+
+- Сначала реализовать minimal tested security configuration и locked-store error path, затем authenticated encryption для hot log/snapshot payloads. Sealed pages не шифровать, пока metadata/catalog boundary не подтверждён в коде.
 
 ## Сделано
 

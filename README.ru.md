@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-Mandate%202%20integration-blue)](PROJECT_STATUS.ru.md)
+[![Status](https://img.shields.io/badge/status-Mandate%203%20security-blue)](PROJECT_STATUS.ru.md)
 [![Interface](https://img.shields.io/badge/interface-CLI%20%7C%20Core%20API-informational)](crates/)
 [![Storage](https://img.shields.io/badge/storage-cells%20%2B%20markers%20%2B%20pages-6f42c1)](docs/ARCHITECTURE.ru.md)
 
@@ -43,6 +43,7 @@ Cells -> Marker Genome -> Hot Memory -> Sealed Pages -> Candidate Page Index -> 
 - [Архитектура](docs/ARCHITECTURE.ru.md)
 - [Дорожная карта](docs/ROADMAP.ru.md)
 - [Бенчмарки](docs/BENCHMARKS.ru.md)
+- [Security model](docs/SECURITY.ru.md)
 - [Интеграция](docs/INTEGRATION.ru.md)
 - [MCP adapter](docs/MCP.ru.md)
 - [SDK](docs/SDK.ru.md)
@@ -67,7 +68,9 @@ Markdown удобен для экспорта и чтения человеком
 
 ## Будущая Безопасность
 
-Storage layer спроектирован так, чтобы позже добавить page-level encryption, session keys, blind marker indexes и policy-gated access.
+Storage layer спроектирован так, чтобы добавить page-level encryption, session keys, blind marker indexes и policy-gated access. Security model Мандата 3 описан в [Security model](docs/SECURITY.ru.md).
+
+Текущий статус: stores ещё не encrypted. `NoSecurity` - честная pass-through реализация и не делает вид, что шифрует данные.
 
 Будущий pipeline записи страницы:
 

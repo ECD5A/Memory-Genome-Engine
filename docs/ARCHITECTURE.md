@@ -301,7 +301,7 @@ The page pipeline is structured for:
 encode page -> compress page -> encrypt page -> write page
 ```
 
-Current storage uses `NoSecurity` as an honest pass-through implementation. It does not claim to encrypt.
+Current storage uses `NoSecurity` as an honest pass-through implementation. It does not claim to encrypt. The Mandate 3 threat model and encryption design live in [Security model](SECURITY.md).
 
 Future security layers:
 

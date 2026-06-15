@@ -50,6 +50,8 @@
 
 ## v0.4
 
+- Security model and threat model. Done as Mandate 3 foundation in `docs/SECURITY.md`.
+- Encryption design before implementation. Done as Mandate 3 foundation in `docs/SECURITY.md`.
 - Page-level encryption.
 - Session unlock.
 - Encrypted indexes.
