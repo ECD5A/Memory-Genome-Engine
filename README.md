@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-Mandate%203%20closed-blue)](PROJECT_STATUS.md)
+[![Status](https://img.shields.io/badge/status-Mandate%204%20in%20progress-blue)](PROJECT_STATUS.md)
 [![Interface](https://img.shields.io/badge/interface-CLI%20%7C%20Core%20API%20%7C%20MCP-informational)](crates/)
 [![Storage](https://img.shields.io/badge/storage-binary%20cells%20%2B%20pages-6f42c1)](docs/ARCHITECTURE.md)
 
@@ -28,6 +28,7 @@ The engine is local-first. Agents recall relevant memory from the engine instead
 - Focused, broad, and full-scope recall modes.
 - Deep validation and safe index/catalog rebuild.
 - Encrypted mode for hot log, checkpoint snapshot, and sealed page payloads.
+- Read-only `mge doctor` diagnostics and local release smoke scripts.
 
 ## Quick Start
 

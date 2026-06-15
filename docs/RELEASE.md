@@ -21,6 +21,15 @@ target/release/mge-corpus-bench
 
 On Windows the files have `.exe` suffixes.
 
+Repo-local build helpers:
+
+```bash
+./scripts/build-release.sh
+powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
+```
+
+The scripts build local binaries and verify that expected executables exist. They do not publish packages or commit artifacts.
+
 ## Test
 
 ```bash
@@ -42,9 +51,19 @@ cargo test -p mge-cli --test cli_smoke rust_agent_host_cli_example_smoke -- --ex
 cargo run -p mge-cli -- init --profile fast
 cargo run -p mge-cli -- remember "release smoke memory" --kind project_fact --scope release --trust tool_observed
 cargo run -p mge-cli -- recall "release smoke"
+cargo run -p mge-cli -- doctor --store .memory-genome --deep
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- validate --deep
 ```
+
+Repo-local smoke helpers:
+
+```bash
+./scripts/smoke-release.sh
+powershell -ExecutionPolicy Bypass -File scripts/smoke-release.ps1
+```
+
+The smoke scripts run local CLI, encrypted store, MCP, SDK, and Rust example checks where the required local toolchain is available. Optional Python/Node/rustc checks are skipped with a message when unavailable.
 
 ## Encrypted Smoke
 
@@ -55,6 +74,7 @@ cargo run -p mge-cli -- remember "private release smoke" --passphrase-env MGE_PA
 cargo run -p mge-cli -- checkpoint --passphrase-env MGE_PASSPHRASE
 cargo run -p mge-cli -- seal --passphrase-env MGE_PASSPHRASE
 cargo run -p mge-cli -- recall "private release smoke" --passphrase-env MGE_PASSPHRASE
+cargo run -p mge-cli -- doctor --store .memory-genome --deep --passphrase-env MGE_PASSPHRASE
 cargo run -p mge-cli -- validate --deep --passphrase-env MGE_PASSPHRASE
 ```
 
@@ -168,6 +188,7 @@ Do not start custom page codec work just because MessagePack is present. A custo
 - CLI smoke passes.
 - Encrypted smoke passes if security docs or encrypted storage changed.
 - MCP/SDK smoke passes if integration docs or wrappers changed.
+- `mge doctor --deep` passes for unencrypted and encrypted smoke stores.
 - README, Quickstart, Security, Integration, Release, and Project Status links are current.
 - No secret material is committed.
 - `LICENSE` is present and MIT.

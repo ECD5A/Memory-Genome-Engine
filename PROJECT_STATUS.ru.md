@@ -16,9 +16,8 @@ Memory Genome Engine - Rust-first локальный memory engine для аге
 
 Текущий этап:
 
-- Pre-Mandate 4 Documentation Tree Cleanup закрыт в этом cleanup-проходе.
-- Следующий рекомендуемый мандат: Mandate 4 Product UI / Packaging.
-- Опциональная проверка перед Mandate 4: real user corpus run плюс проверка с реальным local host/agent runner.
+- Mandate 4: Product UI / Packaging в работе.
+- Текущий фокус: packaging/dev UX, release scripts и read-only local diagnostics.
 
 ## Карта Документации
 
@@ -118,9 +117,33 @@ Future security work не блокирует текущий продукт:
 - Optional interactive unlock / host key-management integration.
 - Explicit migration tool from unencrypted stores to encrypted stores.
 
+## Mandate 4 Status
+
+Product UI / Packaging в работе.
+
+Текущий package:
+
+- Read-only `mge doctor` diagnostics для store structure, manifest/security state, required files, optional unlock и explicit deep validation.
+- Repo-local release build scripts:
+  - `scripts/build-release.sh`
+  - `scripts/build-release.ps1`
+- Repo-local release smoke scripts:
+  - `scripts/smoke-release.sh`
+  - `scripts/smoke-release.ps1`
+- Local encrypted demo workflow scripts:
+  - `scripts/demo-local-memory.sh`
+  - `scripts/demo-local-memory.ps1`
+
+Намеренно не реализовано:
+
+- Package publishing.
+- External MCP SDK dependency.
+- Heavy UI framework.
+- Storage, codec, filter, recall или encryption format changes.
+
 ## Текущие Ограничения
 
-- Product UI еще нет.
+- Product UI еще не начат; Mandate 4 сейчас закрывает packaging/dev UX.
 - Vector database нет.
 - Encrypted indexes и blind marker metadata пока нет.
 - Encrypted Markdown export пока нет.
@@ -144,14 +167,8 @@ Future security work не блокирует текущий продукт:
 - TypeScript SDK encrypted smoke: passed.
 - Rust example smoke: passed.
 
-Этот documentation cleanup меняет только Markdown. Core/storage/codec/filter/recall/security behavior не менялся.
+Mandate 4 добавляет packaging/dev UX и read-only diagnostics. Storage/codec/filter/recall/security formats не менялись.
 
 ## Следующий Рекомендуемый Шаг
 
-Начать Mandate 4: Product UI / Packaging.
-
-Опциональная работа перед Mandate 4:
-
-- Прогнать большой real user corpus через `mge-corpus-bench`.
-- Проверить JSON-RPC adapter с реальным local host/agent runner.
-- Решить release packaging target и distribution format.
+Продолжать Mandate 4: выбрать packaging target и product distribution design.

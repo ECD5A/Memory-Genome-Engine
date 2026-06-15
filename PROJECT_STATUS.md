@@ -16,9 +16,8 @@ Closed:
 
 Current stage:
 
-- Pre-Mandate 4 Documentation Tree Cleanup is complete in this cleanup pass.
-- Next recommended mandate: Mandate 4 Product UI / Packaging.
-- Optional pre-Mandate-4 check: real user corpus run plus real host compatibility check.
+- Mandate 4: Product UI / Packaging is in progress.
+- Current focus: packaging/dev UX, release scripts, and read-only local diagnostics.
 
 ## Documentation Map
 
@@ -118,9 +117,33 @@ Future security work is non-blocking:
 - Optional interactive unlock / host key-management integration.
 - Explicit migration tool from unencrypted stores to encrypted stores.
 
+## Mandate 4 Status
+
+Product UI / Packaging is in progress.
+
+Current package:
+
+- Read-only `mge doctor` diagnostics for store structure, manifest/security state, required files, optional unlock, and explicit deep validation.
+- Repo-local release build scripts:
+  - `scripts/build-release.sh`
+  - `scripts/build-release.ps1`
+- Repo-local release smoke scripts:
+  - `scripts/smoke-release.sh`
+  - `scripts/smoke-release.ps1`
+- Local encrypted demo workflow scripts:
+  - `scripts/demo-local-memory.sh`
+  - `scripts/demo-local-memory.ps1`
+
+Still intentionally not implemented:
+
+- Package publishing.
+- External MCP SDK dependency.
+- Heavy UI framework.
+- Storage, codec, filter, recall, or encryption format changes.
+
 ## Current Known Limitations
 
-- No product UI yet.
+- Product UI is not started yet; Mandate 4 is currently packaging/dev UX.
 - No vector database.
 - No encrypted indexes or blind marker metadata yet.
 - No encrypted Markdown export yet.
@@ -144,14 +167,8 @@ Last full verification before this docs cleanup:
 - TypeScript SDK encrypted smoke: passed.
 - Rust example smoke: passed.
 
-This documentation cleanup changes Markdown only. Core/storage/codec/filter/recall/security behavior is unchanged.
+Mandate 4 adds packaging/dev UX and read-only diagnostics. Storage/codec/filter/recall/security formats remain unchanged.
 
 ## Next Recommended Step
 
-Start Mandate 4: Product UI / Packaging.
-
-Optional pre-Mandate-4 work:
-
-- Run a larger real user corpus through `mge-corpus-bench`.
-- Run the JSON-RPC adapter against a real local host/agent runner.
-- Decide release packaging target and distribution format.
+Continue Mandate 4 with packaging target selection and product distribution design.

@@ -21,6 +21,15 @@ target/release/mge-corpus-bench
 
 На Windows файлы имеют `.exe` suffix.
 
+Repo-local build helpers:
+
+```bash
+./scripts/build-release.sh
+powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
+```
+
+Scripts собирают local binaries и проверяют наличие expected executables. Они не публикуют packages и не коммитят artifacts.
+
 ## Test
 
 ```bash
@@ -42,9 +51,19 @@ cargo test -p mge-cli --test cli_smoke rust_agent_host_cli_example_smoke -- --ex
 cargo run -p mge-cli -- init --profile fast
 cargo run -p mge-cli -- remember "release smoke memory" --kind project_fact --scope release --trust tool_observed
 cargo run -p mge-cli -- recall "release smoke"
+cargo run -p mge-cli -- doctor --store .memory-genome --deep
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- validate --deep
 ```
+
+Repo-local smoke helpers:
+
+```bash
+./scripts/smoke-release.sh
+powershell -ExecutionPolicy Bypass -File scripts/smoke-release.ps1
+```
+
+Smoke scripts запускают local CLI, encrypted store, MCP, SDK и Rust example checks там, где доступен нужный local toolchain. Optional Python/Node/rustc checks пропускаются с сообщением, если toolchain недоступен.
 
 ## Encrypted Smoke
 
@@ -55,6 +74,7 @@ cargo run -p mge-cli -- remember "private release smoke" --passphrase-env MGE_PA
 cargo run -p mge-cli -- checkpoint --passphrase-env MGE_PASSPHRASE
 cargo run -p mge-cli -- seal --passphrase-env MGE_PASSPHRASE
 cargo run -p mge-cli -- recall "private release smoke" --passphrase-env MGE_PASSPHRASE
+cargo run -p mge-cli -- doctor --store .memory-genome --deep --passphrase-env MGE_PASSPHRASE
 cargo run -p mge-cli -- validate --deep --passphrase-env MGE_PASSPHRASE
 ```
 
@@ -168,6 +188,7 @@ Safety rules для corpus benchmark:
 - CLI smoke passes.
 - Encrypted smoke passes, если менялись security docs или encrypted storage.
 - MCP/SDK smoke passes, если менялись integration docs или wrappers.
+- `mge doctor --deep` проходит для unencrypted и encrypted smoke stores.
 - README, Quickstart, Security, Integration, Release и Project Status links актуальны.
 - Secret material не закоммичен.
 - `LICENSE` есть и MIT.

@@ -95,12 +95,19 @@ cargo run -p mge-cli -- recall "answer style" --marker kind:user_preference --ma
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 cargo run -p mge-cli -- stats
+cargo run -p mge-cli -- doctor --store .memory-genome
 cargo run -p mge-cli -- validate --deep
 cargo run -p mge-cli -- rebuild-indexes
 cargo run -p mge-cli -- export
 ```
 
 Markdown export is human-readable and plaintext by design.
+
+`mge doctor` is read-only by default. Use `--deep` only when you explicitly want validation work:
+
+```bash
+cargo run -p mge-cli -- doctor --store .memory-genome --deep
+```
 
 ## Encrypted Store
 
@@ -117,6 +124,16 @@ cargo run -p mge-cli -- validate --deep --passphrase-env MGE_PASSPHRASE
 ```
 
 Encrypted mode protects hot log payloads, checkpoint payloads, and sealed page payloads. Marker dictionary, indexes, catalog summaries, Markdown export, and process memory remain plaintext by design. See [Security](docs/SECURITY.md).
+
+Local encrypted demo workflow:
+
+```bash
+./scripts/demo-local-memory.sh
+# or on Windows:
+powershell -ExecutionPolicy Bypass -File scripts/demo-local-memory.ps1
+```
+
+The demo uses a passphrase environment variable and prints the store path. It does not call external APIs.
 
 ## Storage Defaults
 
