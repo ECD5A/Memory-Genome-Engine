@@ -154,18 +154,21 @@ Still intentionally not implemented:
 
 ## Latest Verification Baseline
 
-Last full verification before this docs cleanup:
+Latest Mandate 4 packaging/dev UX verification:
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 135 tests.
-- CLI unencrypted smoke: passed.
-- CLI encrypted hot+sealed smoke: passed.
-- Encrypted reopen recall smoke: passed.
-- Encrypted validate/rebuild smoke: passed.
-- MCP encrypted smoke: passed.
-- Python SDK encrypted smoke: passed.
-- TypeScript SDK encrypted smoke: passed.
-- Rust example smoke: passed.
+- `cargo test`: passed, 137 tests.
+- `cargo build -p mge-cli --bins`: passed.
+- `cargo build -p mge-cli --bins --release`: passed.
+- `scripts/build-release.ps1`: passed.
+- `scripts/smoke-release.ps1`: passed.
+- `scripts/demo-local-memory.ps1`: passed.
+- CLI quickstart smoke: passed through release smoke.
+- Encrypted quickstart smoke: passed through release smoke and demo.
+- MCP smoke: passed through release smoke.
+- Python SDK smoke: passed through release smoke.
+- TypeScript SDK smoke: passed through release smoke.
+- Rust CLI host example smoke: passed through release smoke.
 
 Mandate 4 adds packaging/dev UX and read-only diagnostics. Storage/codec/filter/recall/security formats remain unchanged.
 

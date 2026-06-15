@@ -154,18 +154,21 @@ Product UI / Packaging в работе.
 
 ## Последняя Verification Baseline
 
-Последняя полная проверка до этого docs cleanup:
+Последняя Mandate 4 packaging/dev UX проверка:
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 135 tests.
-- CLI unencrypted smoke: passed.
-- CLI encrypted hot+sealed smoke: passed.
-- Encrypted reopen recall smoke: passed.
-- Encrypted validate/rebuild smoke: passed.
-- MCP encrypted smoke: passed.
-- Python SDK encrypted smoke: passed.
-- TypeScript SDK encrypted smoke: passed.
-- Rust example smoke: passed.
+- `cargo test`: passed, 137 tests.
+- `cargo build -p mge-cli --bins`: passed.
+- `cargo build -p mge-cli --bins --release`: passed.
+- `scripts/build-release.ps1`: passed.
+- `scripts/smoke-release.ps1`: passed.
+- `scripts/demo-local-memory.ps1`: passed.
+- CLI quickstart smoke: passed через release smoke.
+- Encrypted quickstart smoke: passed через release smoke и demo.
+- MCP smoke: passed через release smoke.
+- Python SDK smoke: passed через release smoke.
+- TypeScript SDK smoke: passed через release smoke.
+- Rust CLI host example smoke: passed через release smoke.
 
 Mandate 4 добавляет packaging/dev UX и read-only diagnostics. Storage/codec/filter/recall/security formats не менялись.
 
