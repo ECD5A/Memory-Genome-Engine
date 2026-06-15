@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use serde_json::{json, Value};
@@ -529,6 +529,199 @@ fn mcp_server_hardens_error_paths() {
     assert!(export_path.is_file());
     assert!(!store.join("manifest.json").exists());
     assert!(!store.join("hot").join("hot_cells.jsonl").exists());
+}
+
+#[test]
+fn mcp_agent_session_fixture_runs_as_one_process() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    let export_path = dir.path().join("agent-session.md");
+    let store_path = json_safe_path(&store);
+    let export_path_string = json_safe_path(&export_path);
+
+    run_mge(&store, &["init", "--profile", "fast"]);
+
+    let transcript = include_str!("../../../examples/mcp_agent_session.jsonl")
+        .replace("$STORE_PATH", &store_path)
+        .replace("$EXPORT_PATH", &export_path_string);
+    let responses = run_mcp_raw_lines(&transcript);
+
+    assert_eq!(responses.len(), 10);
+    assert_eq!(responses[0]["result"]["tool"], "mge_schema");
+    assert_eq!(responses[0]["result"]["protocol_version"], "mge-jsonrpc-1");
+    assert_eq!(responses[0]["result"]["integration_schema_version"], 1);
+    assert_eq!(responses[1]["result"]["tool"], "mge_remember");
+    assert_eq!(responses[1]["result"]["cell_id"], 1);
+    assert_eq!(
+        responses[2]["result"]["context_packet"]["debug"]["recall_mode"],
+        "focused"
+    );
+    assert_eq!(
+        responses[2]["result"]["context_packet"]["relevant_memory"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(responses[3]["result"]["checkpoint"]["hot_cells"], 1);
+    assert_eq!(responses[4]["result"]["seal"]["hot_cells_sealed"], 1);
+    assert_eq!(
+        responses[5]["result"]["context_packet"]["debug"]["recall_mode"],
+        "broad"
+    );
+    assert_eq!(
+        responses[5]["result"]["context_packet"]["relevant_memory"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(responses[6]["result"]["validation"]["ok"], true);
+    assert_eq!(responses[7]["result"]["rebuild"]["pages_scanned"], 1);
+    assert_eq!(responses[8]["result"]["output_path"], export_path_string);
+    assert!(export_path.is_file());
+    assert_eq!(responses[9]["error"]["code"], -32602);
+    assert_eq!(
+        responses[9]["error"]["details"]["error_kind"],
+        "invalid_params"
+    );
+}
+
+#[test]
+fn mcp_adapter_handles_relative_and_absolute_store_paths() {
+    let cwd = std::env::current_dir().unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("mge-relative-store-")
+        .tempdir_in(&cwd)
+        .unwrap();
+    let relative_store = PathBuf::from(dir.path().file_name().unwrap()).join(".memory-genome");
+    let absolute_store = dir.path().join(".memory-genome");
+    let relative_store_path = relative_store.to_string_lossy().to_string();
+    let absolute_store_path = absolute_store.to_string_lossy().to_string();
+
+    run_mge(&relative_store, &["init", "--profile", "fast"]);
+
+    let responses = run_mcp_json_lines(&[
+        json!({
+            "jsonrpc": "2.0",
+            "id": "relative",
+            "method": "mge_stats",
+            "params": { "store_path": relative_store_path }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "absolute",
+            "method": "mge_stats",
+            "params": { "store_path": absolute_store_path }
+        }),
+    ]);
+
+    assert_eq!(responses[0]["result"]["tool"], "mge_stats");
+    assert_eq!(
+        responses[0]["result"]["stats"]["current_page_codec"],
+        "message_pack"
+    );
+    assert_eq!(responses[1]["result"]["tool"], "mge_stats");
+    assert_eq!(
+        responses[1]["result"]["stats"]["current_page_codec"],
+        "message_pack"
+    );
+}
+
+#[test]
+fn python_agent_host_example_smoke() {
+    if !command_available("python") {
+        eprintln!("python not found; skipping Python agent host smoke");
+        return;
+    }
+
+    let output = Command::new("python")
+        .arg(repo_root().join("examples").join("python_agent_host.py"))
+        .current_dir(repo_root())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "python agent host example failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("python agent host example ok"));
+}
+
+#[test]
+fn typescript_agent_host_example_smoke() {
+    if !command_available("node") {
+        eprintln!("node not found; skipping TypeScript agent host smoke");
+        return;
+    }
+
+    let output = Command::new("node")
+        .arg(
+            repo_root()
+                .join("examples")
+                .join("typescript_agent_host.ts"),
+        )
+        .current_dir(repo_root())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success()
+        && (stderr.contains("ERR_UNKNOWN_FILE_EXTENSION")
+            || stderr.contains("Unknown file extension"))
+    {
+        eprintln!("node runtime does not support TypeScript stripping; skipping TypeScript smoke");
+        return;
+    }
+
+    assert!(
+        output.status.success(),
+        "typescript agent host example failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("typescript agent host example ok"));
+}
+
+#[test]
+fn rust_agent_host_cli_example_smoke() {
+    if !command_available("rustc") {
+        eprintln!("rustc not found; skipping Rust agent host CLI smoke");
+        return;
+    }
+
+    let dir = tempdir().unwrap();
+    let exe = dir.path().join(if cfg!(windows) {
+        "agent_host_cli.exe"
+    } else {
+        "agent_host_cli"
+    });
+    let compile = Command::new("rustc")
+        .arg(repo_root().join("examples").join("agent_host_cli.rs"))
+        .arg("-o")
+        .arg(&exe)
+        .current_dir(repo_root())
+        .output()
+        .unwrap();
+    assert!(
+        compile.status.success(),
+        "rust agent host example compile failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&compile.stdout),
+        String::from_utf8_lossy(&compile.stderr)
+    );
+
+    let output = Command::new(&exe)
+        .current_dir(repo_root())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "rust agent host example failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("agent host cli example ok"));
 }
 
 #[test]
@@ -1398,4 +1591,21 @@ fn run_mcp_raw_lines(input: &str) -> Vec<Value> {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
+}
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf()
+}
+
+fn command_available(command: &str) -> bool {
+    Command::new(command).arg("--version").output().is_ok()
+}
+
+fn json_safe_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }

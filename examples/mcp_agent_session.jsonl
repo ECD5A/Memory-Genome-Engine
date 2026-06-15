@@ -1,0 +1,10 @@
+{"jsonrpc":"2.0","id":"schema","method":"mge_schema","params":{}}
+{"jsonrpc":"2.0","id":"remember_result","method":"mge_remember","params":{"store_path":"$STORE_PATH","content":"MCP agent host completed a fake local work result using ContextPacket memory.","kind":"tool_result","scope":"mandate_2","markers":["topic:agent_host","protocol:mcp_jsonrpc"],"trust":"tool_observed","sensitivity":"private"}}
+{"jsonrpc":"2.0","id":"recall_focused","method":"mge_recall","params":{"store_path":"$STORE_PATH","query":"agent host fake local work result","mode":"focused","scope":"mandate_2","max_items":5}}
+{"jsonrpc":"2.0","id":"checkpoint","method":"mge_checkpoint","params":{"store_path":"$STORE_PATH"}}
+{"jsonrpc":"2.0","id":"seal","method":"mge_seal","params":{"store_path":"$STORE_PATH"}}
+{"jsonrpc":"2.0","id":"recall_broad","method":"mge_recall","params":{"store_path":"$STORE_PATH","query":"agent host fake local work result","mode":"broad","scope":"mandate_2","max_items":10}}
+{"jsonrpc":"2.0","id":"validate_deep","method":"mge_validate","params":{"store_path":"$STORE_PATH","deep":true}}
+{"jsonrpc":"2.0","id":"rebuild_indexes","method":"mge_rebuild_indexes","params":{"store_path":"$STORE_PATH"}}
+{"jsonrpc":"2.0","id":"export_markdown","method":"mge_export_markdown","params":{"store_path":"$STORE_PATH","output_path":"$EXPORT_PATH"}}
+{"jsonrpc":"2.0","id":"invalid_mode_error","method":"mge_recall","params":{"store_path":"$STORE_PATH","query":"bad mode","mode":"sideways"}}
