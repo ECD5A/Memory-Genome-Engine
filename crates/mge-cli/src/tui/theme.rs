@@ -6,10 +6,6 @@ pub fn title() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
-pub fn subtitle() -> Style {
-    Style::default().fg(Color::Gray)
-}
-
 pub fn selected() -> Style {
     Style::default()
         .fg(Color::Black)

@@ -3,9 +3,8 @@ use ratatui::text::Line;
 use ratatui::Frame;
 
 use crate::tui::app::TuiApp;
-use crate::tui::i18n::{tr, TKey};
+use crate::tui::i18n::{tr, Language, TKey};
 use crate::tui::screens::{self, action_line, field_line, selected_line};
-use crate::tui::widgets::toggle::toggle_text;
 
 pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     let layout = Layout::default()
@@ -91,4 +90,27 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     );
     screens::render_status(frame, app, layout[1]);
     screens::render_footer(frame, app, layout[2], TKey::FooterSettings);
+}
+
+fn toggle_text(language: Language, enabled: bool, label: &str) -> String {
+    let state = if enabled {
+        tr(language, TKey::On)
+    } else {
+        tr(language, TKey::Off)
+    };
+    let symbol = if enabled { "●" } else { "○" };
+    format!("[{symbol}] {state:<5} {label}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn toggle_formats_english_and_russian() {
+        assert!(toggle_text(Language::En, true, "Timing").contains("ON"));
+        assert!(toggle_text(Language::Ru, false, "Timing").contains("ВЫКЛ"));
+        assert!(toggle_text(Language::En, true, "Timing").contains("●"));
+        assert!(toggle_text(Language::En, false, "Timing").contains("○"));
+    }
 }

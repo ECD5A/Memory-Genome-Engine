@@ -20,10 +20,8 @@ impl Language {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TKey {
-    ProductName,
     Subtitle,
     Dashboard,
     RecallMemory,
@@ -78,7 +76,6 @@ pub enum TKey {
     DebugJsonOutput,
     MarkdownExport,
     ExperimentalFeatures,
-    Theme,
     HumanDashboard,
     HelpText,
     HelpWorkflow,
@@ -93,15 +90,10 @@ pub enum TKey {
     Error,
     On,
     Off,
-    Enabled,
-    Disabled,
     Saved,
     NotInitialized,
-    Locked,
     Unlocked,
     NoData,
-    Back,
-    Confirm,
     CreatedPages,
     ArchivedHotLog,
     CandidatePages,
@@ -132,7 +124,6 @@ pub enum TKey {
 
 #[cfg(test)]
 pub const ALL_KEYS: &[TKey] = &[
-    TKey::ProductName,
     TKey::Subtitle,
     TKey::Dashboard,
     TKey::RecallMemory,
@@ -187,7 +178,6 @@ pub const ALL_KEYS: &[TKey] = &[
     TKey::DebugJsonOutput,
     TKey::MarkdownExport,
     TKey::ExperimentalFeatures,
-    TKey::Theme,
     TKey::HumanDashboard,
     TKey::HelpText,
     TKey::HelpWorkflow,
@@ -202,15 +192,10 @@ pub const ALL_KEYS: &[TKey] = &[
     TKey::Error,
     TKey::On,
     TKey::Off,
-    TKey::Enabled,
-    TKey::Disabled,
     TKey::Saved,
     TKey::NotInitialized,
-    TKey::Locked,
     TKey::Unlocked,
     TKey::NoData,
-    TKey::Back,
-    TKey::Confirm,
     TKey::CreatedPages,
     TKey::ArchivedHotLog,
     TKey::CandidatePages,
@@ -242,8 +227,7 @@ pub const ALL_KEYS: &[TKey] = &[
 pub fn tr(language: Language, key: TKey) -> &'static str {
     match language {
         Language::En => match key {
-            TKey::ProductName => "Memory Genome Engine",
-            TKey::Subtitle => "Local-first memory engine for AI agents",
+            TKey::Subtitle => "Local-first memory engine for AI agents by ECD5A",
             TKey::Dashboard => "Dashboard",
             TKey::RecallMemory => "Recall memory",
             TKey::AddMemoryCell => "Add memory cell",
@@ -297,7 +281,6 @@ pub fn tr(language: Language, key: TKey) -> &'static str {
             TKey::DebugJsonOutput => "Debug JSON output",
             TKey::MarkdownExport => "Markdown export",
             TKey::ExperimentalFeatures => "Experimental features",
-            TKey::Theme => "Theme",
             TKey::HumanDashboard => "Human dashboard",
             TKey::HelpText => {
                 "Use arrows to move, Enter to open or run, Space to toggle, Esc to go back."
@@ -322,15 +305,10 @@ pub fn tr(language: Language, key: TKey) -> &'static str {
             TKey::Error => "ERROR",
             TKey::On => "ON",
             TKey::Off => "OFF",
-            TKey::Enabled => "enabled",
-            TKey::Disabled => "disabled",
             TKey::Saved => "saved",
             TKey::NotInitialized => "not initialized",
-            TKey::Locked => "locked",
             TKey::Unlocked => "unlocked",
             TKey::NoData => "no data",
-            TKey::Back => "Back",
-            TKey::Confirm => "Confirm",
             TKey::CreatedPages => "Created pages",
             TKey::ArchivedHotLog => "Archived hot log",
             TKey::CandidatePages => "Candidate pages",
@@ -367,8 +345,7 @@ pub fn tr(language: Language, key: TKey) -> &'static str {
             }
         },
         Language::Ru => match key {
-            TKey::ProductName => "Memory Genome Engine",
-            TKey::Subtitle => "Локальный движок памяти для AI-агентов",
+            TKey::Subtitle => "Local-first memory engine for AI agents by ECD5A",
             TKey::Dashboard => "Панель",
             TKey::RecallMemory => "Вспомнить память",
             TKey::AddMemoryCell => "Добавить запись",
@@ -424,7 +401,6 @@ pub fn tr(language: Language, key: TKey) -> &'static str {
             TKey::DebugJsonOutput => "Debug JSON output",
             TKey::MarkdownExport => "Markdown export",
             TKey::ExperimentalFeatures => "Experimental features",
-            TKey::Theme => "Тема",
             TKey::HumanDashboard => "Human dashboard",
             TKey::HelpText => {
                 "Стрелки двигают выбор, Enter открывает или запускает, Space переключает, Esc назад."
@@ -449,15 +425,10 @@ pub fn tr(language: Language, key: TKey) -> &'static str {
             TKey::Error => "ОШИБКА",
             TKey::On => "ВКЛ",
             TKey::Off => "ВЫКЛ",
-            TKey::Enabled => "включено",
-            TKey::Disabled => "выключено",
             TKey::Saved => "сохранено",
             TKey::NotInitialized => "не инициализировано",
-            TKey::Locked => "закрыто",
             TKey::Unlocked => "открыто",
             TKey::NoData => "нет данных",
-            TKey::Back => "Назад",
-            TKey::Confirm => "Подтвердить",
             TKey::CreatedPages => "Создано страниц",
             TKey::ArchivedHotLog => "Архив hot log",
             TKey::CandidatePages => "Candidate pages",

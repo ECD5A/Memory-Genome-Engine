@@ -16,8 +16,8 @@ use ratatui::Frame;
 
 use crate::tui::app::TuiApp;
 use crate::tui::i18n::{tr, TKey};
+use crate::tui::status_badge::{badge_line, BadgeKind};
 use crate::tui::theme;
-use crate::tui::widgets::status_badge::{badge_line, BadgeKind};
 
 pub fn block(title: impl Into<String>) -> Block<'static> {
     Block::default()

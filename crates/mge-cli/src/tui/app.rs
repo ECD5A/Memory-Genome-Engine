@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -19,8 +19,8 @@ use crate::app_service::{
 use crate::tui::i18n::{tr, Language, TKey};
 use crate::tui::input;
 use crate::tui::screens;
+use crate::tui::status_badge::BadgeKind;
 use crate::tui::theme;
-use crate::tui::widgets::status_badge::BadgeKind;
 
 #[derive(Clone, Debug)]
 pub struct TuiOptions {
@@ -227,6 +227,10 @@ fn draw(frame: &mut Frame<'_>, app: &TuiApp) {
 }
 
 fn handle_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
+    if key.kind != KeyEventKind::Press {
+        return Ok(true);
+    }
+
     if input::is_language_key(key) {
         app.language = app.language.toggle();
         return Ok(true);
@@ -265,13 +269,7 @@ fn handle_setup_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
         KeyCode::Enter => match app.form_selected {
             0 => run_setup(app, false),
             1 => run_setup(app, true),
-            2 => match app.service.doctor(true) {
-                Ok(report) => {
-                    app.dashboard.doctor = report;
-                    app.set_status(BadgeKind::Ok, tr(app.language, TKey::DeepDoctor));
-                }
-                Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
-            },
+            2 => run_deep_doctor(app),
             3 => app.open_screen(Screen::Dashboard),
             4 => app.open_screen(Screen::Help),
             _ => {}
@@ -481,44 +479,56 @@ fn handle_status_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
                 app.refresh_dashboard();
                 app.set_status(BadgeKind::Ok, tr(app.language, TKey::Refresh));
             }
-            1 => match app.service.doctor(true) {
-                Ok(report) => {
-                    app.dashboard.doctor = report;
-                    app.set_status(BadgeKind::Ok, tr(app.language, TKey::DeepDoctor));
-                }
-                Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
-            },
-            2 => match app.service.validate_deep() {
-                Ok(report) if report.ok => {
-                    app.set_status(BadgeKind::Ok, tr(app.language, TKey::ValidateDeep))
-                }
-                Ok(report) => app.set_status(
-                    BadgeKind::Error,
-                    format!(
-                        "{}: {} {}",
-                        tr(app.language, TKey::ValidateDeep),
-                        report.errors.len(),
-                        tr(app.language, TKey::Error)
-                    ),
-                ),
-                Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
-            },
-            3 => match app.service.rebuild_indexes() {
-                Ok(report) => app.set_status(
-                    BadgeKind::Ok,
-                    format!(
-                        "{}: {} page(s)",
-                        tr(app.language, TKey::RebuildIndexes),
-                        report.pages_scanned
-                    ),
-                ),
-                Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
-            },
+            1 => run_deep_doctor(app),
+            2 => run_validate_deep(app),
+            3 => run_rebuild_indexes(app),
             _ => {}
         },
         _ => {}
     }
     Ok(true)
+}
+
+fn run_deep_doctor(app: &mut TuiApp) {
+    match app.service.doctor(true) {
+        Ok(report) => {
+            app.dashboard.doctor = report;
+            app.set_status(BadgeKind::Ok, tr(app.language, TKey::DeepDoctor));
+        }
+        Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
+    }
+}
+
+fn run_validate_deep(app: &mut TuiApp) {
+    match app.service.validate_deep() {
+        Ok(report) if report.ok => {
+            app.set_status(BadgeKind::Ok, tr(app.language, TKey::ValidateDeep))
+        }
+        Ok(report) => app.set_status(
+            BadgeKind::Error,
+            format!(
+                "{}: {} {}",
+                tr(app.language, TKey::ValidateDeep),
+                report.errors.len(),
+                tr(app.language, TKey::Error)
+            ),
+        ),
+        Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
+    }
+}
+
+fn run_rebuild_indexes(app: &mut TuiApp) {
+    match app.service.rebuild_indexes() {
+        Ok(report) => app.set_status(
+            BadgeKind::Ok,
+            format!(
+                "{}: {} page(s)",
+                tr(app.language, TKey::RebuildIndexes),
+                report.pages_scanned
+            ),
+        ),
+        Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
+    }
 }
 
 fn handle_benchmark_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
@@ -646,6 +656,7 @@ fn cycle_recall_mode(mode: RecallMode, forward: bool) -> RecallMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::{KeyEventState, KeyModifiers};
 
     #[test]
     fn recall_mode_cycles_both_directions() {
@@ -690,5 +701,40 @@ mod tests {
         });
 
         assert_eq!(app.screen, Screen::Dashboard);
+    }
+
+    #[test]
+    fn repeated_key_events_are_ignored_to_prevent_menu_skips() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = TuiApp::new(TuiOptions {
+            store: dir.path().join(".memory-genome"),
+            passphrase_env: None,
+        });
+        let selected = app.form_selected;
+        let language = app.language;
+
+        handle_key(
+            &mut app,
+            KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Repeat,
+                state: KeyEventState::NONE,
+            },
+        )
+        .unwrap();
+        handle_key(
+            &mut app,
+            KeyEvent {
+                code: KeyCode::Char('l'),
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Repeat,
+                state: KeyEventState::NONE,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(app.form_selected, selected);
+        assert_eq!(app.language, language);
     }
 }

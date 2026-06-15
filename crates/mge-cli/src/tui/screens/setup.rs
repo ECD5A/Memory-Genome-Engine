@@ -3,6 +3,7 @@ use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
 use crate::tui::app::TuiApp;
+use crate::tui::banner;
 use crate::tui::i18n::{tr, TKey};
 use crate::tui::screens::{self, action_line, key_value};
 use crate::tui::theme;
@@ -11,6 +12,7 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(8),
             Constraint::Length(12),
             Constraint::Min(8),
             Constraint::Length(1),
@@ -18,10 +20,15 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
         ])
         .split(area);
 
-    render_actions(frame, app, layout[0]);
-    render_guidance(frame, app, layout[1]);
-    screens::render_status(frame, app, layout[2]);
-    screens::render_footer(frame, app, layout[3], TKey::FooterScreen);
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new(banner::banner_lines(app.language))
+            .wrap(ratatui::widgets::Wrap { trim: false }),
+        layout[0],
+    );
+    render_actions(frame, app, layout[1]);
+    render_guidance(frame, app, layout[2]);
+    screens::render_status(frame, app, layout[3]);
+    screens::render_footer(frame, app, layout[4], TKey::FooterScreen);
 }
 
 fn render_actions(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {

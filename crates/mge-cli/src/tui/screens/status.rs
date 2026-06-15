@@ -5,8 +5,8 @@ use ratatui::Frame;
 use crate::tui::app::TuiApp;
 use crate::tui::i18n::{tr, TKey};
 use crate::tui::screens::{self, action_line, key_value};
+use crate::tui::status_badge::{badge_line, BadgeKind};
 use crate::tui::theme;
-use crate::tui::widgets::status_badge::{badge_line, BadgeKind};
 
 pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     let layout = Layout::default()
