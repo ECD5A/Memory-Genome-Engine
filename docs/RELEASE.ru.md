@@ -54,6 +54,7 @@ cargo run -p mge-cli -- recall "release smoke"
 cargo run -p mge-cli -- doctor --store .memory-genome --deep
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- validate --deep
+cargo run -p mge-cli -- tui --help
 ```
 
 Repo-local smoke helpers:
@@ -186,6 +187,7 @@ Safety rules для corpus benchmark:
 - `cargo fmt --check` passes.
 - `cargo test` passes.
 - CLI smoke passes.
+- TUI help smoke (`mge tui --help`) passes.
 - Encrypted smoke passes, если менялись security docs или encrypted storage.
 - MCP/SDK smoke passes, если менялись integration docs или wrappers.
 - `mge doctor --deep` проходит для unencrypted и encrypted smoke stores.

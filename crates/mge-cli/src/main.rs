@@ -1,20 +1,18 @@
+mod app_service;
+mod tui;
+
 use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::{bail, Context, Result};
+use app_service::doctor_report;
 use clap::{Parser, Subcommand};
-use mge_core::binary::{self, FileKind};
-use mge_core::security::unlock_security_metadata;
-use mge_core::store::Manifest;
 use mge_core::{
     CellId, CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine, MemoryKind,
     MemorySource, MemoryStatus, MemoryValue, PageClustererKind, PageCodecKind, RecallMode,
-    RecallRequest, RememberRequest, SecurityMode, SensitivityLevel, TrustLevel, ValidationReport,
-    DEFAULT_STORE_DIR,
+    RecallRequest, RememberRequest, SecurityMode, SensitivityLevel, TrustLevel, DEFAULT_STORE_DIR,
 };
-use serde::Serialize;
 
 #[derive(Debug, Parser)]
 #[command(name = "mge", version, about = "Memory Genome Engine CLI")]
@@ -191,6 +189,10 @@ enum Commands {
         #[arg(long, default_value = "markdown")]
         format: String,
 
+        #[arg(long)]
+        passphrase_env: Option<String>,
+    },
+    Tui {
         #[arg(long)]
         passphrase_env: Option<String>,
     },
@@ -552,309 +554,15 @@ fn main() -> Result<()> {
                 other => bail!("unsupported export format: {other}; supported: markdown, json"),
             }
         }
+        Commands::Tui { passphrase_env } => {
+            tui::run(tui::TuiOptions {
+                store: cli.store.clone(),
+                passphrase_env,
+            })?;
+        }
     }
 
     Ok(())
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct DoctorFileStatus {
-    path: String,
-    exists: bool,
-    is_dir: bool,
-    required: bool,
-    size_bytes: Option<u64>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct DoctorReport {
-    ok: bool,
-    store_path: String,
-    exists: bool,
-    initialized: bool,
-    manifest_readable: bool,
-    manifest_error: Option<String>,
-    store_version: Option<u32>,
-    security_mode: Option<String>,
-    payload_encryption: Option<bool>,
-    session_unlock_required: Option<bool>,
-    passphrase_required: bool,
-    passphrase_env_provided: bool,
-    unlock_status: String,
-    key_metadata_present: Option<bool>,
-    page_codec: Option<String>,
-    compression: Option<String>,
-    index_kind: Option<String>,
-    durability: Option<String>,
-    page_files: usize,
-    file_statuses: Vec<DoctorFileStatus>,
-    validate_recommendation: String,
-    deep_requested: bool,
-    deep_validation: Option<ValidationReport>,
-    deep_validation_skipped: Option<String>,
-    issues: Vec<String>,
-    warnings: Vec<String>,
-}
-
-impl DoctorReport {
-    fn to_human_text(&self) -> String {
-        let mut output = String::new();
-        output.push_str("Memory Genome doctor\n");
-        output.push_str(&format!("store: {}\n", self.store_path));
-        output.push_str(&format!("ok: {}\n", self.ok));
-        output.push_str(&format!("exists: {}\n", self.exists));
-        output.push_str(&format!("initialized: {}\n", self.initialized));
-        output.push_str(&format!("manifest readable: {}\n", self.manifest_readable));
-        if let Some(version) = self.store_version {
-            output.push_str(&format!("store version: {version}\n"));
-        }
-        if let Some(mode) = &self.security_mode {
-            output.push_str(&format!("security mode: {mode}\n"));
-        }
-        output.push_str(&format!("unlock status: {}\n", self.unlock_status));
-        if let Some(index_kind) = &self.index_kind {
-            output.push_str(&format!("index kind: {index_kind}\n"));
-        }
-        if let Some(page_codec) = &self.page_codec {
-            output.push_str(&format!("page codec: {page_codec}\n"));
-        }
-        if let Some(compression) = &self.compression {
-            output.push_str(&format!("compression: {compression}\n"));
-        }
-        output.push_str(&format!("sealed page files: {}\n", self.page_files));
-        output.push_str(&format!(
-            "validate recommendation: {}\n",
-            self.validate_recommendation
-        ));
-        if let Some(skipped) = &self.deep_validation_skipped {
-            output.push_str(&format!("deep validation skipped: {skipped}\n"));
-        }
-        if let Some(validation) = &self.deep_validation {
-            output.push_str(&format!("deep validation ok: {}\n", validation.ok));
-            output.push_str(&format!(
-                "deep validation errors: {}\n",
-                validation.errors.len()
-            ));
-            output.push_str(&format!(
-                "deep validation warnings: {}\n",
-                validation.warnings.len()
-            ));
-        }
-        if !self.warnings.is_empty() {
-            output.push_str("warnings:\n");
-            for warning in &self.warnings {
-                output.push_str(&format!("- {warning}\n"));
-            }
-        }
-        if !self.issues.is_empty() {
-            output.push_str("issues:\n");
-            for issue in &self.issues {
-                output.push_str(&format!("- {issue}\n"));
-            }
-        }
-        output
-    }
-}
-
-fn doctor_report(
-    store: &Path,
-    deep_requested: bool,
-    passphrase_env: Option<&str>,
-) -> Result<DoctorReport> {
-    let root = store.to_path_buf();
-    let exists = root.exists();
-    let manifest_path = root.join("manifest.mgm");
-    let initialized = manifest_path.exists();
-    let passphrase = passphrase_from_env(passphrase_env)?;
-    let passphrase_env_provided = passphrase_env.is_some();
-    let file_statuses = doctor_file_statuses(&root);
-    let page_files = count_page_files(&root);
-    let mut issues = Vec::new();
-    let mut warnings = Vec::new();
-
-    if !exists {
-        issues.push("store path does not exist".to_string());
-    } else if !root.is_dir() {
-        issues.push("store path exists but is not a directory".to_string());
-    }
-    if exists && !initialized {
-        issues.push("manifest.mgm is missing; run `mge init` first".to_string());
-    }
-
-    let mut manifest_readable = false;
-    let mut manifest_error = None;
-    let mut store_version = None;
-    let mut security_mode = None;
-    let mut payload_encryption = None;
-    let mut session_unlock_required = None;
-    let mut passphrase_required = false;
-    let mut unlock_status = "not_initialized".to_string();
-    let mut key_metadata_present = None;
-    let mut page_codec = None;
-    let mut compression = None;
-    let mut index_kind = None;
-    let mut durability = None;
-    let mut deep_validation = None;
-    let mut deep_validation_skipped = None;
-
-    let manifest = if initialized {
-        match binary::read_messagepack_file::<Manifest>(&manifest_path, FileKind::Manifest) {
-            Ok(manifest) => {
-                manifest_readable = true;
-                store_version = Some(manifest.version);
-                security_mode = Some(manifest.security_mode.to_string());
-                page_codec = Some(manifest.page_codec.to_string());
-                compression = Some(manifest.compression.to_string());
-                index_kind = Some(manifest.index_kind.to_string());
-                durability = Some(manifest.durability.to_string());
-                Some(manifest)
-            }
-            Err(err) => {
-                let message = err.to_string();
-                manifest_error = Some(message.clone());
-                issues.push(format!("manifest.mgm is not readable: {message}"));
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    if let Some(manifest) = &manifest {
-        let security = MemoryEngine::security_config_at(&root)?;
-        payload_encryption = Some(security.payload_encryption);
-        session_unlock_required = Some(security.session_unlock_required);
-        passphrase_required = security.session_unlock_required;
-        key_metadata_present = Some(security.key_verification_configured);
-        if manifest.security_mode.is_encrypted() {
-            if passphrase.is_some() {
-                unlock_security_metadata(&manifest.security, passphrase.as_deref().unwrap())
-                    .with_context(|| "auth_failed: failed to unlock encrypted store")?;
-                unlock_status = "unlocked".to_string();
-            } else {
-                unlock_status = "locked_passphrase_required".to_string();
-                warnings.push(
-                    "encrypted store requires --passphrase-env for payload commands or deep doctor"
-                        .to_string(),
-                );
-            }
-        } else {
-            unlock_status = "not_required".to_string();
-        }
-
-        if deep_requested {
-            if manifest.security_mode.is_encrypted() && passphrase.is_none() {
-                deep_validation_skipped =
-                    Some("encrypted store requires --passphrase-env for --deep".to_string());
-            } else {
-                match MemoryEngine::open_at_read_only_with_passphrase(&root, passphrase.as_deref())
-                    .and_then(|engine| engine.validate_deep())
-                {
-                    Ok(report) => {
-                        if !report.ok {
-                            issues.push("deep validation reported issues".to_string());
-                        }
-                        deep_validation = Some(report);
-                    }
-                    Err(err) => {
-                        issues.push(format!("deep validation failed: {err}"));
-                    }
-                }
-            }
-        }
-    }
-
-    for status in &file_statuses {
-        if status.required && !status.exists {
-            issues.push(format!("required path missing: {}", status.path));
-        }
-    }
-
-    let validate_recommendation = if passphrase_required && !passphrase_env_provided {
-        "run `mge validate --deep --passphrase-env <ENV>` after unlocking".to_string()
-    } else {
-        "run `mge validate --deep` for full catalog/index/page validation".to_string()
-    };
-
-    let ok = issues.is_empty();
-    Ok(DoctorReport {
-        ok,
-        store_path: root.display().to_string(),
-        exists,
-        initialized,
-        manifest_readable,
-        manifest_error,
-        store_version,
-        security_mode,
-        payload_encryption,
-        session_unlock_required,
-        passphrase_required,
-        passphrase_env_provided,
-        unlock_status,
-        key_metadata_present,
-        page_codec,
-        compression,
-        index_kind,
-        durability,
-        page_files,
-        file_statuses,
-        validate_recommendation,
-        deep_requested,
-        deep_validation,
-        deep_validation_skipped,
-        issues,
-        warnings,
-    })
-}
-
-fn doctor_file_statuses(root: &Path) -> Vec<DoctorFileStatus> {
-    [
-        ("manifest.mgm", true),
-        ("dictionary", true),
-        ("dictionary/markers.mgd", true),
-        ("hot", true),
-        ("hot/hot.mgl", true),
-        ("hot/snapshot.mgs", false),
-        ("pages", true),
-        ("indexes", true),
-        ("indexes/page_index.mgi", true),
-        ("indexes/marker_index.mgi", true),
-        ("indexes/fuse_index.mgi", true),
-        ("exports", false),
-    ]
-    .into_iter()
-    .map(|(relative, required)| {
-        let path = root.join(relative);
-        let metadata = fs::metadata(&path).ok();
-        DoctorFileStatus {
-            path: relative.to_string(),
-            exists: metadata.is_some(),
-            is_dir: metadata.as_ref().is_some_and(|metadata| metadata.is_dir()),
-            required,
-            size_bytes: metadata
-                .as_ref()
-                .filter(|metadata| metadata.is_file())
-                .map(|metadata| metadata.len()),
-        }
-    })
-    .collect()
-}
-
-fn count_page_files(root: &Path) -> usize {
-    let pages_dir = root.join("pages");
-    let Ok(entries) = fs::read_dir(pages_dir) else {
-        return 0;
-    };
-    entries
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .and_then(|extension| extension.to_str())
-                == Some("mgp")
-        })
-        .count()
 }
 
 fn open_engine(store: &PathBuf, passphrase_env: Option<&str>) -> Result<MemoryEngine> {

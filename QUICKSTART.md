@@ -16,6 +16,14 @@ The main CLI binary is `mge`:
 cargo run -p mge-cli -- --help
 ```
 
+Human terminal interface:
+
+```bash
+cargo run -p mge-cli -- tui
+```
+
+Inside the TUI, use arrows, Enter, Space, Esc, F1/L/Д for language, and F2 for help. Scriptable CLI commands remain unchanged.
+
 ## Create A Store
 
 Default store:

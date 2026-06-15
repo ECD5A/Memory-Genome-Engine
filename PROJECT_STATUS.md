@@ -17,7 +17,7 @@ Closed:
 Current stage:
 
 - Mandate 4: Product UI / Packaging is in progress.
-- Current focus: packaging/dev UX, release scripts, and read-only local diagnostics.
+- Current focus: terminal product UI, packaging/dev UX, release scripts, and read-only local diagnostics.
 
 ## Documentation Map
 
@@ -123,6 +123,10 @@ Product UI / Packaging is in progress.
 
 Current package:
 
+- Human-first terminal interface through `mge tui` using `ratatui` + `crossterm`.
+- TUI screens for dashboard, recall, add memory, seal/checkpoint, status/diagnostics, index benchmark, Markdown export/import status, settings, and help.
+- Runtime EN/RU language switching with F1, L/l, and Д/д.
+- Thin `mge-cli` app service layer shared by the TUI and CLI-oriented diagnostics.
 - Read-only `mge doctor` diagnostics for store structure, manifest/security state, required files, optional unlock, and explicit deep validation.
 - Repo-local release build scripts:
   - `scripts/build-release.sh`
@@ -143,7 +147,7 @@ Still intentionally not implemented:
 
 ## Current Known Limitations
 
-- Product UI is not started yet; Mandate 4 is currently packaging/dev UX.
+- No web/desktop GUI; Mandate 4 UI is terminal-first through `mge tui`.
 - No vector database.
 - No encrypted indexes or blind marker metadata yet.
 - No encrypted Markdown export yet.
@@ -154,23 +158,22 @@ Still intentionally not implemented:
 
 ## Latest Verification Baseline
 
-Latest Mandate 4 packaging/dev UX verification:
+Latest Mandate 4 TUI/package verification:
 
-- `cargo fmt`: passed.
-- `cargo test`: passed, 137 tests.
+- `cargo fmt --check`: passed.
+- `cargo test`: passed, 147 tests.
 - `cargo build -p mge-cli --bins`: passed.
+- CLI quickstart smoke: passed on a temporary store.
+- TUI help smoke: `cargo run -p mge-cli -- tui --help` passed.
+
+Previous packaging/dev UX baseline from the release-script pass remains relevant:
+
 - `cargo build -p mge-cli --bins --release`: passed.
 - `scripts/build-release.ps1`: passed.
 - `scripts/smoke-release.ps1`: passed.
 - `scripts/demo-local-memory.ps1`: passed.
-- CLI quickstart smoke: passed through release smoke.
-- Encrypted quickstart smoke: passed through release smoke and demo.
-- MCP smoke: passed through release smoke.
-- Python SDK smoke: passed through release smoke.
-- TypeScript SDK smoke: passed through release smoke.
-- Rust CLI host example smoke: passed through release smoke.
 
-Mandate 4 adds packaging/dev UX and read-only diagnostics. Storage/codec/filter/recall/security formats remain unchanged.
+Mandate 4 adds terminal UI, packaging/dev UX, and read-only diagnostics. Storage/codec/filter/recall/security formats remain unchanged.
 
 ## Next Recommended Step
 

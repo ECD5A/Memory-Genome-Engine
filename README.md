@@ -3,7 +3,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-Mandate%204%20in%20progress-blue)](PROJECT_STATUS.md)
-[![Interface](https://img.shields.io/badge/interface-CLI%20%7C%20Core%20API%20%7C%20MCP-informational)](crates/)
+[![Interface](https://img.shields.io/badge/interface-TUI%20%7C%20CLI%20%7C%20Core%20API%20%7C%20MCP-informational)](crates/)
 [![Storage](https://img.shields.io/badge/storage-binary%20cells%20%2B%20pages-6f42c1)](docs/ARCHITECTURE.md)
 
 [Russian version](README.ru.md)
@@ -20,6 +20,7 @@ The engine is local-first. Agents recall relevant memory from the engine instead
 
 - Rust core library: `mge-core`.
 - CLI and local JSON-RPC adapter: `mge`, `mge-mcp-server`.
+- Human terminal interface: `mge tui`.
 - Thin Python and TypeScript SDK wrappers over the Rust CLI.
 - L1 Hot RAM layer with durable binary hot log.
 - Sealed binary page layer with page catalog and candidate indexes.
@@ -39,6 +40,7 @@ cargo run -p mge-cli -- remember "User prefers concise technical explanations" -
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- validate --deep
+cargo run -p mge-cli -- tui
 ```
 
 Full setup and usage: [Quickstart](QUICKSTART.md).
@@ -98,7 +100,7 @@ Metadata remains plaintext by design: marker dictionary, index files, page catal
 
 ## Current Limits
 
-- No UI yet.
+- No web/desktop GUI; the human interface is terminal-first through `mge tui`.
 - No vector database.
 - No encrypted indexes or blind marker metadata yet.
 - No encrypted Markdown export yet.

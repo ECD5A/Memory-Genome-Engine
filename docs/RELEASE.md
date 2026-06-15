@@ -54,6 +54,7 @@ cargo run -p mge-cli -- recall "release smoke"
 cargo run -p mge-cli -- doctor --store .memory-genome --deep
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- validate --deep
+cargo run -p mge-cli -- tui --help
 ```
 
 Repo-local smoke helpers:
@@ -186,6 +187,7 @@ Do not start custom page codec work just because MessagePack is present. A custo
 - `cargo fmt --check` passes.
 - `cargo test` passes.
 - CLI smoke passes.
+- TUI help smoke (`mge tui --help`) passes.
 - Encrypted smoke passes if security docs or encrypted storage changed.
 - MCP/SDK smoke passes if integration docs or wrappers changed.
 - `mge doctor --deep` passes for unencrypted and encrypted smoke stores.

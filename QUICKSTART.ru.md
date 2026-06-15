@@ -2,7 +2,7 @@
 
 [English version](QUICKSTART.md)
 
-Этот guide показывает короткий путь от clean checkout до working local Memory Genome store.
+Короткий путь от чистого checkout до рабочего локального Memory Genome store.
 
 ## Build
 
@@ -15,6 +15,14 @@ cargo build
 ```bash
 cargo run -p mge-cli -- --help
 ```
+
+Human terminal interface:
+
+```bash
+cargo run -p mge-cli -- tui
+```
+
+В TUI используйте стрелки, Enter, Space, Esc, F1/L/Д для языка и F2 для help. Scriptable CLI commands остаются без изменений.
 
 ## Создать Store
 
@@ -123,7 +131,7 @@ cargo run -p mge-cli -- recall "private memory" --passphrase-env MGE_PASSPHRASE
 cargo run -p mge-cli -- validate --deep --passphrase-env MGE_PASSPHRASE
 ```
 
-Encrypted mode защищает hot log payloads, checkpoint payloads и sealed page payloads. Marker dictionary, indexes, catalog summaries, Markdown export и process memory остаются plaintext by design. Подробно: [Security](docs/SECURITY.ru.md).
+Encrypted mode защищает hot log payloads, checkpoint payloads и sealed page payloads. Marker dictionary, indexes, catalog summaries, Markdown export и process memory остаются plaintext by design. Подробнее: [Security](docs/SECURITY.ru.md).
 
 Local encrypted demo workflow:
 

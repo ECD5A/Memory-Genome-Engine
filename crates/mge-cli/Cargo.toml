@@ -9,7 +9,9 @@ default-run = "mge"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+crossterm.workspace = true
 mge-core = { path = "../mge-core" }
+ratatui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

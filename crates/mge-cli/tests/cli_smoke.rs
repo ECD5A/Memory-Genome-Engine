@@ -175,6 +175,24 @@ fn cli_fast_profile_initializes_compact_storage_defaults() {
 }
 
 #[test]
+fn cli_tui_help_is_available_without_starting_interactive_terminal() {
+    let output = Command::new(env!("CARGO_BIN_EXE_mge"))
+        .args(["tui", "--help"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "mge tui --help failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"));
+    assert!(stdout.contains("--passphrase-env"));
+}
+
+#[test]
 fn cli_doctor_reports_unencrypted_store_status() {
     let dir = tempdir().unwrap();
     let store = dir.path().join(".memory-genome");
