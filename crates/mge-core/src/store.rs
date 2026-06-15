@@ -38,8 +38,9 @@ use crate::retrieval::{
     RecallRequest, Retriever, ScoringContext,
 };
 use crate::security::{
-    create_security_metadata, unlock_security_metadata, AuditEvent, AuditLogger, NoSecurity,
-    NoopAuditLogger, SecurityConfig, SecurityMetadata, SecurityMode, SecurityProvider, SessionKey,
+    create_security_metadata, decrypt_payload, encrypt_payload, unlock_security_metadata,
+    AuditEvent, AuditLogger, EncryptedPayload, NoSecurity, NoopAuditLogger, SecurityConfig,
+    SecurityMetadata, SecurityMode, SecurityProvider, SessionKey,
 };
 
 pub const DEFAULT_STORE_DIR: &str = ".memory-genome";
@@ -50,6 +51,7 @@ const PAGE_CATALOG_FILE: &str = "page_index.mgi";
 const EXACT_MARKER_INDEX_FILE: &str = "marker_index.mgi";
 const BINARY_FUSE_INDEX_FILE: &str = "fuse_index.mgi";
 const DECODED_PAGE_CACHE_CAPACITY: usize = 64;
+const PAGE_PAYLOAD_AAD: &[u8] = b"mge:sealed_page:v1";
 
 pub trait Store {
     fn remember(&mut self, request: RememberRequest) -> Result<MemoryCell>;
@@ -1886,19 +1888,19 @@ impl MemoryEngine {
 
         let decode_started = Instant::now();
         let frame = binary::decode_frame(&bytes, FileKind::Page)?;
-        let expected_codec = page_storage_codec(entry.page_codec, entry.compression)?;
-        if frame.codec != expected_codec {
+        let (page_codec, compression) = page_storage_details_from_codec(frame.codec)?;
+        if page_codec != entry.page_codec || compression != entry.compression {
             return Err(MgeError::StorageFormat(format!(
-                "wrong codec for page {}: expected {}, found {}",
+                "wrong codec for page {}: catalog expects {}/{}, found {}",
                 entry.page_id,
-                expected_codec.as_str(),
+                entry.page_codec,
+                entry.compression,
                 frame.codec.as_str()
             )));
         }
-        let security = NoSecurity;
-        let opened = security.open_page_bytes(&frame.payload)?;
-        let decoded = decompress_with(entry.compression, &opened)?;
-        let page = decode_page_with(entry.page_codec, &decoded)?;
+        let opened = self.open_page_payload(&frame)?;
+        let decoded = decompress_with(compression, &opened)?;
+        let page = decode_page_with(page_codec, &decoded)?;
         let decode_micros = elapsed_micros(decode_started);
 
         Ok(TimedPageRead {
@@ -1959,21 +1961,49 @@ impl MemoryEngine {
     }
 
     fn write_page(&self, page: &MemoryPage) -> Result<u64> {
-        let security = NoSecurity;
-
         let encoded = encode_page_with(self.manifest.page_codec, page)?;
         let compressed = compress_with(self.manifest.compression, &encoded)?;
-        let stored = security.seal_page_bytes(&compressed)?;
+        let encrypted = self.manifest.security_mode.is_encrypted();
+        let stored = self.seal_page_payload(&compressed)?;
         let stored = binary::encode_frame(
             FileKind::Page,
-            page_storage_codec(self.manifest.page_codec, self.manifest.compression)?,
+            page_storage_codec(
+                self.manifest.page_codec,
+                self.manifest.compression,
+                encrypted,
+            )?,
             &stored,
         )?;
-        // Future order remains: encode page -> compress page -> encrypt page -> write page.
         let encoded_size_bytes = u64::try_from(stored.len())
             .map_err(|_| MgeError::InvalidInput("page frame size overflow".to_string()))?;
         binary::atomic_write_bytes(self.pages_dir().join(page_file_name(page.page_id)), &stored)?;
         Ok(encoded_size_bytes)
+    }
+
+    fn seal_page_payload(&self, compressed_page_bytes: &[u8]) -> Result<Vec<u8>> {
+        if self.manifest.security_mode.is_encrypted() {
+            let key = self.session_key.as_ref().ok_or_else(|| {
+                MgeError::StoreLocked("encrypted sealed page requires session unlock".to_string())
+            })?;
+            let envelope = encrypt_payload(key, PAGE_PAYLOAD_AAD, compressed_page_bytes)?;
+            return Ok(rmp_serde::to_vec_named(&envelope)?);
+        }
+
+        let security = NoSecurity;
+        security.seal_page_bytes(compressed_page_bytes)
+    }
+
+    fn open_page_payload(&self, frame: &binary::DecodedFrame) -> Result<Vec<u8>> {
+        if page_payload_is_encrypted(frame.codec) {
+            let key = self.session_key.as_ref().ok_or_else(|| {
+                MgeError::StoreLocked("encrypted sealed page requires session unlock".to_string())
+            })?;
+            let envelope: EncryptedPayload = rmp_serde::from_slice(&frame.payload)?;
+            return decrypt_payload(key, PAGE_PAYLOAD_AAD, &envelope);
+        }
+
+        let security = NoSecurity;
+        security.open_page_bytes(&frame.payload)
     }
 
     fn read_all_page_files_for_rebuild(&self) -> Result<Vec<RebuildPageRead>> {
@@ -2011,8 +2041,7 @@ impl MemoryEngine {
             .map_err(|_| MgeError::InvalidInput("page frame size overflow".to_string()))?;
         let frame = binary::decode_frame(&bytes, FileKind::Page)?;
         let (page_codec, compression) = page_storage_details_from_codec(frame.codec)?;
-        let security = NoSecurity;
-        let opened = security.open_page_bytes(&frame.payload)?;
+        let opened = self.open_page_payload(&frame)?;
         let decoded = decompress_with(compression, &opened)?;
         let page = decode_page_with(page_codec, &decoded)?;
         let entry = self.page_catalog_entry_for_existing_page(
@@ -2453,11 +2482,21 @@ fn append_cell_markdown(output: &mut String, cell: &MemoryCell, dictionary: &Mar
     output.push_str("\n\n");
 }
 
-fn page_storage_codec(page_codec: PageCodecKind, compression: CompressionKind) -> Result<CodecId> {
-    match (page_codec, compression) {
-        (PageCodecKind::MessagePack, CompressionKind::None) => Ok(CodecId::MessagePack),
-        (PageCodecKind::MessagePack, CompressionKind::Zstd) => Ok(CodecId::MessagePackZstd),
-        (PageCodecKind::Json, _) => Err(MgeError::InvalidInput(
+fn page_storage_codec(
+    page_codec: PageCodecKind,
+    compression: CompressionKind,
+    encrypted: bool,
+) -> Result<CodecId> {
+    match (page_codec, compression, encrypted) {
+        (PageCodecKind::MessagePack, CompressionKind::None, false) => Ok(CodecId::MessagePack),
+        (PageCodecKind::MessagePack, CompressionKind::Zstd, false) => Ok(CodecId::MessagePackZstd),
+        (PageCodecKind::MessagePack, CompressionKind::None, true) => {
+            Ok(CodecId::MessagePackEncrypted)
+        }
+        (PageCodecKind::MessagePack, CompressionKind::Zstd, true) => {
+            Ok(CodecId::MessagePackZstdEncrypted)
+        }
+        (PageCodecKind::Json, _, _) => Err(MgeError::InvalidInput(
             "json page codec is only allowed for optional debug/export paths, not runtime storage"
                 .to_string(),
         )),
@@ -2468,15 +2507,21 @@ fn page_storage_details_from_codec(codec: CodecId) -> Result<(PageCodecKind, Com
     match codec {
         CodecId::MessagePack => Ok((PageCodecKind::MessagePack, CompressionKind::None)),
         CodecId::MessagePackZstd => Ok((PageCodecKind::MessagePack, CompressionKind::Zstd)),
-        CodecId::MessagePackEncrypted | CodecId::MessagePackZstdEncrypted => {
-            Err(MgeError::StorageFormat(
-                "encrypted page payload codec is not supported in this build".to_string(),
-            ))
+        CodecId::MessagePackEncrypted => Ok((PageCodecKind::MessagePack, CompressionKind::None)),
+        CodecId::MessagePackZstdEncrypted => {
+            Ok((PageCodecKind::MessagePack, CompressionKind::Zstd))
         }
         CodecId::None => Err(MgeError::StorageFormat(
             "page frame codec none is not valid for runtime page storage".to_string(),
         )),
     }
+}
+
+fn page_payload_is_encrypted(codec: CodecId) -> bool {
+    matches!(
+        codec,
+        CodecId::MessagePackEncrypted | CodecId::MessagePackZstdEncrypted
+    )
 }
 
 fn ensure_runtime_page_codec(page_codec: PageCodecKind) -> Result<()> {
@@ -2492,11 +2537,12 @@ fn ensure_runtime_page_codec(page_codec: PageCodecKind) -> Result<()> {
 fn security_config_from_parts(mode: SecurityMode, metadata: &SecurityMetadata) -> SecurityConfig {
     let key_verification_configured = metadata.is_configured();
     let hot_payload_encryption = mode.is_encrypted() && key_verification_configured;
+    let sealed_page_payload_encryption = hot_payload_encryption;
     SecurityConfig {
         mode,
-        payload_encryption: hot_payload_encryption,
+        payload_encryption: hot_payload_encryption && sealed_page_payload_encryption,
         hot_payload_encryption,
-        sealed_page_payload_encryption: false,
+        sealed_page_payload_encryption,
         session_unlock_required: mode.is_encrypted(),
         key_verification_configured,
         metadata_plaintext: true,
@@ -2505,7 +2551,7 @@ fn security_config_from_parts(mode: SecurityMode, metadata: &SecurityMetadata) -
                 "unencrypted store; NoSecurity pass-through is active".to_string()
             }
             (SecurityMode::Encrypted, true) => {
-                "encrypted hot storage configured; hot log/snapshot payload operations require session unlock".to_string()
+                "encrypted hot and sealed page storage configured; payload operations require session unlock".to_string()
             }
             (SecurityMode::Encrypted, false) => {
                 "encrypted mode configured without key metadata; payload operations remain locked until security metadata is initialized".to_string()

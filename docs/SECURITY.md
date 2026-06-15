@@ -2,7 +2,7 @@
 
 [Russian version](SECURITY.ru.md)
 
-Mandate 3 adds the security and encryption layer for Memory Genome Engine. The current implemented scope is session unlock plus authenticated encryption for L1 hot storage.
+Mandate 3 adds the security and encryption layer for Memory Genome Engine. The current implemented scope is session unlock plus authenticated encryption for L1 hot storage and sealed page payloads.
 
 Current implementation status:
 
@@ -12,10 +12,11 @@ Current implementation status:
 - Encrypted stores require session unlock for payload operations through `--passphrase-env`.
 - `hot/hot.mgl` hot records are encrypted/authenticated when the store has key metadata.
 - `hot/snapshot.mgs` checkpoint payloads are encrypted/authenticated when the store has key metadata.
+- `pages/*.mgp` sealed page payloads are encrypted/authenticated when the store has key metadata.
 - Wrong passphrases fail with an authentication error.
 - Encrypted init without passphrase is still allowed as a locked marker/config state, but payload operations remain locked until key metadata exists.
 - `mge config security` reads safe manifest-level security status without opening payloads.
-- Sealed pages, indexes, marker dictionary, page catalog summaries, Markdown export, and selected manifest metadata are not encrypted in this pass.
+- Indexes, marker dictionary, page catalog summaries, Markdown export, and selected manifest metadata are not encrypted in this pass.
 - JSON remains protocol/debug/benchmark output only, not runtime storage.
 
 ## Core Flow
@@ -28,7 +29,7 @@ seal -> Sealed Pages + Indexes
 recall -> ContextPacket
 ```
 
-The encryption work changes only hot payload persistence and session unlock. It does not change recall modes, `MarkerGenome`, `MemoryCell.markers`, candidate indexes, sealed page codec, or storage layout.
+The encryption work changes only payload persistence and session unlock. It does not change recall modes, `MarkerGenome`, `MemoryCell.markers`, candidate indexes, page codec, or storage layout.
 
 ## Crypto Dependencies
 
@@ -64,6 +65,7 @@ Encrypted when initialized with key metadata:
 
 - hot log record payloads in `hot/hot.mgl`;
 - hot checkpoint payloads in `hot/snapshot.mgs`;
+- sealed page payloads in `pages/*.mgp`;
 - the key-check block inside manifest security metadata.
 
 Still plaintext by design in this pass:
@@ -71,12 +73,12 @@ Still plaintext by design in this pass:
 - binary frame headers: magic, file kind, version, codec id, payload length, checksum;
 - manifest safe metadata, security mode, KDF salt/parameters, AEAD scheme/version;
 - marker dictionary: `dictionary/markers.mgd`;
-- sealed pages: `pages/*.mgp`;
 - indexes and page catalog: `indexes/*.mgi`;
+- page catalog summaries: marker/scope/kind/status/sensitivity/trust summaries and encoded-size metadata;
 - Markdown export: `exports/memory.md`;
 - process memory while the store is unlocked.
 
-Sealed page encryption, encrypted indexes, blind marker tokens, and encrypted export are separate future packages.
+Encrypted indexes, blind marker tokens, and encrypted export are separate future packages. Index/catalog metadata remains plaintext for deterministic search, pruning, validation, and rebuild.
 
 ## Recovery
 
@@ -84,6 +86,7 @@ Hot recovery remains crash-safe:
 
 - after unlock, `hot/snapshot.mgs` can restore checkpointed hot cells;
 - `hot/hot.mgl` replays valid encrypted hot records after the snapshot offset;
+- sealed recall decrypts `pages/*.mgp` payloads after session unlock;
 - a corrupted or truncated final encrypted frame is discarded without destroying earlier valid hot memory;
 - wrong keys fail authentication before normal payload use.
 
@@ -99,9 +102,11 @@ Error mapping:
 
 Python SDK uses `passphrase_env="MGE_PASSPHRASE"`. TypeScript SDK uses `passphraseEnv: "MGE_PASSPHRASE"`. Both wrappers delegate crypto and storage logic to the Rust CLI/core.
 
+Encrypted sealed recall, `validate --deep`, and `rebuild-indexes` require the same unlock path. Missing unlock maps to `store_locked`; wrong passphrases and AEAD authentication failures map to `auth_failed`.
+
 ## Threats In Scope
 
-This pass protects against casual local inspection of hot memory files and copied hot logs/snapshots when the attacker does not have the passphrase.
+This pass protects against casual local inspection of hot memory files and sealed page payloads when the attacker does not have the passphrase.
 
 ## Threats Out Of Scope
 
@@ -110,15 +115,14 @@ This pass does not protect against:
 - a compromised running process;
 - malicious OS/root/admin/debugger access;
 - plaintext `ContextPacket` data in process memory;
-- plaintext sealed pages and index/catalog metadata;
+- plaintext marker dictionary and index/catalog metadata;
 - plaintext Markdown export;
 - shell history, terminal capture, clipboard, or host-side logging;
 - file deletion, rollback attacks, or ransomware.
 
 ## Current Limitations
 
-- Only hot storage payloads are encrypted now.
-- Sealed pages are not encrypted yet.
+- Hot storage and sealed page payloads are encrypted for encrypted stores with key metadata.
 - Marker dictionary and candidate index metadata are not blind.
 - There is no interactive prompt unlock command; current safe CLI unlock uses `--passphrase-env`.
 - There is no encrypted export mode.
@@ -126,4 +130,4 @@ This pass does not protect against:
 
 ## Next Security Step
 
-The next Mandate 3 package should be sealed page payload encryption. That step must keep page headers/catalog boundaries explicit and must not silently encrypt indexes or blind marker metadata without a separate design.
+The next Mandate 3 package should be encrypted indexes / blind marker metadata design. Do not encrypt indexes, marker dictionary, or catalog summaries without a separate design, because those structures define search and pruning behavior.

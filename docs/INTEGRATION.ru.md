@@ -93,7 +93,7 @@ Encrypted stores используют те же integration paths. Host пере
 - Python SDK: `MemoryGenomeClient(..., passphrase_env="MGE_PASSPHRASE")`
 - TypeScript SDK: `new MemoryGenomeClient(..., { passphraseEnv: "MGE_PASSPHRASE" })`
 
-Значение passphrase не должно попадать в protocol payloads и logs. Сейчас encryption покрывает `hot/hot.mgl` и `hot/snapshot.mgs`; sealed pages и indexes будут отдельным security package.
+Значение passphrase не должно попадать в protocol payloads и logs. Сейчас encryption покрывает `hot/hot.mgl`, `hot/snapshot.mgs` и sealed page payloads в `pages/*.mgp`. Indexes, marker dictionary, catalog summaries и Markdown export остаются plaintext by design.
 
 ## Local Developer Setup
 
@@ -149,7 +149,7 @@ npm run check # если tsc доступен
 
 - `mge-mcp-server` сейчас MCP-ready local JSON-RPC adapter, а не полная внешняя MCP SDK реализация.
 - SDK пока thin local wrappers вокруг `mge`; package publishing ещё не делался.
-- Sealed page encryption, vector DB, UI и remote service hosting не входят в текущий integration layer.
+- Encrypted indexes/blind marker metadata, vector DB, UI и remote service hosting не входят в текущий integration layer.
 
 ## Troubleshooting
 

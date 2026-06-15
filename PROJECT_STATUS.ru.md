@@ -43,7 +43,7 @@ JSON policy:
 | v0.2 storage/index foundation | Done / hardening | Binary runtime storage layout, MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in и validation hardening сделаны. |
 | v0.2 remaining | Closed | Benchmark foundation готов; дальнейший core cleanup только benchmark-gated. |
 | v0.3 SDK/MCP | In progress | Mandate 2 integration foundation активен: MCP-ready adapter и thin Python/TypeScript wrappers уже есть. |
-| v0.4 security | In progress | Mandate 3 имеет threat model плюс real session unlock и authenticated hot log/snapshot encryption; sealed pages/blind markers остаются future work. |
+| v0.4 security | In progress | Mandate 3 имеет threat model плюс real session unlock и authenticated hot log/snapshot/sealed-page payload encryption; encrypted indexes/blind markers остаются future work. |
 | v0.5 safety/search | Partial foundation | Policy/capabilities есть; poisoning/conflict/vector reranking ещё не начаты. |
 
 ## Текущий Фокус
@@ -207,6 +207,16 @@ Active mandate: Security / Encryption.
 - MCP поддерживает optional `passphrase_env` и structured `auth_failed` для wrong key.
 - Python SDK поддерживает `passphrase_env`, TypeScript SDK поддерживает `passphraseEnv`.
 
+Сделано в Mandate 3 sealed-page encryption package:
+
+- Sealed page payloads в `pages/*.mgp` теперь encrypted/authenticated для stores с key metadata.
+- Page frame headers остаются readable для file kind/version/codec/payload length/checksum handling.
+- Добавлены encrypted page codec ids для MessagePack и MessagePack+zstd page payloads без изменения page storage layout или `CandidatePageIndex` API.
+- Marker dictionary, candidate indexes, page catalog summaries и Markdown export остаются plaintext by design в этом package.
+- Sealed recall decrypt-ит page payloads только после session unlock; missing unlock возвращает `store_locked`, wrong key или corrupted AEAD payload возвращает `auth_failed`.
+- `validate --deep` и `rebuild-indexes` читают encrypted pages через тот же session unlock path и не silently skip encrypted pages.
+- MCP, Python SDK и TypeScript SDK encrypted sealed recall smokes покрыты через passphrase environment variables.
+
 Security design decisions:
 
 - Сначала защищать payload bytes: `hot/hot.mgl`, `hot/snapshot.mgs` и `pages/*.mgp`.
@@ -226,8 +236,7 @@ Crypto dependencies in use:
 
 Current limitations:
 
-- Сейчас шифруются только hot storage payloads: `hot/hot.mgl` и `hot/snapshot.mgs`.
-- Sealed page payload encryption ещё не реализована.
+- Hot storage payloads и sealed page payloads шифруются для encrypted stores с key metadata: `hot/hot.mgl`, `hot/snapshot.mgs` и `pages/*.mgp`.
 - `mge init --encrypted` без `--passphrase-env` всё ещё создаёт locked encrypted-mode marker/config state, но payload operations остаются locked, потому что нет key metadata.
 - Нет blind marker indexes или encrypted indexes.
 - Markdown export остаётся plaintext by design.
@@ -235,17 +244,19 @@ Current limitations:
 Latest Mandate 3 verification:
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 131 tests total.
+- `cargo test`: passed, 135 tests total.
 - CLI unencrypted smoke: passed.
-- CLI encrypted smoke: passed, включая отсутствие plaintext в hot log/snapshot и wrong-key failure.
-- MCP encrypted locked/wrong-key smoke: passed.
-- Python SDK encrypted smoke: passed.
-- TypeScript SDK encrypted smoke: passed.
+- CLI encrypted smoke: passed, включая отсутствие plaintext в hot log/snapshot/page и wrong-key failure.
+- Encrypted reopen sealed recall smoke: passed.
+- Encrypted validate/rebuild smoke: passed.
+- MCP encrypted sealed recall и wrong-key smoke: passed.
+- Python SDK encrypted sealed recall smoke: passed.
+- TypeScript SDK encrypted sealed recall smoke: passed.
 - Rust example smoke: passed.
 
 Next Mandate 3 step:
 
-- Добавить sealed page payload encryption следующим пакетом. Не шифровать indexes и не делать blind marker metadata в том же пакете без отдельного design.
+- Спроектировать encrypted indexes / blind marker metadata следующим пакетом. Не шифровать indexes, marker dictionary или page catalog summaries без отдельного design, потому что эти структуры определяют recall pruning и validation behavior.
 
 ## Сделано
 

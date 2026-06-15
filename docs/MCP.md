@@ -118,7 +118,7 @@ For SDK stability, recall also includes `result.context`, an adapter-level wrapp
 - `mge_rebuild_indexes`: `{ "store_path": "..." }`
 - `mge_export_markdown`: `{ "store_path": "...", "output_path": "optional/path.md" }`
 
-All store operations also accept optional `passphrase_env` for encrypted stores. The value is an environment variable name, not a passphrase.
+All store operations also accept optional `passphrase_env` for encrypted stores. The value is an environment variable name, not a passphrase. Encrypted sealed recall, deep validation, and rebuild-indexes use the same unlock path; the adapter never accepts raw passphrase values.
 
 ## Example
 
@@ -165,6 +165,7 @@ Replace `$STORE_PATH` with a created store path and `$EXPORT_PATH` with a Markdo
 - A missing or invalid store path returns `-32000` with `details.error_kind = "store_open_failed"`.
 - An encrypted-mode store opened without session unlock returns `-32000` with `details.error_kind = "store_locked"`.
 - A wrong passphrase or authenticated decryption failure returns `-32000` with `details.error_kind = "auth_failed"`.
+- Encrypted sealed page payloads require unlock for `mge_recall`, `mge_validate` with `deep: true`, and `mge_rebuild_indexes`.
 - `full_scope` without `scope` returns `-32000` with `details.error_kind = "invalid_request"`.
 - Invalid recall modes such as `sideways` are parameter errors, not core runtime failures.
 - `output_path` on `mge_export_markdown` is explicit; otherwise export goes to the store default `exports/memory.md`.

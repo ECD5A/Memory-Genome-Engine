@@ -77,8 +77,14 @@ fn main() {
 }
 
 fn run_mge(store: &Path, args: &[&str]) -> String {
-    let output = Command::new("cargo")
-        .args(["run", "-q", "-p", "mge-cli", "--bin", "mge", "--"])
+    let mut command = if let Ok(path) = std::env::var("MGE_BIN") {
+        Command::new(path)
+    } else {
+        let mut command = Command::new("cargo");
+        command.args(["run", "-q", "-p", "mge-cli", "--bin", "mge", "--"]);
+        command
+    };
+    let output = command
         .arg("--store")
         .arg(store)
         .args(args)

@@ -219,7 +219,7 @@ fn cli_encrypted_passphrase_env_encrypts_hot_files_and_unlocks() {
     assert_eq!(security["mode"], "encrypted");
     assert_eq!(security["payload_encryption"], true);
     assert_eq!(security["hot_payload_encryption"], true);
-    assert_eq!(security["sealed_page_payload_encryption"], false);
+    assert_eq!(security["sealed_page_payload_encryption"], true);
     assert_eq!(security["key_verification_configured"], true);
 
     run_mge(
@@ -269,6 +269,69 @@ fn cli_encrypted_passphrase_env_encrypts_hot_files_and_unlocks() {
         &store.join("hot").join("snapshot.mgs"),
         plaintext.as_bytes()
     ));
+
+    run_mge(&store, &["seal", "--passphrase-env", passphrase_env]);
+    let page_path = fs::read_dir(store.join("pages"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("mgp"))
+        .unwrap();
+    assert!(!file_contains_bytes(&page_path, plaintext.as_bytes()));
+
+    let sealed_recall = run_mge_json(
+        &store,
+        &[
+            "recall",
+            "secret phrase",
+            "--marker",
+            "tag:cli_encrypted",
+            "--passphrase-env",
+            passphrase_env,
+            "--json",
+        ],
+    );
+    assert_eq!(sealed_recall["relevant_memory"][0]["content"], plaintext);
+    let validation = run_mge_json(
+        &store,
+        &[
+            "validate",
+            "--deep",
+            "--passphrase-env",
+            passphrase_env,
+            "--json",
+        ],
+    );
+    assert_eq!(validation["ok"], true);
+
+    let locked_recall = run_mge_failure(&store, &["recall", "secret phrase", "--json"]);
+    assert!(String::from_utf8_lossy(&locked_recall.stderr).contains("store is locked"));
+    let locked_validate = run_mge_failure(&store, &["validate", "--deep", "--json"]);
+    assert!(String::from_utf8_lossy(&locked_validate.stderr).contains("store is locked"));
+
+    fs::remove_file(store.join("indexes").join("marker_index.mgi")).unwrap();
+    let locked_rebuild = run_mge_failure(&store, &["rebuild-indexes", "--json"]);
+    assert!(String::from_utf8_lossy(&locked_rebuild.stderr).contains("store is locked"));
+    let rebuild = run_mge_json(
+        &store,
+        &[
+            "rebuild-indexes",
+            "--passphrase-env",
+            passphrase_env,
+            "--json",
+        ],
+    );
+    assert_eq!(rebuild["pages_scanned"], 1);
+    let validation = run_mge_json(
+        &store,
+        &[
+            "validate",
+            "--deep",
+            "--passphrase-env",
+            passphrase_env,
+            "--json",
+        ],
+    );
+    assert_eq!(validation["ok"], true);
 
     let failed = run_mge_failure(
         &store,
@@ -698,6 +761,26 @@ fn mcp_server_reports_wrong_passphrase_as_auth_error() {
         &store,
         &["init", "--encrypted", "--passphrase-env", passphrase_env],
     );
+    run_mge(
+        &store,
+        &[
+            "remember",
+            "mcp encrypted sealed memory",
+            "--kind",
+            "project_fact",
+            "--scope",
+            "mcp-encrypted",
+            "--trust",
+            "user_confirmed",
+            "--sensitivity",
+            "public",
+            "--marker",
+            "tag:mcp_encrypted",
+            "--passphrase-env",
+            passphrase_env,
+        ],
+    );
+    run_mge(&store, &["seal", "--passphrase-env", passphrase_env]);
 
     let responses = run_mcp_json_lines(&[
         json!({
@@ -708,21 +791,58 @@ fn mcp_server_reports_wrong_passphrase_as_auth_error() {
         }),
         json!({
             "jsonrpc": "2.0",
+            "id": "recall",
+            "method": "mge_recall",
+            "params": {
+                "store_path": store.to_string_lossy().to_string(),
+                "query": "sealed memory",
+                "markers": ["tag:mcp_encrypted"],
+                "passphrase_env": passphrase_env
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "validate",
+            "method": "mge_validate",
+            "params": {
+                "store_path": store.to_string_lossy().to_string(),
+                "deep": true,
+                "passphrase_env": passphrase_env
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "rebuild",
+            "method": "mge_rebuild_indexes",
+            "params": {
+                "store_path": store.to_string_lossy().to_string(),
+                "passphrase_env": passphrase_env
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
             "id": "wrong",
-            "method": "mge_stats",
+            "method": "mge_recall",
             "params": { "store_path": store.to_string_lossy().to_string(), "passphrase_env": wrong_passphrase_env }
         }),
     ]);
 
-    assert_eq!(responses.len(), 2);
+    assert_eq!(responses.len(), 5);
     assert_eq!(responses[0]["result"]["tool"], "mge_stats");
     assert_eq!(
         responses[0]["result"]["stats"]["current_security_mode"],
         "encrypted"
     );
+    assert_eq!(responses[1]["result"]["tool"], "mge_recall");
+    assert_eq!(
+        responses[1]["result"]["context_packet"]["relevant_memory"][0]["content"],
+        "mcp encrypted sealed memory"
+    );
+    assert_eq!(responses[2]["result"]["validation"]["ok"], true);
+    assert_eq!(responses[3]["result"]["rebuild"]["pages_scanned"], 1);
 
-    let error = &responses[1]["error"];
-    assert_eq!(error["tool_name"], "mge_stats");
+    let error = &responses[4]["error"];
+    assert_eq!(error["tool_name"], "mge_recall");
     assert_eq!(error["details"]["error_kind"], "auth_failed");
     assert!(error["message"]
         .as_str()
@@ -847,6 +967,7 @@ fn python_agent_host_example_smoke() {
 
     let output = Command::new("python")
         .arg(repo_root().join("examples").join("python_agent_host.py"))
+        .env("MGE_BIN", env!("CARGO_BIN_EXE_mge"))
         .current_dir(repo_root())
         .output()
         .unwrap();
@@ -858,6 +979,70 @@ fn python_agent_host_example_smoke() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("python agent host example ok"));
+}
+
+#[test]
+fn python_sdk_encrypted_sealed_recall_smoke() {
+    if !command_available("python") {
+        eprintln!("python not found; skipping Python SDK encrypted smoke");
+        return;
+    }
+
+    let script = r#"
+import tempfile
+import os
+from pathlib import Path
+from mge_sdk import MemoryGenomeClient
+
+repo = Path.cwd()
+store = Path(tempfile.mkdtemp()) / ".memory-genome"
+plain = b"python sdk encrypted sealed memory"
+client = MemoryGenomeClient(
+    str(store),
+    command=[os.environ["MGE_BIN"]],
+    cwd=repo,
+    passphrase_env="MGE_TEST_PY_SDK_SEALED_PASSPHRASE",
+)
+client.init(encrypted=True)
+client.remember(
+    plain.decode(),
+    kind="project_fact",
+    scope="python-sdk-encrypted",
+    trust="user_confirmed",
+    sensitivity="public",
+    markers=["tag:python_sdk_encrypted_sealed"],
+)
+client.seal()
+packet = client.recall("sealed memory", markers=["tag:python_sdk_encrypted_sealed"])
+assert packet["relevant_memory"][0]["content"] == plain.decode()
+page = next((store / "pages").glob("*.mgp"))
+assert plain not in page.read_bytes()
+client.validate(deep=True)
+print("python sdk encrypted sealed smoke ok")
+"#;
+
+    let output = Command::new("python")
+        .arg("-c")
+        .arg(script)
+        .env("PYTHONPATH", repo_root().join("sdk").join("python"))
+        .env(
+            "MGE_TEST_PY_SDK_SEALED_PASSPHRASE",
+            "python sdk sealed passphrase",
+        )
+        .env("MGE_BIN", env!("CARGO_BIN_EXE_mge"))
+        .current_dir(repo_root())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "python SDK encrypted sealed smoke failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("python sdk encrypted sealed smoke ok")
+    );
 }
 
 #[test]
@@ -873,6 +1058,7 @@ fn typescript_agent_host_example_smoke() {
                 .join("examples")
                 .join("typescript_agent_host.ts"),
         )
+        .env("MGE_BIN", env!("CARGO_BIN_EXE_mge"))
         .current_dir(repo_root())
         .output()
         .unwrap();
@@ -892,6 +1078,78 @@ fn typescript_agent_host_example_smoke() {
         stderr
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("typescript agent host example ok"));
+}
+
+#[test]
+fn typescript_sdk_encrypted_sealed_recall_smoke() {
+    if !command_available("node") {
+        eprintln!("node not found; skipping TypeScript SDK encrypted smoke");
+        return;
+    }
+
+    let script = r#"
+import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { MemoryGenomeClient } from "./sdk/typescript/src/mge.ts";
+
+const store = join(mkdtempSync(join(tmpdir(), "mge-ts-sdk-sealed-")), ".memory-genome");
+const plain = "typescript sdk encrypted sealed memory";
+const client = new MemoryGenomeClient(store, {
+  command: [process.env.MGE_BIN],
+  cwd: process.cwd(),
+  passphraseEnv: "MGE_TEST_TS_SDK_SEALED_PASSPHRASE",
+});
+client.init("debug", { encrypted: true });
+client.remember(plain, {
+  kind: "project_fact",
+  scope: "typescript-sdk-encrypted",
+  trust: "user_confirmed",
+  sensitivity: "public",
+  markers: ["tag:typescript_sdk_encrypted_sealed"],
+});
+client.seal();
+const packet = client.recall("sealed memory", { markers: ["tag:typescript_sdk_encrypted_sealed"] });
+if (packet.relevant_memory[0].content !== plain) throw new Error("encrypted sealed recall failed");
+const pageName = readdirSync(join(store, "pages")).find((name) => name.endsWith(".mgp"));
+if (!pageName) throw new Error("missing page file");
+if (readFileSync(join(store, "pages", pageName)).includes(Buffer.from(plain))) {
+  throw new Error("encrypted page contains plaintext");
+}
+client.validate({ deep: true });
+console.log("typescript sdk encrypted sealed smoke ok");
+"#;
+
+    let output = Command::new("node")
+        .arg("--input-type=module")
+        .arg("-e")
+        .arg(script)
+        .env(
+            "MGE_TEST_TS_SDK_SEALED_PASSPHRASE",
+            "typescript sdk sealed passphrase",
+        )
+        .env("MGE_BIN", env!("CARGO_BIN_EXE_mge"))
+        .current_dir(repo_root())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success()
+        && (stderr.contains("ERR_UNKNOWN_FILE_EXTENSION")
+            || stderr.contains("Unknown file extension")
+            || stderr.contains("TypeScript"))
+    {
+        eprintln!("node runtime does not support TypeScript stripping; skipping TypeScript SDK encrypted smoke");
+        return;
+    }
+
+    assert!(
+        output.status.success(),
+        "typescript SDK encrypted sealed smoke failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr
+    );
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .contains("typescript sdk encrypted sealed smoke ok"));
 }
 
 #[test]
@@ -922,6 +1180,7 @@ fn rust_agent_host_cli_example_smoke() {
     );
 
     let output = Command::new(&exe)
+        .env("MGE_BIN", env!("CARGO_BIN_EXE_mge"))
         .current_dir(repo_root())
         .output()
         .unwrap();

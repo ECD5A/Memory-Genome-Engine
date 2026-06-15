@@ -8,9 +8,12 @@ import { MemoryGenomeClient } from "../sdk/typescript/src/mge.ts";
 
 const root = process.cwd();
 const storePath = join(mkdtempSync(join(tmpdir(), "mge-typescript-example-")), ".memory-genome");
+const command = process.env.MGE_BIN
+  ? [process.env.MGE_BIN]
+  : ["cargo", "run", "-q", "-p", "mge-cli", "--bin", "mge", "--"];
 
 const client = new MemoryGenomeClient(storePath, {
-  command: ["cargo", "run", "-q", "-p", "mge-cli", "--bin", "mge", "--"],
+  command,
   cwd: root,
 });
 

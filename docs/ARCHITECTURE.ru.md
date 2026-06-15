@@ -301,11 +301,10 @@ Page pipeline подготовлен под:
 encode page -> compress page -> encrypt page -> write page
 ```
 
-Текущий security status: unencrypted stores всё ещё используют честную pass-through реализацию `NoSecurity`. Encrypted stores с key metadata уже authenticate/encrypt hot payloads в `hot/hot.mgl` и `hot/snapshot.mgs`; sealed pages пока plaintext до следующего security package. Threat model и implementation status Мандата 3 описаны в [Security model](SECURITY.ru.md).
+Текущий security status: unencrypted stores всё ещё используют честную pass-through реализацию `NoSecurity`. Encrypted stores с key metadata authenticate/encrypt hot payloads в `hot/hot.mgl`, checkpoint payloads в `hot/snapshot.mgs` и sealed page payloads в `pages/*.mgp`. Page frame headers, marker dictionary, candidate indexes, page catalog summaries и Markdown export остаются plaintext by design в этом package. Threat model и implementation status Мандата 3 описаны в [Security model](SECURITY.ru.md).
 
 Future security layers:
 
-- page-level encryption
 - session-bound unlock для encrypted stores
 - page keys
 - encrypted indexes

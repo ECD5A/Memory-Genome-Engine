@@ -188,7 +188,7 @@ SDK targets: `protocol_version = mge-jsonrpc-1` и `integration_schema_version =
 - Если SDK не находит `mge`, передайте `command=["cargo", "run", "-q", "-p", "mge-cli", "--bin", "mge", "--"]` и `cwd=repo_root`.
 - Если TypeScript type checking недоступен, запускайте runtime smoke: `node examples/typescript_basic_usage.ts`; `tsc` для локального wrapper опционален.
 - Если JSON-RPC call завершился ошибкой, смотрите `error.details.error_kind`: invalid args дают `invalid_params`, missing store даёт `store_open_failed`, encrypted store без session unlock даёт `store_locked`, wrong passphrase даёт `auth_failed`, `full_scope` без scope даёт `invalid_request`, malformed JSON даёт `parse_error`.
-- Security note: SDK передают только имя passphrase environment variable. Они не должны логировать passphrase или raw key material. Crypto и storage остаются в Rust core/CLI.
+- Security note: SDK передают только имя passphrase environment variable. Они не должны логировать passphrase или raw key material. Crypto и storage остаются в Rust core/CLI. Encrypted sealed recall, `validate(deep=True)` и `rebuild_indexes()` требуют тот же passphrase environment path, что и hot-memory operations.
 - Не читайте и не меняйте `.memory-genome` files из SDK. SDK являются process wrappers вокруг Rust engine.
 
 ## Policy

@@ -393,7 +393,7 @@ fn encrypted_store_with_passphrase_encrypts_hot_log_snapshot_and_recovers() {
     assert_eq!(security.mode, SecurityMode::Encrypted);
     assert!(security.payload_encryption);
     assert!(security.hot_payload_encryption);
-    assert!(!security.sealed_page_payload_encryption);
+    assert!(security.sealed_page_payload_encryption);
     assert!(security.key_verification_configured);
     assert!(security.session_unlock_required);
     assert!(security.metadata_plaintext);
@@ -430,11 +430,25 @@ fn encrypted_store_with_passphrase_encrypts_hot_log_snapshot_and_recovers() {
     assert_eq!(seal.hot_cells_sealed, 1);
     assert!(!snapshot_path.exists());
     assert_eq!(reopened.stats().unwrap().hot_cells, 0);
+    let inspect = reopened.inspect().unwrap();
+    let page_file = inspect.page_catalog.pages[0].file.clone();
+    let page_path = dir.path().join("pages").join(&page_file);
+    let page_frame = binary::decode_frame(&fs::read(&page_path).unwrap(), FileKind::Page).unwrap();
+    assert_eq!(page_frame.codec, CodecId::MessagePackEncrypted);
+    assert!(!file_contains_bytes(&page_path, plaintext.as_bytes()));
     let mut request = RecallRequest::new("secret phrase");
     request.markers = vec!["tag:encrypted_hot".to_string()];
     let sealed_packet = reopened.recall(request).unwrap();
     assert_eq!(sealed_packet.relevant_memory.len(), 1);
     assert_eq!(sealed_packet.relevant_memory[0].content, plaintext);
+
+    drop(reopened);
+    let reopened = MemoryEngine::open_at_with_passphrase(dir.path(), Some(passphrase)).unwrap();
+    let mut request = RecallRequest::new("secret phrase");
+    request.markers = vec!["tag:encrypted_hot".to_string()];
+    let reopened_packet = reopened.recall(request).unwrap();
+    assert_eq!(reopened_packet.relevant_memory.len(), 1);
+    assert_eq!(reopened_packet.relevant_memory[0].content, plaintext);
 
     let wrong_key_err = MemoryEngine::open_at_with_passphrase(dir.path(), Some("wrong key"))
         .unwrap_err()
@@ -443,6 +457,113 @@ fn encrypted_store_with_passphrase_encrypts_hot_log_snapshot_and_recovers() {
 
     let locked_err = MemoryEngine::open_at(dir.path()).unwrap_err().to_string();
     assert!(locked_err.contains("store is locked"));
+}
+
+#[test]
+fn encrypted_sealed_pages_validate_and_rebuild_with_correct_key() {
+    let dir = tempdir().unwrap();
+    let passphrase = "encrypted validate rebuild passphrase";
+    let mut engine = MemoryEngine::init_with_options_and_passphrase(
+        dir.path(),
+        InitOptions {
+            page_codec: PageCodecKind::MessagePack,
+            compression: CompressionKind::Zstd,
+            index_kind: IndexKind::ExactMarkerPage,
+            page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Encrypted,
+        },
+        Some(passphrase),
+    )
+    .unwrap();
+    remember_text_cell(
+        &mut engine,
+        "encrypted-rebuild",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "encrypted sealed rebuild memory",
+        &["tag:encrypted_rebuild".to_string()],
+    );
+    engine.seal().unwrap();
+
+    let inspect = engine.inspect().unwrap();
+    let page_path = dir
+        .path()
+        .join("pages")
+        .join(&inspect.page_catalog.pages[0].file);
+    let page_frame = binary::decode_frame(&fs::read(&page_path).unwrap(), FileKind::Page).unwrap();
+    assert_eq!(page_frame.codec, CodecId::MessagePackZstdEncrypted);
+    assert!(!file_contains_bytes(
+        &page_path,
+        b"encrypted sealed rebuild memory"
+    ));
+
+    assert!(engine.validate_deep().unwrap().ok);
+    fs::remove_file(dir.path().join("indexes").join("marker_index.mgi")).unwrap();
+    assert!(!engine.validate_deep().unwrap().ok);
+    let rebuild = engine.rebuild_catalog_and_indexes().unwrap();
+    assert_eq!(rebuild.pages_scanned, 1);
+    assert!(engine.validate_deep().unwrap().ok);
+
+    drop(engine);
+    let reopened = MemoryEngine::open_at_with_passphrase(dir.path(), Some(passphrase)).unwrap();
+    let mut request = RecallRequest::new("sealed rebuild");
+    request.markers = vec!["tag:encrypted_rebuild".to_string()];
+    let packet = reopened.recall(request).unwrap();
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert_eq!(
+        packet.relevant_memory[0].content,
+        "encrypted sealed rebuild memory"
+    );
+}
+
+#[test]
+fn corrupted_encrypted_sealed_page_fails_deep_validation() {
+    let dir = tempdir().unwrap();
+    let passphrase = "encrypted corrupt page passphrase";
+    let mut engine = MemoryEngine::init_with_options_and_passphrase(
+        dir.path(),
+        InitOptions {
+            page_codec: PageCodecKind::MessagePack,
+            compression: CompressionKind::None,
+            index_kind: IndexKind::ExactMarkerPage,
+            page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Encrypted,
+        },
+        Some(passphrase),
+    )
+    .unwrap();
+    remember_text_cell(
+        &mut engine,
+        "encrypted-corrupt",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "encrypted sealed corruption memory",
+        &["tag:encrypted_corrupt".to_string()],
+    );
+    engine.seal().unwrap();
+
+    let inspect = engine.inspect().unwrap();
+    let page_path = dir
+        .path()
+        .join("pages")
+        .join(&inspect.page_catalog.pages[0].file);
+    let page_frame = binary::decode_frame(&fs::read(&page_path).unwrap(), FileKind::Page).unwrap();
+    assert_eq!(page_frame.codec, CodecId::MessagePackEncrypted);
+    let mut envelope: mge_core::security::EncryptedPayload =
+        rmp_serde::from_slice(&page_frame.payload).unwrap();
+    envelope.ciphertext[0] ^= 0x7f;
+    let corrupted_payload = rmp_serde::to_vec_named(&envelope).unwrap();
+    let corrupted_frame =
+        binary::encode_frame(FileKind::Page, page_frame.codec, &corrupted_payload).unwrap();
+    fs::write(&page_path, corrupted_frame).unwrap();
+
+    let report = engine.validate_deep().unwrap();
+    assert!(!report.ok);
+    assert!(report.errors.iter().any(|error| {
+        error.contains("failed to read page") && error.contains("authentication failed")
+    }));
 }
 
 #[test]

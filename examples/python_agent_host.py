@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import os
 from pathlib import Path
 
 
@@ -11,11 +12,17 @@ sys.path.insert(0, str(ROOT / "sdk" / "python"))
 from mge_sdk import MemoryGenomeClient  # noqa: E402
 
 
+def mge_command() -> list[str]:
+    if path := os.environ.get("MGE_BIN"):
+        return [path]
+    return ["cargo", "run", "-q", "-p", "mge-cli", "--bin", "mge", "--"]
+
+
 def main() -> None:
     store_path = Path(tempfile.mkdtemp(prefix="mge-python-agent-host-")) / ".memory-genome"
     client = MemoryGenomeClient(
         store_path,
-        command=["cargo", "run", "-q", "-p", "mge-cli", "--bin", "mge", "--"],
+        command=mge_command(),
         cwd=ROOT,
     )
 

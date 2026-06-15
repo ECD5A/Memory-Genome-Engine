@@ -118,7 +118,7 @@ Output содержит `ContextPacket` в `result.context_packet`.
 - `mge_rebuild_indexes`: `{ "store_path": "..." }`
 - `mge_export_markdown`: `{ "store_path": "...", "output_path": "optional/path.md" }`
 
-Все store operations также принимают optional `passphrase_env` для encrypted stores. Значение - это имя environment variable, а не passphrase.
+Все store operations также принимают optional `passphrase_env` для encrypted stores. Значение - это имя environment variable, а не passphrase. Encrypted sealed recall, deep validation и rebuild-indexes используют тот же unlock path; adapter никогда не принимает raw passphrase values.
 
 ## Пример
 
@@ -165,6 +165,7 @@ examples/mcp_agent_session.jsonl
 - Missing или invalid store path возвращает `-32000` с `details.error_kind = "store_open_failed"`.
 - Encrypted-mode store без session unlock возвращает `-32000` с `details.error_kind = "store_locked"`.
 - Wrong passphrase или authenticated decryption failure возвращает `-32000` с `details.error_kind = "auth_failed"`.
+- Encrypted sealed page payloads требуют unlock для `mge_recall`, `mge_validate` с `deep: true` и `mge_rebuild_indexes`.
 - `full_scope` без `scope` возвращает `-32000` с `details.error_kind = "invalid_request"`.
 - Invalid recall modes вроде `sideways` являются parameter errors, а не core runtime failures.
 - `output_path` у `mge_export_markdown` явный; без него export идёт в default `exports/memory.md` внутри store.

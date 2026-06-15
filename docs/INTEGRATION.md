@@ -93,7 +93,7 @@ Encrypted stores use the same integration paths. The host passes only the enviro
 - Python SDK: `MemoryGenomeClient(..., passphrase_env="MGE_PASSPHRASE")`
 - TypeScript SDK: `new MemoryGenomeClient(..., { passphraseEnv: "MGE_PASSPHRASE" })`
 
-The passphrase value must stay outside protocol payloads and logs. Current encryption covers `hot/hot.mgl` and `hot/snapshot.mgs`; sealed pages and indexes are planned separately.
+The passphrase value must stay outside protocol payloads and logs. Current encryption covers `hot/hot.mgl`, `hot/snapshot.mgs`, and sealed page payloads in `pages/*.mgp`. Indexes, marker dictionary, catalog summaries, and Markdown export remain plaintext by design.
 
 ## Local Developer Setup
 
@@ -149,7 +149,7 @@ These fields version only the MCP/SDK protocol contract. They do not change the 
 
 - `mge-mcp-server` is an MCP-ready local JSON-RPC adapter, not a full external MCP SDK implementation.
 - SDKs are thin local wrappers around `mge`; package publishing is not done yet.
-- Sealed page encryption, vector DB, UI, and remote service hosting are outside the current integration layer.
+- Encrypted indexes/blind marker metadata, vector DB, UI, and remote service hosting are outside the current integration layer.
 
 ## Troubleshooting
 

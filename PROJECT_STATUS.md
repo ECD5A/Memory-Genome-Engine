@@ -43,7 +43,7 @@ JSON policy:
 | v0.2 storage/index foundation | Done / hardening | Binary runtime storage layout, MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in, and validation hardening are done. |
 | v0.2 remaining | Closed | Benchmark foundation is ready; further core cleanup is benchmark-gated. |
 | v0.3 SDK/MCP | In progress | Mandate 2 integration foundation is active: MCP-ready adapter and thin Python/TypeScript wrappers are present. |
-| v0.4 security | In progress | Mandate 3 has threat model plus real session unlock and authenticated hot log/snapshot encryption; sealed pages/blind markers remain future work. |
+| v0.4 security | In progress | Mandate 3 has threat model plus real session unlock and authenticated hot log/snapshot/sealed-page payload encryption; encrypted indexes/blind markers remain future work. |
 | v0.5 safety/search | Partial foundation | Policy/capabilities exist; poisoning/conflict/vector reranking are not started. |
 
 ## Current Focus
@@ -207,6 +207,16 @@ Done in Mandate 3 hot-encryption package:
 - Added MCP optional `passphrase_env` support and `auth_failed` structured error classification.
 - Added Python SDK `passphrase_env` and TypeScript SDK `passphraseEnv` pass-through.
 
+Done in Mandate 3 sealed-page encryption package:
+
+- Encrypted/authenticated sealed page payloads in `pages/*.mgp` for stores initialized with key metadata.
+- Preserved readable page frame headers for file kind/version/codec/payload length/checksum handling.
+- Added encrypted page codec ids for MessagePack and MessagePack+zstd page payloads without changing page storage layout or the `CandidatePageIndex` API.
+- Kept marker dictionary, candidate indexes, page catalog summaries, and Markdown export plaintext by design in this package.
+- Sealed recall decrypts page payloads only after session unlock; missing unlock returns `store_locked`, wrong key or corrupted AEAD payload returns `auth_failed`.
+- `validate --deep` and `rebuild-indexes` read encrypted pages with the same session unlock path and do not silently skip encrypted pages.
+- MCP, Python SDK, and TypeScript SDK encrypted sealed recall smokes are covered through passphrase environment variables.
+
 Security design decisions:
 
 - Protect payload bytes first: `hot/hot.mgl`, `hot/snapshot.mgs`, and `pages/*.mgp`.
@@ -226,8 +236,7 @@ Crypto dependencies in use:
 
 Current limitations:
 
-- Only hot storage payloads are encrypted now: `hot/hot.mgl` and `hot/snapshot.mgs`.
-- Sealed page payload encryption is not implemented yet.
+- Hot storage payloads and sealed page payloads are encrypted for encrypted stores with key metadata: `hot/hot.mgl`, `hot/snapshot.mgs`, and `pages/*.mgp`.
 - No blind marker indexes or encrypted indexes yet.
 - Markdown export remains plaintext by design.
 - `mge init --encrypted` without `--passphrase-env` still creates a locked encrypted-mode marker/config state, but payload operations remain locked because no key metadata exists.
@@ -235,17 +244,19 @@ Current limitations:
 Latest Mandate 3 verification:
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 131 tests total.
+- `cargo test`: passed, 135 tests total.
 - CLI unencrypted smoke: passed.
-- CLI encrypted smoke: passed, including hot log/snapshot plaintext absence and wrong-key failure.
-- MCP encrypted locked/wrong-key smoke: passed.
-- Python SDK encrypted smoke: passed.
-- TypeScript SDK encrypted smoke: passed.
+- CLI encrypted smoke: passed, including hot log/snapshot/page plaintext absence and wrong-key failure.
+- Encrypted reopen sealed recall smoke: passed.
+- Encrypted validate/rebuild smoke: passed.
+- MCP encrypted sealed recall and wrong-key smoke: passed.
+- Python SDK encrypted sealed recall smoke: passed.
+- TypeScript SDK encrypted sealed recall smoke: passed.
 - Rust example smoke: passed.
 
 Next Mandate 3 step:
 
-- Add sealed page payload encryption next. Do not encrypt indexes or blind marker metadata in the same package without a separate design.
+- Design encrypted indexes / blind marker metadata next. Do not encrypt indexes, marker dictionary, or page catalog summaries without a separate design because they define recall pruning and validation behavior.
 
 ## Done
 
