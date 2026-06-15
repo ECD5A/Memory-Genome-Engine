@@ -47,6 +47,7 @@ python -m pip install -e sdk/python
 ```bash
 python -c "import mge_sdk; print(mge_sdk.MemoryGenomeClient)"
 python examples/python_basic_usage.py
+python examples/python_agent_host.py
 ```
 
 ## Errors

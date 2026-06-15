@@ -241,7 +241,7 @@ tests/
 ## Текущие Ограничения
 
 - Mandate 1 core закрыт: storage, L1 Hot RAM, sealed pages, indexes, validation/rebuild, CLI и benchmark foundation готовы.
-- Mandate 2 integration foundation активен: MCP-ready adapter и thin Python/TypeScript SDK wrappers уже есть.
+- Mandate 2 local integration layer готов к закрытию: MCP-ready JSON-RPC adapter, thin Python/TypeScript SDK wrappers, host examples и compatibility smokes уже есть.
 - Большой user-provided corpus всё ещё полезен перед любым дальнейшим scoring/filtering cleanup.
 - Нет GUI.
 - Нет chatbot.

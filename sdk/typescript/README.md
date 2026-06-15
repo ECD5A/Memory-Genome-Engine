@@ -38,6 +38,7 @@ No package has been published and no dependency install is required for the exam
 
 ```bash
 npm run smoke
+node ../../examples/typescript_agent_host.ts
 ```
 
 ## Errors

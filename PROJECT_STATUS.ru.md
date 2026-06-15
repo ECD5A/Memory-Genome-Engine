@@ -133,6 +133,50 @@ Mandate 2 constraints сохранены:
 - Оставляем текущий versioned JSON-RPC stdin/stdout adapter основной local MCP-ready поверхностью; full external MCP SDK dependency откладывается до конкретной host integration необходимости.
 - Следующий полезный пакет: прогнать JSON-RPC adapter против реального local agent runner/host harness или добавить package-level release checks для thin SDK без изменения core.
 
+## Mandate 2 Closure Status
+
+Mandate 2 готов к закрытию как local agent integration-ready layer.
+
+Готово:
+
+- MCP adapter: `mge-mcp-server` является основной local MCP-ready поверхностью через JSON-RPC over stdin/stdout.
+- Protocol contract: `protocol_version = mge-jsonrpc-1`, `integration_schema_version = 1`.
+- Tool schema: `mge_schema` отдаёт contracts для remember, recall, seal, checkpoint, stats, validate, rebuild indexes и Markdown export.
+- Error model: structured JSON-RPC errors содержат `code`, `message`, `tool_name`, `recoverable`, protocol/schema versions и `details.error_kind`.
+- Python SDK: thin wrapper over Rust CLI с typed request/response surfaces, `py.typed`, local README, import smoke, agent-host smoke и wheel metadata check без публикации.
+- TypeScript SDK: thin wrapper over Rust CLI с typed interfaces, `types`/typed export metadata, local README, runtime smoke и agent-host smoke. `tsc` остаётся optional и в текущем окружении недоступен.
+- Examples: CLI/Rust host, Python host, TypeScript host, MCP JSONL session transcript и agent workflow docs есть.
+- Docs: README, Integration, MCP, SDK и project status описывают local host pattern, lifecycle, recall modes, schema versioning и limitations.
+
+Последняя Mandate 2 проверка:
+
+- `cargo fmt`: passed.
+- `cargo test`: passed, 124 tests total.
+- CLI smoke: passed.
+- MCP workflow smoke: passed.
+- Python SDK smoke: passed.
+- TypeScript SDK runtime smoke: passed.
+- Rust example smoke: passed.
+- Python wheel metadata check: passed через `python -m pip wheel --no-deps --no-build-isolation sdk/python`.
+- TypeScript compile check: skipped, потому что `tsc` не установлен.
+
+Намеренно не реализовано:
+
+- Нет external MCP SDK dependency.
+- Нет package publishing.
+- Нет PyO3/maturin Python native binding.
+- Нет UI, encryption, vector DB, новых filters, storage layout changes, codec changes или recall semantic changes.
+
+Known limitations:
+
+- MCP adapter является MCP-ready JSON-RPC stdin/stdout, а не full external MCP SDK transport/server implementation.
+- Python и TypeScript SDK вызывают Rust CLI; это integration wrappers, не альтернативные engines.
+- TypeScript source execution требует Node runtime с TypeScript stripping или локальный TypeScript toolchain, выбранный host-ом.
+
+Recommended next mandate:
+
+- Mandate 3 должен быть явным product decision: либо real host integration с выбранным agent runner/MCP host, либо security/session work. Core optimization не возобновлять без benchmark или integration blocker.
+
 ## Сделано
 
 - Git-репозиторий инициализирован.

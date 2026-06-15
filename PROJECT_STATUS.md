@@ -133,6 +133,50 @@ Next Mandate 2 step:
 - Keep the current versioned JSON-RPC stdin/stdout adapter as the main local MCP-ready surface; defer any full external MCP SDK dependency until a concrete host integration needs it.
 - Next useful package: run the JSON-RPC adapter against a real local agent runner/host harness or add package-level release checks for the thin SDKs, without changing the core.
 
+## Mandate 2 Closure Status
+
+Mandate 2 is ready to close as a local agent integration-ready layer.
+
+Ready:
+
+- MCP adapter: `mge-mcp-server` is the primary local MCP-ready surface using JSON-RPC over stdin/stdout.
+- Protocol contract: `protocol_version = mge-jsonrpc-1`, `integration_schema_version = 1`.
+- Tool schema: `mge_schema` exposes remember, recall, seal, checkpoint, stats, validate, rebuild indexes, and Markdown export contracts.
+- Error model: structured JSON-RPC errors include `code`, `message`, `tool_name`, `recoverable`, protocol/schema versions, and `details.error_kind`.
+- Python SDK: thin wrapper over the Rust CLI with typed request/response surfaces, `py.typed`, local README, import smoke, agent-host smoke, and wheel metadata check passing without publishing.
+- TypeScript SDK: thin wrapper over the Rust CLI with typed interfaces, `types`/typed export metadata, local README, runtime smoke, and agent-host smoke. `tsc` remains optional and was not available in the current environment.
+- Examples: CLI/Rust host, Python host, TypeScript host, MCP JSONL session transcript, and agent workflow docs are present.
+- Docs: README, Integration, MCP, SDK, and project status documents describe the local host pattern, lifecycle, recall modes, schema versioning, and limitations.
+
+Latest Mandate 2 verification:
+
+- `cargo fmt`: passed.
+- `cargo test`: passed, 124 tests total.
+- CLI smoke: passed.
+- MCP workflow smoke: passed.
+- Python SDK smoke: passed.
+- TypeScript SDK runtime smoke: passed.
+- Rust example smoke: passed.
+- Python wheel metadata check: passed with `python -m pip wheel --no-deps --no-build-isolation sdk/python`.
+- TypeScript compile check: skipped because `tsc` was not installed.
+
+Intentionally not implemented:
+
+- No external MCP SDK dependency.
+- No package publishing.
+- No PyO3/maturin Python native binding.
+- No UI, encryption, vector DB, new filters, storage layout changes, codec changes, or recall semantic changes.
+
+Known limitations:
+
+- The MCP adapter is MCP-ready JSON-RPC stdin/stdout, not a full external MCP SDK transport/server implementation.
+- Python and TypeScript SDKs shell out to the Rust CLI; they are integration wrappers, not alternate engines.
+- TypeScript source execution requires a Node runtime that supports TypeScript stripping, or a local TypeScript toolchain chosen by the host.
+
+Recommended next mandate:
+
+- Mandate 3 should be an explicit product decision: either real host integration with a chosen agent runner/MCP host, or security/session work. Do not restart core optimization without a benchmark or integration blocker.
+
 ## Done
 
 - Repository initialized with git.

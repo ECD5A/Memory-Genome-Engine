@@ -241,7 +241,7 @@ tests/
 ## Current Limits
 
 - Mandate 1 core is closed: storage, L1 Hot RAM, sealed pages, indexes, validation/rebuild, CLI, and benchmark foundation are ready.
-- Mandate 2 integration foundation is active: MCP-ready adapter and thin Python/TypeScript SDK wrappers are present.
+- Mandate 2 local integration layer is closure-ready: MCP-ready JSON-RPC adapter, thin Python/TypeScript SDK wrappers, host examples, and compatibility smokes are present.
 - A larger user-provided corpus is still useful before any further scoring/filtering cleanup.
 - No GUI.
 - No chatbot.
