@@ -1,5 +1,3 @@
-declare const process: any;
-
 import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";

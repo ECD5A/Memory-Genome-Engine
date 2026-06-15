@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mge-sdk"
+version = "0.2.0"
+description = "Thin Python wrapper for the Memory Genome Engine Rust CLI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "ECD5A" }]
+keywords = ["memory", "agents", "cli", "mcp"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Software Development :: Libraries",
+]
+
+[tool.setuptools]
+packages = ["mge_sdk"]
+
+[tool.setuptools.package-data]
+mge_sdk = ["py.typed"]

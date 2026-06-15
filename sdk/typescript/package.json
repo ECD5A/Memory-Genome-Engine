@@ -1,0 +1,16 @@
+{
+  "name": "@memory-genome/engine-sdk",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Thin TypeScript wrapper for the Memory Genome Engine Rust CLI",
+  "type": "module",
+  "exports": {
+    ".": "./src/mge.ts"
+  },
+  "scripts": {
+    "example": "node ../../examples/typescript_basic_usage.ts",
+    "smoke": "node ../../examples/typescript_basic_usage.ts",
+    "check": "tsc --noEmit --project tsconfig.json"
+  },
+  "license": "MIT"
+}

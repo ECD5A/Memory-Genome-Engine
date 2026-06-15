@@ -2,5 +2,10 @@
 /.memory-genome/
 __pycache__/
 *.py[cod]
+*.egg-info/
+.venv/
+node_modules/
+dist/
+*.tsbuildinfo
 **/*.rs.bk
 desktop.ini
