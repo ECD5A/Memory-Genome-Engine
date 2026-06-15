@@ -371,6 +371,81 @@ fn encrypted_store_init_records_security_mode_and_locks_payload_operations() {
 }
 
 #[test]
+fn encrypted_store_with_passphrase_encrypts_hot_log_snapshot_and_recovers() {
+    let dir = tempdir().unwrap();
+    let passphrase = "correct hot layer passphrase";
+    let plaintext = "encrypted hot memory secret phrase";
+    let mut engine = MemoryEngine::init_with_options_and_passphrase(
+        dir.path(),
+        InitOptions {
+            page_codec: PageCodecKind::MessagePack,
+            compression: CompressionKind::None,
+            index_kind: IndexKind::ExactMarkerPage,
+            page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Encrypted,
+        },
+        Some(passphrase),
+    )
+    .unwrap();
+
+    let security = engine.security_config();
+    assert_eq!(security.mode, SecurityMode::Encrypted);
+    assert!(security.payload_encryption);
+    assert!(security.hot_payload_encryption);
+    assert!(!security.sealed_page_payload_encryption);
+    assert!(security.key_verification_configured);
+    assert!(security.session_unlock_required);
+    assert!(security.metadata_plaintext);
+
+    remember_text_cell(
+        &mut engine,
+        "encrypted-hot",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        plaintext,
+        &["tag:encrypted_hot".to_string()],
+    );
+    let mut request = RecallRequest::new("secret phrase");
+    request.markers = vec!["tag:encrypted_hot".to_string()];
+    assert_eq!(engine.recall(request).unwrap().relevant_memory.len(), 1);
+
+    engine.checkpoint().unwrap();
+    let hot_path = dir.path().join("hot").join("hot.mgl");
+    let snapshot_path = dir.path().join("hot").join("snapshot.mgs");
+    assert!(hot_path.is_file());
+    assert!(snapshot_path.is_file());
+    assert!(!file_contains_bytes(&hot_path, plaintext.as_bytes()));
+    assert!(!file_contains_bytes(&snapshot_path, plaintext.as_bytes()));
+
+    drop(engine);
+    let mut reopened = MemoryEngine::open_at_with_passphrase(dir.path(), Some(passphrase)).unwrap();
+    let mut request = RecallRequest::new("secret phrase");
+    request.markers = vec!["tag:encrypted_hot".to_string()];
+    let packet = reopened.recall(request).unwrap();
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert_eq!(packet.relevant_memory[0].content, plaintext);
+
+    let seal = reopened.seal().unwrap();
+    assert_eq!(seal.hot_cells_sealed, 1);
+    assert!(!snapshot_path.exists());
+    assert_eq!(reopened.stats().unwrap().hot_cells, 0);
+    let mut request = RecallRequest::new("secret phrase");
+    request.markers = vec!["tag:encrypted_hot".to_string()];
+    let sealed_packet = reopened.recall(request).unwrap();
+    assert_eq!(sealed_packet.relevant_memory.len(), 1);
+    assert_eq!(sealed_packet.relevant_memory[0].content, plaintext);
+
+    let wrong_key_err = MemoryEngine::open_at_with_passphrase(dir.path(), Some("wrong key"))
+        .unwrap_err()
+        .to_string();
+    assert!(wrong_key_err.contains("authentication failed"));
+
+    let locked_err = MemoryEngine::open_at(dir.path()).unwrap_err().to_string();
+    assert!(locked_err.contains("store is locked"));
+}
+
+#[test]
 fn init_creates_binary_storage_layout() {
     let dir = tempdir().unwrap();
     MemoryEngine::init_at(dir.path()).unwrap();
@@ -659,6 +734,68 @@ fn corrupted_last_hot_frame_does_not_destroy_valid_hot_memory() {
 
     assert_eq!(packet.relevant_memory.len(), 2);
     assert_eq!(packet.debug.hot_total_cells, 2);
+}
+
+#[test]
+fn corrupted_last_encrypted_hot_frame_does_not_destroy_snapshot_memory() {
+    let dir = tempdir().unwrap();
+    let passphrase = "encrypted tail recovery passphrase";
+    let mut engine = MemoryEngine::init_with_options_and_passphrase(
+        dir.path(),
+        InitOptions {
+            page_codec: PageCodecKind::MessagePack,
+            compression: CompressionKind::None,
+            index_kind: IndexKind::ExactMarkerPage,
+            page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Encrypted,
+        },
+        Some(passphrase),
+    )
+    .unwrap();
+    remember_text_cell(
+        &mut engine,
+        "encrypted-tail",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "first encrypted durable hot memory",
+        &["tag:encrypted_tail".to_string()],
+    );
+    engine.checkpoint().unwrap();
+    remember_text_cell(
+        &mut engine,
+        "encrypted-tail",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "second encrypted durable hot memory",
+        &["tag:encrypted_tail".to_string()],
+    );
+    drop(engine);
+
+    let hot_path = dir.path().join("hot").join("hot.mgl");
+    let valid_len = fs::metadata(&hot_path).unwrap().len();
+    assert!(valid_len > 8);
+    OpenOptions::new()
+        .write(true)
+        .open(&hot_path)
+        .unwrap()
+        .set_len(valid_len - 8)
+        .unwrap();
+
+    let reopened = MemoryEngine::open_at_with_passphrase(dir.path(), Some(passphrase)).unwrap();
+    assert!(fs::metadata(&hot_path).unwrap().len() <= valid_len - 8);
+
+    let mut request = RecallRequest::new("encrypted durable hot memory");
+    request.markers = vec!["tag:encrypted_tail".to_string()];
+    request.mode = RecallMode::Broad;
+    let packet = reopened.recall(request).unwrap();
+
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert_eq!(
+        packet.relevant_memory[0].content,
+        "first encrypted durable hot memory"
+    );
+    assert_eq!(packet.debug.hot_total_cells, 1);
 }
 
 #[test]
@@ -2844,6 +2981,13 @@ fn synthetic_recall_request(marker: &str, query: &str) -> RecallRequest {
 
 fn synthetic_group_marker(group: usize) -> String {
     format!("bench_group:g{group:03}")
+}
+
+fn file_contains_bytes(path: &Path, needle: &[u8]) -> bool {
+    let haystack = fs::read(path).unwrap();
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 fn remember_with_status(engine: &mut MemoryEngine, status: MemoryStatus, content: &str) {

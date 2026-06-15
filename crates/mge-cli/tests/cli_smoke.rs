@@ -202,6 +202,88 @@ fn cli_encrypted_init_records_mode_and_locks_payload_commands() {
 }
 
 #[test]
+fn cli_encrypted_passphrase_env_encrypts_hot_files_and_unlocks() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    let passphrase_env = "MGE_TEST_CLI_ENCRYPTED_PASSPHRASE";
+    let wrong_passphrase_env = "MGE_TEST_CLI_ENCRYPTED_WRONG_PASSPHRASE";
+    let plaintext = "cli encrypted hot memory secret phrase";
+    std::env::set_var(passphrase_env, "cli correct passphrase");
+    std::env::set_var(wrong_passphrase_env, "cli wrong passphrase");
+
+    run_mge(
+        &store,
+        &["init", "--encrypted", "--passphrase-env", passphrase_env],
+    );
+    let security = run_mge_json(&store, &["config", "security", "--json"]);
+    assert_eq!(security["mode"], "encrypted");
+    assert_eq!(security["payload_encryption"], true);
+    assert_eq!(security["hot_payload_encryption"], true);
+    assert_eq!(security["sealed_page_payload_encryption"], false);
+    assert_eq!(security["key_verification_configured"], true);
+
+    run_mge(
+        &store,
+        &[
+            "remember",
+            plaintext,
+            "--kind",
+            "project_fact",
+            "--scope",
+            "cli-encrypted",
+            "--trust",
+            "user_confirmed",
+            "--sensitivity",
+            "public",
+            "--marker",
+            "tag:cli_encrypted",
+            "--passphrase-env",
+            passphrase_env,
+        ],
+    );
+    let recalled = run_mge_json(
+        &store,
+        &[
+            "recall",
+            "secret phrase",
+            "--marker",
+            "tag:cli_encrypted",
+            "--passphrase-env",
+            passphrase_env,
+            "--json",
+        ],
+    );
+    assert_eq!(recalled["relevant_memory"].as_array().unwrap().len(), 1);
+    assert_eq!(recalled["relevant_memory"][0]["content"], plaintext);
+
+    let checkpoint = run_mge_json(
+        &store,
+        &["checkpoint", "--passphrase-env", passphrase_env, "--json"],
+    );
+    assert_eq!(checkpoint["hot_cells"], 1);
+    assert!(!file_contains_bytes(
+        &store.join("hot").join("hot.mgl"),
+        plaintext.as_bytes()
+    ));
+    assert!(!file_contains_bytes(
+        &store.join("hot").join("snapshot.mgs"),
+        plaintext.as_bytes()
+    ));
+
+    let failed = run_mge_failure(
+        &store,
+        &["stats", "--passphrase-env", wrong_passphrase_env, "--json"],
+    );
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(stderr.contains("authentication failed"));
+    assert!(!stderr.contains("cli correct passphrase"));
+    assert!(!stderr.contains("cli wrong passphrase"));
+
+    std::env::remove_var(passphrase_env);
+    std::env::remove_var(wrong_passphrase_env);
+}
+
+#[test]
 fn cli_checkpoint_and_durability_config_restore_hot_memory() {
     let dir = tempdir().unwrap();
     let store = dir.path().join(".memory-genome");
@@ -430,6 +512,18 @@ fn mcp_server_exposes_stable_schema_and_structured_errors() {
             .is_some());
         assert!(schema["tools"][tool]["output"].as_array().is_some());
     }
+    assert!(
+        schema["tools"]["mge_remember"]["input"]["properties"]["passphrase_env"]
+            .as_str()
+            .unwrap()
+            .contains("environment variable")
+    );
+    assert!(
+        schema["tools"]["mge_stats"]["input"]["properties"]["passphrase_env"]
+            .as_str()
+            .unwrap()
+            .contains("environment variable")
+    );
     assert!(schema["context_packet_contract"]["context"]["relevant_memory"].is_string());
     assert_eq!(
         schema["error_contract"]["error"]["protocol_version"],
@@ -588,6 +682,63 @@ fn mcp_server_reports_locked_store_as_structured_error() {
         .as_str()
         .unwrap()
         .contains("MGE_PASSPHRASE"));
+}
+
+#[test]
+fn mcp_server_reports_wrong_passphrase_as_auth_error() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    let store_path = store.to_string_lossy().to_string();
+    let passphrase_env = "MGE_TEST_MCP_ENCRYPTED_PASSPHRASE";
+    let wrong_passphrase_env = "MGE_TEST_MCP_ENCRYPTED_WRONG_PASSPHRASE";
+    std::env::set_var(passphrase_env, "mcp correct passphrase");
+    std::env::set_var(wrong_passphrase_env, "mcp wrong passphrase");
+
+    run_mge(
+        &store,
+        &["init", "--encrypted", "--passphrase-env", passphrase_env],
+    );
+
+    let responses = run_mcp_json_lines(&[
+        json!({
+            "jsonrpc": "2.0",
+            "id": "ok",
+            "method": "mge_stats",
+            "params": { "store_path": store_path, "passphrase_env": passphrase_env }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "wrong",
+            "method": "mge_stats",
+            "params": { "store_path": store.to_string_lossy().to_string(), "passphrase_env": wrong_passphrase_env }
+        }),
+    ]);
+
+    assert_eq!(responses.len(), 2);
+    assert_eq!(responses[0]["result"]["tool"], "mge_stats");
+    assert_eq!(
+        responses[0]["result"]["stats"]["current_security_mode"],
+        "encrypted"
+    );
+
+    let error = &responses[1]["error"];
+    assert_eq!(error["tool_name"], "mge_stats");
+    assert_eq!(error["details"]["error_kind"], "auth_failed");
+    assert!(error["message"]
+        .as_str()
+        .unwrap()
+        .contains("authentication failed"));
+    assert!(!error["message"]
+        .as_str()
+        .unwrap()
+        .contains("mcp correct passphrase"));
+    assert!(!error["message"]
+        .as_str()
+        .unwrap()
+        .contains("mcp wrong passphrase"));
+
+    std::env::remove_var(passphrase_env);
+    std::env::remove_var(wrong_passphrase_env);
 }
 
 #[test]
@@ -1667,4 +1818,11 @@ fn command_available(command: &str) -> bool {
 
 fn json_safe_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+fn file_contains_bytes(path: &Path, needle: &[u8]) -> bool {
+    let haystack = fs::read(path).unwrap();
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }

@@ -43,7 +43,7 @@ JSON policy:
 | v0.2 storage/index foundation | Done / hardening | Binary runtime storage layout, MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in, and validation hardening are done. |
 | v0.2 remaining | Closed | Benchmark foundation is ready; further core cleanup is benchmark-gated. |
 | v0.3 SDK/MCP | In progress | Mandate 2 integration foundation is active: MCP-ready adapter and thin Python/TypeScript wrappers are present. |
-| v0.4 security | In progress | Mandate 3 started with threat model and encryption design; real encryption/session unlock/blind markers are not implemented yet. |
+| v0.4 security | In progress | Mandate 3 has threat model plus real session unlock and authenticated hot log/snapshot encryption; sealed pages/blind markers remain future work. |
 | v0.5 safety/search | Partial foundation | Policy/capabilities exist; poisoning/conflict/vector reranking are not started. |
 
 ## Current Focus
@@ -186,13 +186,26 @@ Done in Mandate 3 foundation:
 - Added `docs/SECURITY.md` and `docs/SECURITY.ru.md`.
 - Documented the threat model: protected assets, in-scope threats, out-of-scope threats, metadata policy, session model, validation/rebuild behavior, and implementation gates.
 - Documented the encryption design direction before implementation.
-- Reconfirmed that current stores are not encrypted yet and `NoSecurity` is pass-through, not fake encryption.
+- Reconfirmed in the foundation phase that `NoSecurity` is pass-through, not fake encryption.
 - Reconfirmed that JSON/JSONL remain protocol/debug/benchmark output only, not runtime storage.
 - Added manifest-level `SecurityMode` and `SecurityConfig`.
 - Added `mge init --encrypted` as an opt-in encrypted-mode store marker.
 - Added `mge config security` for manifest-level security status without opening payloads.
-- Added locked-store errors for encrypted-mode payload operations until session unlock/encryption are implemented.
+- Added locked-store errors for encrypted-mode payload operations without session unlock.
 - Added MCP `store_locked` structured error classification.
+
+Done in Mandate 3 hot-encryption package:
+
+- Added crypto dependencies: `chacha20poly1305`, `argon2`, `rand`, and `zeroize`.
+- Added session unlock through passphrase environment variables: `--passphrase-env MGE_PASSPHRASE`.
+- Added manifest security metadata for KDF params, AEAD scheme/version, salt, and encrypted key-check block without storing passphrases or raw keys.
+- Added runtime-only `SessionKey` with zeroization on drop.
+- Encrypted/authenticated hot record payloads in `hot/hot.mgl` for stores initialized with key metadata.
+- Encrypted/authenticated checkpoint payloads in `hot/snapshot.mgs`.
+- Preserved hot recovery behavior: valid encrypted records replay after snapshot offset, and a corrupted/truncated final encrypted frame is discarded without destroying earlier valid hot memory.
+- Added CLI passphrase-env support for init, remember, recall, seal, checkpoint, inspect, validate, rebuild-indexes, stats, and export.
+- Added MCP optional `passphrase_env` support and `auth_failed` structured error classification.
+- Added Python SDK `passphrase_env` and TypeScript SDK `passphraseEnv` pass-through.
 
 Security design decisions:
 
@@ -204,24 +217,35 @@ Security design decisions:
 - Encrypted store conversion must be an explicit future operation, not a silent config flip.
 - Use well-known Rust crypto crates when implementation starts; do not write custom crypto.
 
-Preferred crypto dependency direction:
+Crypto dependencies in use:
 
-- AEAD: `chacha20poly1305`, preferably XChaCha20-Poly1305 if available.
+- AEAD: `chacha20poly1305` with XChaCha20-Poly1305.
 - KDF: `argon2`.
-- Random salt/nonce generation: `rand` or `rand_core`.
-- Memory hygiene: `zeroize` or `secrecy` where practical.
+- Random salt/nonce generation: `rand`.
+- Memory hygiene: `zeroize`.
 
 Current limitations:
 
-- Encryption is designed and encrypted-mode/locked-store foundation is implemented, but authenticated payload encryption is not implemented.
-- No session unlock yet.
-- `mge init --encrypted` does not encrypt payloads yet; it creates a locked encrypted-mode store marker and prevents silent plaintext payload operations.
+- Only hot storage payloads are encrypted now: `hot/hot.mgl` and `hot/snapshot.mgs`.
+- Sealed page payload encryption is not implemented yet.
 - No blind marker indexes or encrypted indexes yet.
 - Markdown export remains plaintext by design.
+- `mge init --encrypted` without `--passphrase-env` still creates a locked encrypted-mode marker/config state, but payload operations remain locked because no key metadata exists.
+
+Latest Mandate 3 verification:
+
+- `cargo fmt`: passed.
+- `cargo test`: passed, 131 tests total.
+- CLI unencrypted smoke: passed.
+- CLI encrypted smoke: passed, including hot log/snapshot plaintext absence and wrong-key failure.
+- MCP encrypted locked/wrong-key smoke: passed.
+- Python SDK encrypted smoke: passed.
+- TypeScript SDK encrypted smoke: passed.
+- Rust example smoke: passed.
 
 Next Mandate 3 step:
 
-- Add real session unlock and authenticated encryption for hot log/snapshot payloads first. Do not encrypt sealed pages until the metadata/catalog boundary is confirmed in code.
+- Add sealed page payload encryption next. Do not encrypt indexes or blind marker metadata in the same package without a separate design.
 
 ## Done
 

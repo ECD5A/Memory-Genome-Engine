@@ -301,12 +301,12 @@ The page pipeline is structured for:
 encode page -> compress page -> encrypt page -> write page
 ```
 
-Current storage uses `NoSecurity` as an honest pass-through implementation. It does not claim to encrypt. The Mandate 3 threat model and encryption design live in [Security model](SECURITY.md).
+Current security status: unencrypted stores still use `NoSecurity` as an honest pass-through implementation. Encrypted stores with key metadata now authenticate and encrypt hot payloads in `hot/hot.mgl` and `hot/snapshot.mgs`; sealed pages are still plaintext until the next security package. The Mandate 3 threat model and implementation status live in [Security model](SECURITY.md).
 
 Future security layers:
 
 - page-level encryption
-- session-bound unlock
+- session-bound unlock for encrypted stores
 - page keys
 - encrypted indexes
 - blind marker tokens

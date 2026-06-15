@@ -65,6 +65,8 @@ pub enum CodecId {
     None = 0,
     MessagePack = 1,
     MessagePackZstd = 2,
+    MessagePackEncrypted = 3,
+    MessagePackZstdEncrypted = 4,
 }
 
 impl CodecId {
@@ -73,6 +75,8 @@ impl CodecId {
             0 => Ok(Self::None),
             1 => Ok(Self::MessagePack),
             2 => Ok(Self::MessagePackZstd),
+            3 => Ok(Self::MessagePackEncrypted),
+            4 => Ok(Self::MessagePackZstdEncrypted),
             _ => Err(storage_error(format!("unknown codec id {value}"))),
         }
     }
@@ -82,6 +86,8 @@ impl CodecId {
             Self::None => "none",
             Self::MessagePack => "messagepack",
             Self::MessagePackZstd => "messagepack_zstd",
+            Self::MessagePackEncrypted => "messagepack_encrypted",
+            Self::MessagePackZstdEncrypted => "messagepack_zstd_encrypted",
         }
     }
 }

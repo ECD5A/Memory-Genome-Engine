@@ -28,6 +28,12 @@ pub enum MgeError {
     #[error("store is locked: {0}")]
     StoreLocked(String),
 
+    #[error("authentication failed: {0}")]
+    AuthenticationFailed(String),
+
+    #[error("crypto error: {0}")]
+    Crypto(String),
+
     #[error("invalid input: {0}")]
     InvalidInput(String),
 }

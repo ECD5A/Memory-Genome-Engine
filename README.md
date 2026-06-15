@@ -66,11 +66,19 @@ Markdown is good for export and human reading, but bad as the internal high-spee
 
 Vector search can be added later as a reranker inside already selected candidate pages. The core system stays marker/page based so retrieval can be deterministic, compact, and policy-aware.
 
-## Future Security
+## Security
 
-The storage layer is designed for page-level encryption, session keys, blind marker indexes, and policy-gated access. The Mandate 3 security model is documented in [Security model](docs/SECURITY.md).
+The storage layer is designed for staged encryption, session keys, blind marker indexes, and policy-gated access. The Mandate 3 security model is documented in [Security model](docs/SECURITY.md).
 
-Current status: unencrypted stores still work by default. `mge init --encrypted` can create an encrypted-mode store marker, but payload encryption and session unlock are not implemented yet, so payload operations return a clear locked-store error instead of silently writing plaintext. `NoSecurity` remains an honest pass-through implementation and does not pretend to encrypt.
+Current status: unencrypted stores still work by default. Encrypted stores can now be initialized with a passphrase environment variable; `hot/hot.mgl` records and `hot/snapshot.mgs` checkpoint payloads are authenticated and encrypted. Sealed pages, indexes, marker dictionary, catalog metadata, and Markdown export remain plaintext until the next security package.
+
+```bash
+export MGE_PASSPHRASE="use-a-real-secret"
+mge init --encrypted --passphrase-env MGE_PASSPHRASE
+mge remember "private hot memory" --passphrase-env MGE_PASSPHRASE
+mge recall "private hot memory" --passphrase-env MGE_PASSPHRASE
+mge checkpoint --passphrase-env MGE_PASSPHRASE
+```
 
 Future page write flow:
 
@@ -127,15 +135,18 @@ cargo run -p mge-cli -- config set --index-kind binary_fuse_page
 mge init
 mge init --profile fast
 mge init --encrypted
+mge init --encrypted --passphrase-env MGE_PASSPHRASE
 mge init --page-codec messagepack --compression zstd
 mge init --index-kind binary_fuse_page
 mge config security
 mge config set --page-clusterer marker_overlap
 mge remember "..." --kind user_preference --scope global --trust user_confirmed
+mge remember "private hot memory" --passphrase-env MGE_PASSPHRASE
 mge remember --kind user_preference --subject answer_style --json-value '{"style":"concise","max_examples":2}'
 mge remember --kind project_fact --reference-value vault://references/api-key --sensitivity secret_reference
 mge remember "Decision recorded" --kind decision --source-type issue --source-ref MGE-1 --link 1
 mge recall "technical answer style"
+mge recall "private hot memory" --passphrase-env MGE_PASSPHRASE
 mge recall "technical answer style" --mode broad
 mge recall --mode full-scope --scope global
 mge recall "api key" --include-secret-references
@@ -145,6 +156,7 @@ mge config set --page-codec messagepack --compression zstd
 mge config set --index-kind binary_fuse_page
 mge inspect
 mge validate
+mge validate --passphrase-env MGE_PASSPHRASE
 mge stats
 mge stats --json
 mge export

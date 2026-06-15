@@ -33,8 +33,8 @@ python -c "import mge_sdk; print(mge_sdk.MemoryGenomeClient)"
 ```python
 from mge_sdk import MemoryGenomeClient
 
-client = MemoryGenomeClient(".memory-genome")
-client.init(profile="fast")
+client = MemoryGenomeClient(".memory-genome", passphrase_env="MGE_PASSPHRASE")
+client.init(profile="fast", encrypted=True)
 security = client.security_config()
 client.remember("Agent should use recalled context.", kind="procedure", scope="agent")
 packet = client.recall("agent context", mode="focused", scope="agent")
@@ -99,8 +99,10 @@ npm run check # если локально установлен tsc
 ```typescript
 import { MemoryGenomeClient } from "./sdk/typescript/src/mge.ts";
 
-const client = new MemoryGenomeClient(".memory-genome");
-client.init("fast");
+const client = new MemoryGenomeClient(".memory-genome", {
+  passphraseEnv: "MGE_PASSPHRASE",
+});
+client.init("fast", { encrypted: true });
 const security = client.securityConfig();
 client.remember("Agent should use recalled context.", {
   kind: "procedure",
@@ -138,7 +140,8 @@ Typed SDK surface:
 Оба wrapper-а поддерживают:
 
 - init/open store
-- opt-in encrypted-mode store marker during init
+- opt-in encrypted store init through passphrase env
+- encrypted hot log/snapshot unlock pass-through
 - security config readout
 - remember
 - focused/broad/full-scope recall
@@ -184,8 +187,8 @@ SDK targets: `protocol_version = mge-jsonrpc-1` и `integration_schema_version =
 
 - Если SDK не находит `mge`, передайте `command=["cargo", "run", "-q", "-p", "mge-cli", "--bin", "mge", "--"]` и `cwd=repo_root`.
 - Если TypeScript type checking недоступен, запускайте runtime smoke: `node examples/typescript_basic_usage.ts`; `tsc` для локального wrapper опционален.
-- Если JSON-RPC call завершился ошибкой, смотрите `error.details.error_kind`: invalid args дают `invalid_params`, missing store даёт `store_open_failed`, encrypted-mode store без session unlock даёт `store_locked`, `full_scope` без scope даёт `invalid_request`, malformed JSON даёт `parse_error`.
-- Security foundation: `mge init --encrypted` уже может создать encrypted-mode store marker, но payload encryption/session unlock пока не реализованы. SDK должны трактовать `store_locked` как typed recoverable state и не логировать passphrase или raw key material, когда future unlock support будет добавлен.
+- Если JSON-RPC call завершился ошибкой, смотрите `error.details.error_kind`: invalid args дают `invalid_params`, missing store даёт `store_open_failed`, encrypted store без session unlock даёт `store_locked`, wrong passphrase даёт `auth_failed`, `full_scope` без scope даёт `invalid_request`, malformed JSON даёт `parse_error`.
+- Security note: SDK передают только имя passphrase environment variable. Они не должны логировать passphrase или raw key material. Crypto и storage остаются в Rust core/CLI.
 - Не читайте и не меняйте `.memory-genome` files из SDK. SDK являются process wrappers вокруг Rust engine.
 
 ## Policy

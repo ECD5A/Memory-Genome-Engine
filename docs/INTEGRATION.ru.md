@@ -84,6 +84,17 @@ MCP/SDK recall responses сохраняют core `ContextPacket` в `context_pac
 
 Rust остаётся core. Python и TypeScript wrappers вызывают Rust CLI и не дублируют memory logic.
 
+## Unlock Для Encrypted Store
+
+Encrypted stores используют те же integration paths. Host передаёт только имя environment variable, где лежит passphrase:
+
+- CLI: `--passphrase-env MGE_PASSPHRASE`
+- MCP JSON-RPC params: `"passphrase_env": "MGE_PASSPHRASE"`
+- Python SDK: `MemoryGenomeClient(..., passphrase_env="MGE_PASSPHRASE")`
+- TypeScript SDK: `new MemoryGenomeClient(..., { passphraseEnv: "MGE_PASSPHRASE" })`
+
+Значение passphrase не должно попадать в protocol payloads и logs. Сейчас encryption покрывает `hot/hot.mgl` и `hot/snapshot.mgs`; sealed pages и indexes будут отдельным security package.
+
 ## Local Developer Setup
 
 Сначала соберите Rust tools:
@@ -138,7 +149,7 @@ npm run check # если tsc доступен
 
 - `mge-mcp-server` сейчас MCP-ready local JSON-RPC adapter, а не полная внешняя MCP SDK реализация.
 - SDK пока thin local wrappers вокруг `mge`; package publishing ещё не делался.
-- Encryption, vector DB, UI и remote service hosting не входят в foundation work Мандата 2.
+- Sealed page encryption, vector DB, UI и remote service hosting не входят в текущий integration layer.
 
 ## Troubleshooting
 

@@ -84,6 +84,17 @@ Use the lowest layer that fits the host:
 
 Rust remains the core. Python and TypeScript wrappers delegate to the Rust CLI and do not duplicate memory logic.
 
+## Encrypted Store Unlock
+
+Encrypted stores use the same integration paths. The host passes only the environment variable name that contains the passphrase:
+
+- CLI: `--passphrase-env MGE_PASSPHRASE`
+- MCP JSON-RPC params: `"passphrase_env": "MGE_PASSPHRASE"`
+- Python SDK: `MemoryGenomeClient(..., passphrase_env="MGE_PASSPHRASE")`
+- TypeScript SDK: `new MemoryGenomeClient(..., { passphraseEnv: "MGE_PASSPHRASE" })`
+
+The passphrase value must stay outside protocol payloads and logs. Current encryption covers `hot/hot.mgl` and `hot/snapshot.mgs`; sealed pages and indexes are planned separately.
+
 ## Local Developer Setup
 
 Build the Rust tools first:
@@ -138,7 +149,7 @@ These fields version only the MCP/SDK protocol contract. They do not change the 
 
 - `mge-mcp-server` is an MCP-ready local JSON-RPC adapter, not a full external MCP SDK implementation.
 - SDKs are thin local wrappers around `mge`; package publishing is not done yet.
-- Encryption, vector DB, UI, and remote service hosting are outside Mandate 2 foundation work.
+- Sealed page encryption, vector DB, UI, and remote service hosting are outside the current integration layer.
 
 ## Troubleshooting
 

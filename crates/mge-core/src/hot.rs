@@ -11,12 +11,16 @@ use crate::indexes::QueryMode;
 use crate::markers::canonicalize_marker_value;
 use crate::models::{current_timestamp, CellId, MarkerId, MemoryCell, MemoryKind, MemoryStatus};
 use crate::retrieval::CachedCellScoringData;
-use crate::security::RecallPolicy;
+use crate::security::{
+    decrypt_payload, encrypt_payload, EncryptedPayload, RecallPolicy, SessionKey,
+};
 
 pub type ScopeId = String;
 pub type KindId = MemoryKind;
 const HOT_SNAPSHOT_FILE: &str = "snapshot.mgs";
 const HOT_SNAPSHOT_VERSION: u32 = 1;
+const HOT_RECORD_AAD: &[u8] = b"mge:hot_record:v1";
+const HOT_SNAPSHOT_AAD: &[u8] = b"mge:hot_snapshot:v1";
 
 #[derive(Clone, Debug, Default)]
 pub struct HotMemoryLayer {
@@ -310,9 +314,28 @@ impl HotStore {
     }
 
     pub fn append_cell(&self, cell: &MemoryCell, sync_after_write: bool) -> Result<()> {
+        self.append_cell_with_key(cell, sync_after_write, None)
+    }
+
+    pub fn append_cell_with_key(
+        &self,
+        cell: &MemoryCell,
+        sync_after_write: bool,
+        key: Option<&SessionKey>,
+    ) -> Result<()> {
         self.ensure_exists()?;
-        let record = rmp_serde::to_vec_named(cell)?;
-        let record = binary::encode_frame(FileKind::HotRecord, CodecId::MessagePack, &record)?;
+        let plaintext = rmp_serde::to_vec_named(cell)?;
+        let (codec, payload) = match key {
+            Some(key) => {
+                let envelope = encrypt_payload(key, HOT_RECORD_AAD, &plaintext)?;
+                (
+                    CodecId::MessagePackEncrypted,
+                    rmp_serde::to_vec_named(&envelope)?,
+                )
+            }
+            None => (CodecId::MessagePack, plaintext),
+        };
+        let record = binary::encode_frame(FileKind::HotRecord, codec, &payload)?;
         let header = fs::read(&self.path)?;
         binary::decode_frame_at(&header, 0, FileKind::HotLog)?;
 
@@ -330,6 +353,10 @@ impl HotStore {
     }
 
     pub fn load_recovering(&self) -> Result<HotRecovery> {
+        self.load_recovering_with_key(None)
+    }
+
+    pub fn load_recovering_with_key(&self, key: Option<&SessionKey>) -> Result<HotRecovery> {
         if !self.path.exists() {
             return Ok(HotRecovery::default());
         }
@@ -343,7 +370,7 @@ impl HotStore {
         let mut cells = Vec::new();
         let mut replay_offset = log_start_offset;
 
-        if let Some(snapshot) = self.load_usable_snapshot(content.len(), log_start_offset)? {
+        if let Some(snapshot) = self.load_usable_snapshot(content.len(), log_start_offset, key)? {
             replay_offset = usize::try_from(snapshot.hot_log_offset).map_err(|_| {
                 MgeError::StorageFormat(
                     "hot snapshot offset does not fit this platform".to_string(),
@@ -352,7 +379,7 @@ impl HotStore {
             cells = snapshot.cells;
         }
 
-        let replay = decode_hot_records_from(&content, replay_offset)?;
+        let replay = decode_hot_records_from(&content, replay_offset, key)?;
         cells.extend(replay.cells);
 
         Ok(HotRecovery {
@@ -382,6 +409,14 @@ impl HotStore {
     }
 
     pub fn write_snapshot(&self, cells: &[MemoryCell]) -> Result<HotSnapshot> {
+        self.write_snapshot_with_key(cells, None)
+    }
+
+    pub fn write_snapshot_with_key(
+        &self,
+        cells: &[MemoryCell],
+        key: Option<&SessionKey>,
+    ) -> Result<HotSnapshot> {
         self.ensure_exists()?;
         self.sync()?;
         let hot_log_offset = fs::metadata(&self.path)?.len();
@@ -391,7 +426,7 @@ impl HotStore {
             hot_log_offset,
             cells: cells.to_vec(),
         };
-        binary::write_messagepack_file(self.snapshot_path(), FileKind::HotSnapshot, &snapshot)?;
+        write_hot_snapshot_file(&self.snapshot_path(), &snapshot, key)?;
         Ok(snapshot)
     }
 
@@ -407,17 +442,17 @@ impl HotStore {
         &self,
         hot_log_len: usize,
         log_start_offset: usize,
+        key: Option<&SessionKey>,
     ) -> Result<Option<HotSnapshot>> {
         let path = self.snapshot_path();
         if !path.exists() {
             return Ok(None);
         }
 
-        let snapshot =
-            match binary::read_messagepack_file::<HotSnapshot>(&path, FileKind::HotSnapshot) {
-                Ok(snapshot) => snapshot,
-                Err(_) => return Ok(None),
-            };
+        let snapshot = match read_hot_snapshot_file(&path, key) {
+            Ok(snapshot) => snapshot,
+            Err(_) => return Ok(None),
+        };
         if snapshot.version != HOT_SNAPSHOT_VERSION {
             return Ok(None);
         }
@@ -463,7 +498,11 @@ impl HotStore {
     }
 }
 
-fn decode_hot_records_from(content: &[u8], mut offset: usize) -> Result<HotRecovery> {
+fn decode_hot_records_from(
+    content: &[u8],
+    mut offset: usize,
+    key: Option<&SessionKey>,
+) -> Result<HotRecovery> {
     let mut cells = Vec::new();
     while offset < content.len() {
         let (record, next_offset) =
@@ -477,14 +516,24 @@ fn decode_hot_records_from(content: &[u8], mut offset: usize) -> Result<HotRecov
                     });
                 }
             };
-        if record.codec != CodecId::MessagePack {
-            return Ok(HotRecovery {
-                cells,
-                valid_log_offset: offset,
-                recovered_bad_tail: true,
-            });
-        }
-        let cell = match rmp_serde::from_slice(&record.payload) {
+        let plaintext = match decode_hot_record_payload(&record.payload, record.codec, key) {
+            Ok(payload) => payload,
+            Err(err)
+                if next_offset == content.len()
+                    && matches!(
+                        err,
+                        MgeError::AuthenticationFailed(_) | MgeError::MessagePackDecode(_)
+                    ) =>
+            {
+                return Ok(HotRecovery {
+                    cells,
+                    valid_log_offset: offset,
+                    recovered_bad_tail: true,
+                });
+            }
+            Err(err) => return Err(err),
+        };
+        let cell = match rmp_serde::from_slice(&plaintext) {
             Ok(cell) => cell,
             Err(_) => {
                 return Ok(HotRecovery {
@@ -507,6 +556,69 @@ fn decode_hot_records_from(content: &[u8], mut offset: usize) -> Result<HotRecov
 
 fn empty_hot_log_bytes() -> Result<Vec<u8>> {
     binary::encode_frame(FileKind::HotLog, CodecId::None, &[])
+}
+
+fn decode_hot_record_payload(
+    payload: &[u8],
+    codec: CodecId,
+    key: Option<&SessionKey>,
+) -> Result<Vec<u8>> {
+    match codec {
+        CodecId::MessagePack => Ok(payload.to_vec()),
+        CodecId::MessagePackEncrypted => {
+            let key = key.ok_or_else(|| {
+                MgeError::StoreLocked("encrypted hot record requires session unlock".to_string())
+            })?;
+            let envelope: EncryptedPayload = rmp_serde::from_slice(payload)?;
+            decrypt_payload(key, HOT_RECORD_AAD, &envelope)
+        }
+        other => Err(MgeError::StorageFormat(format!(
+            "wrong codec for hot record: expected messagepack or messagepack_encrypted, found {}",
+            other.as_str()
+        ))),
+    }
+}
+
+fn write_hot_snapshot_file(
+    path: &Path,
+    snapshot: &HotSnapshot,
+    key: Option<&SessionKey>,
+) -> Result<()> {
+    let plaintext = rmp_serde::to_vec_named(snapshot)?;
+    let (codec, payload) = match key {
+        Some(key) => {
+            let envelope = encrypt_payload(key, HOT_SNAPSHOT_AAD, &plaintext)?;
+            (
+                CodecId::MessagePackEncrypted,
+                rmp_serde::to_vec_named(&envelope)?,
+            )
+        }
+        None => (CodecId::MessagePack, plaintext),
+    };
+    let bytes = binary::encode_frame(FileKind::HotSnapshot, codec, &payload)?;
+    binary::atomic_write_bytes(path, &bytes)
+}
+
+fn read_hot_snapshot_file(path: &Path, key: Option<&SessionKey>) -> Result<HotSnapshot> {
+    let bytes = fs::read(path)?;
+    let frame = binary::decode_frame(&bytes, FileKind::HotSnapshot)?;
+    let plaintext = match frame.codec {
+        CodecId::MessagePack => frame.payload,
+        CodecId::MessagePackEncrypted => {
+            let key = key.ok_or_else(|| {
+                MgeError::StoreLocked("encrypted hot snapshot requires session unlock".to_string())
+            })?;
+            let envelope: EncryptedPayload = rmp_serde::from_slice(&frame.payload)?;
+            decrypt_payload(key, HOT_SNAPSHOT_AAD, &envelope)?
+        }
+        other => {
+            return Err(MgeError::StorageFormat(format!(
+                "wrong codec for hot snapshot: expected messagepack or messagepack_encrypted, found {}",
+                other.as_str()
+            )));
+        }
+    };
+    Ok(rmp_serde::from_slice(&plaintext)?)
 }
 
 fn unique_archive_path(archive_dir: &Path, timestamp: i64) -> PathBuf {

@@ -79,6 +79,7 @@ Input:
 - optional `subject`
 - optional `source_type` и `source_ref`
 - optional `links`
+- optional `passphrase_env` для encrypted stores
 
 ### `mge_recall`
 
@@ -93,6 +94,7 @@ Input:
 - optional `kind`
 - optional `include_deprecated`
 - optional `include_secret_references`
+- optional `passphrase_env` для encrypted stores
 
 Output содержит `ContextPacket` в `result.context_packet`.
 
@@ -115,6 +117,8 @@ Output содержит `ContextPacket` в `result.context_packet`.
 - `mge_validate`: `{ "store_path": "...", "deep": true }`
 - `mge_rebuild_indexes`: `{ "store_path": "..." }`
 - `mge_export_markdown`: `{ "store_path": "...", "output_path": "optional/path.md" }`
+
+Все store operations также принимают optional `passphrase_env` для encrypted stores. Значение - это имя environment variable, а не passphrase.
 
 ## Пример
 
@@ -159,7 +163,8 @@ examples/mcp_agent_session.jsonl
 - Unknown tools возвращают `-32601` с `details.error_kind = "unknown_method"`.
 - Missing или invalid arguments возвращают `-32602` с `details.error_kind = "invalid_params"`.
 - Missing или invalid store path возвращает `-32000` с `details.error_kind = "store_open_failed"`.
-- Encrypted-mode store без session unlock возвращает `-32000` с `details.error_kind = "store_locked"`. Payload encryption/unlock пока не реализованы, поэтому это безопасный locked-store foundation, а не usable encrypted recall.
+- Encrypted-mode store без session unlock возвращает `-32000` с `details.error_kind = "store_locked"`.
+- Wrong passphrase или authenticated decryption failure возвращает `-32000` с `details.error_kind = "auth_failed"`.
 - `full_scope` без `scope` возвращает `-32000` с `details.error_kind = "invalid_request"`.
 - Invalid recall modes вроде `sideways` являются parameter errors, а не core runtime failures.
 - `output_path` у `mge_export_markdown` явный; без него export идёт в default `exports/memory.md` внутри store.

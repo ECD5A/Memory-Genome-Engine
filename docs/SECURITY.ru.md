@@ -1,32 +1,26 @@
-# Security Model
+# Модель Безопасности
 
 [English version](SECURITY.md)
 
-Мандат 3 добавляет security/encryption layer для Memory Genome Engine. Этот документ фиксирует design boundary перед реализацией. Он специально честно разделяет: что защищаем, что планируем, и что пока не защищаем.
+Мандат 3 добавляет security/encryption слой для Memory Genome Engine. Текущий реализованный объём: session unlock и authenticated encryption для L1 hot storage.
 
-Текущее состояние:
+Текущий статус реализации:
 
 - Существующие unencrypted stores продолжают работать без изменений.
-- `mge init --encrypted` может создать store с encrypted-mode marker в `manifest.mgm`.
-- Encrypted-mode stores сейчас намеренно возвращают locked-store error для payload operations, пока не реализованы session unlock и authenticated encryption.
-- `mge config security` читает manifest-level security status без открытия payload.
-- Payload bytes пока не шифруются.
-- `NoSecurity` - честная pass-through реализация.
-- Проект не должен заявлять encryption, пока authenticated encryption реально не реализована и не покрыта тестами.
+- `mge init --encrypted` создаёт encrypted-mode store.
+- `mge init --encrypted --passphrase-env MGE_PASSPHRASE` создаёт metadata для проверки ключа и открывает первую session.
+- Encrypted stores требуют session unlock для payload operations через `--passphrase-env`.
+- Hot records в `hot/hot.mgl` шифруются и аутентифицируются, если store создан с key metadata.
+- Checkpoint payload в `hot/snapshot.mgs` шифруется и аутентифицируется, если store создан с key metadata.
+- Неверный passphrase даёт понятную authentication error.
+- Encrypted init без passphrase всё ещё разрешён как locked marker/config state, но payload operations остаются locked, пока нет key metadata.
+- `mge config security` читает безопасный manifest-level security status без открытия payload.
+- Sealed pages, indexes, marker dictionary, page catalog summaries, Markdown export и часть manifest metadata пока не шифруются.
 - JSON остаётся только protocol/debug/benchmark output, а не runtime storage.
 
-## Goals
+## Core Flow
 
-Memory Genome Engine должен стать local-first memory engine, где store может быть locked at rest и unlocked для runtime session.
-
-Основные цели:
-
-- защищать memory payloads в local store files;
-- не допускать silent fallback из encrypted mode в plaintext;
-- не класть passphrase в manifest, logs, debug output, shell history и SDK errors;
-- сохранить binary headers, versioning и validation usable;
-- сохранить работу существующих unencrypted stores;
-- сохранить текущий memory flow:
+Архитектура памяти не менялась:
 
 ```text
 remember -> L1 Hot RAM + pending persistence -> hot/hot.mgl
@@ -34,209 +28,102 @@ seal -> Sealed Pages + Indexes
 recall -> ContextPacket
 ```
 
-## Protected Assets
+Encryption package меняет только hot payload persistence и session unlock. Он не меняет recall modes, `MarkerGenome`, `MemoryCell.markers`, candidate indexes, sealed page codec или storage layout.
 
-Мандат 3 защищает payload bytes:
+## Crypto Dependencies
 
-- `hot/hot.mgl`
-- `hot/snapshot.mgs`
-- `pages/*.mgp`
-- optional exports/backups позже, только если это явно спроектировано
+Используются известные Rust crypto crates; custom crypto не пишется:
 
-Главная ценность - `MemoryCell` content и связанные cell payload data, которые раскрывают пользовательскую память при копировании или просмотре store directory.
+- `chacha20poly1305`: XChaCha20-Poly1305 AEAD для authenticated payload encryption.
+- `argon2`: Argon2id passphrase-to-session-key derivation.
+- `rand`: OS randomness для KDF salt и AEAD nonce.
+- `zeroize`: zeroize runtime `SessionKey` bytes при drop.
+
+Passphrase никогда не хранится в `manifest.mgm`, logs, debug output или errors. Derived key живёт только в runtime session процесса.
+
+## Session Unlock
+
+Рекомендуемый CLI flow:
+
+```powershell
+$env:MGE_PASSPHRASE = "use a real passphrase outside shell history"
+mge init --encrypted --passphrase-env MGE_PASSPHRASE
+mge remember "private hot memory" --passphrase-env MGE_PASSPHRASE
+mge recall "private hot memory" --passphrase-env MGE_PASSPHRASE
+mge checkpoint --passphrase-env MGE_PASSPHRASE
+mge validate --passphrase-env MGE_PASSPHRASE
+```
+
+`--passphrase-env` принимает имя переменной окружения, а не сам passphrase.
+
+Encrypted store без unlock возвращает `store is locked`. Неверный passphrase возвращает `authentication failed`.
+
+## Что Шифруется Сейчас
+
+Шифруется при init с key metadata:
+
+- hot log record payloads в `hot/hot.mgl`;
+- hot checkpoint payloads в `hot/snapshot.mgs`;
+- key-check block внутри manifest security metadata.
+
+Пока остаётся plaintext:
+
+- binary frame headers: magic, file kind, version, codec id, payload length, checksum;
+- manifest safe metadata, security mode, KDF salt/params, AEAD scheme/version;
+- marker dictionary: `dictionary/markers.mgd`;
+- sealed pages: `pages/*.mgp`;
+- indexes and page catalog: `indexes/*.mgi`;
+- Markdown export: `exports/memory.md`;
+- process memory while the store is unlocked.
+
+Sealed page encryption, encrypted indexes, blind marker tokens и encrypted export - отдельные будущие пакеты.
+
+## Recovery
+
+Hot recovery остаётся crash-safe:
+
+- после unlock `hot/snapshot.mgs` восстанавливает checkpointed hot cells;
+- `hot/hot.mgl` replay-ит valid encrypted hot records после snapshot offset;
+- corrupted/truncated final encrypted frame отбрасывается без уничтожения предыдущей valid hot memory;
+- wrong key падает на authentication до нормального payload use.
+
+## MCP И SDK
+
+MCP/JSON-RPC tools принимают optional `passphrase_env` в params. Adapter никогда не принимает и не возвращает raw passphrase.
+
+Error mapping:
+
+- locked encrypted store без unlock: `details.error_kind = "store_locked"`;
+- wrong passphrase/authentication failure: `details.error_kind = "auth_failed"`;
+- invalid env var name или empty env value: structured command/parameter error на caller path.
+
+Python SDK использует `passphrase_env="MGE_PASSPHRASE"`. TypeScript SDK использует `passphraseEnv: "MGE_PASSPHRASE"`. Оба wrapper-а делегируют crypto и storage logic в Rust CLI/core.
 
 ## Threats In Scope
 
-Первый encrypted mode должен защищать от:
-
-- casual local file inspection;
-- украденного или скопированного `.memory-genome` store directory;
-- accidental leakage через store files;
-- accidental leakage через unencrypted hot logs или snapshots после завершения процесса.
+Этот pass защищает от casual local inspection hot memory files и скопированных hot logs/snapshots, если у атакующего нет passphrase.
 
 ## Threats Out Of Scope
 
-Первый encrypted mode не защищает от:
+Этот pass не защищает от:
 
 - compromised running process;
-- malicious OS, root, administrator, kernel или debugger access;
-- model/API provider, если host явно отправил данные в модель;
+- malicious OS/root/admin/debugger access;
 - plaintext `ContextPacket` в process memory;
-- plaintext Markdown export, если пользователь явно сделал export;
-- clipboard, terminal history, shell history или screen capture вне engine;
-- denial of service, file deletion, ransomware или rollback attacks без отдельного authenticated backup/audit design.
+- plaintext sealed pages и index/catalog metadata;
+- plaintext Markdown export;
+- shell history, terminal capture, clipboard или host-side logging;
+- file deletion, rollback attacks или ransomware.
 
-## Metadata Policy
+## Текущие Ограничения
 
-Security балансируется с deterministic recall и validation. В Мандате 3 сначала шифруем sensitive payloads и явно документируем plaintext metadata.
+- Сейчас шифруются только hot storage payloads.
+- Sealed pages ещё не шифруются.
+- Marker dictionary и candidate index metadata ещё не blind.
+- Interactive prompt unlock command пока нет; безопасный CLI unlock сейчас через `--passphrase-env`.
+- Encrypted export mode пока нет.
+- Existing unencrypted stores не мигрируются в encrypted автоматически.
 
-Metadata, которая может остаться plaintext на первом этапе:
+## Следующий Security Step
 
-- binary file magic, file kind, format version, codec id, payload length и integrity fields;
-- manifest security mode и KDF/AEAD parameters, которые не являются секретом;
-- page ids, file names, encoded sizes, codec/compression identifiers;
-- page catalog summaries для pruning: marker summaries, scope/kind/status/sensitivity/trust summaries;
-- candidate page indexes: exact marker index и Binary Fuse page filters;
-- marker dictionary entries, пока не реализованы blind marker tokens.
-
-Payloads, которые должны быть encrypted:
-
-- hot record payloads в `hot/hot.mgl`;
-- hot snapshot payloads в `hot/snapshot.mgs`;
-- sealed page payload bytes в `pages/*.mgp`;
-- future export/backup payloads только если это явно запрошено и задокументировано.
-
-Риски plaintext metadata:
-
-- marker strings, scope names, kinds, statuses, sensitivity labels и page summaries могут раскрывать структуру или темы даже при encrypted content;
-- exact marker indexes раскрывают marker-to-page relationships;
-- Binary Fuse filters могут раскрывать approximate membership behavior;
-- file sizes и page counts раскрывают workload shape.
-
-Позже можно добавить blind marker tokens, encrypted indexes, encrypted/redacted catalogs и policy-gated export. Это отдельные design steps и должны быть оправданы перед реализацией.
-
-## Session Model
-
-Encrypted stores locked at rest.
-
-Ожидаемый session flow:
-
-```text
-open encrypted store -> locked-store error
-unlock with passphrase/env/key source -> derive session key -> load hot memory -> recall/remember/seal -> process exits -> key gone
-```
-
-Правила:
-
-- passphrases никогда не хранятся в manifest;
-- session keys могут существовать в RAM, пока процесс активен;
-- L1 Hot RAM может держать plaintext cells, пока store unlocked;
-- decoded sealed page cache и scoring cache могут держать plaintext-derived data, пока store unlocked;
-- после завершения процесса key исчезает и store снова требует unlock;
-- lock/unlock process-local, пока не будет явно спроектирован future session service.
-
-## Encryption Design
-
-Не писать собственную криптографию.
-
-Предпочтительное направление реализации:
-
-- AEAD: `chacha20poly1305` with XChaCha20-Poly1305 if available, иначе ChaCha20-Poly1305 со строгими unique nonces;
-- KDF: `argon2` для passphrase-to-key derivation;
-- random salt/nonce generation: `rand` или `rand_core` через стабильные Rust crypto ecosystem APIs;
-- memory hygiene helpers: `zeroize` или `secrecy`, где practical.
-
-Encrypted payload envelope должен содержать non-secret metadata для decryption:
-
-- encryption scheme/version;
-- KDF id и parameters;
-- salt id или salt bytes where appropriate;
-- nonce;
-- AEAD tag как часть ciphertext/envelope;
-- optional associated-data context.
-
-Associated data должно по возможности связывать ciphertext с контекстом:
-
-- file kind;
-- format version;
-- page id или frame kind;
-- store id, если он будет добавлен позже.
-
-Binary file headers остаются readable. Payload за этими headers encrypted. Existing payload checksum полезен для corruption detection stored payload bytes, но AEAD authentication является главным integrity check для plaintext recovery.
-
-## Storage Layout Direction
-
-Не переписывать всю storage architecture.
-
-Разрешённое направление:
-
-- сохранить текущие file names и binary frame headers;
-- добавить security metadata в manifest или clearly versioned security metadata block;
-- использовать encrypted payload bytes внутри существующих `.mgl`, `.mgs` и `.mgp` containers;
-- сохранить чтение unencrypted stores;
-- reject encrypted stores без key;
-- wrong keys должны падать ясно.
-
-Migration story:
-
-- existing unencrypted stores продолжают открываться как unencrypted;
-- new encrypted stores могут создаваться через `mge init --encrypted`;
-- converting existing unencrypted store to encrypted должен быть отдельной явной командой позже, а не silent config flip;
-- encrypted stores никогда не должны silently downgrade/fallback to plaintext.
-
-## CLI And Integration Behavior
-
-Предпочтительное local key handling:
-
-- environment variable для automation, например `MGE_PASSPHRASE`;
-- prompt input для interactive CLI, где safe;
-- key file только если явно задокументировано;
-- test-only passphrase flags только в tests/test fixtures.
-
-Избегать:
-
-- passphrase как обычный CLI positional argument;
-- logging passphrases;
-- passphrase в MCP/SDK errors;
-- passphrase в config, manifest, benchmark output или debug output.
-
-Текущая и ожидаемая CLI форма:
-
-```bash
-mge init --encrypted
-mge config security
-# Future, пока не реализовано:
-mge unlock --store .memory-genome
-MGE_PASSPHRASE=... mge remember "..."
-```
-
-MCP/SDK behavior:
-
-- locked encrypted stores возвращают structured locked-store error (`details.error_kind = "store_locked"` в JSON-RPC adapter);
-- wrong keys возвращают structured authentication/unlock error;
-- SDK передают safe security options без дублирования crypto;
-- MCP/SDK protocol output не должен содержать passphrases или raw key material.
-
-## Validation And Rebuild
-
-Validation должна работать в двух уровнях:
-
-- locked encrypted store: проверять readable headers, manifest security metadata и file presence where possible;
-- unlocked encrypted store: decrypt/authenticate payloads, validate checksums, page catalog, indexes, hot log recovery и rebuild behavior.
-
-`rebuild-indexes` для encrypted stores требует unlocked session, потому что rebuild читает page contents, если только заранее не сохранено достаточно safe plaintext metadata.
-
-## Implementation Gates
-
-Перед implementation:
-
-- зафиксировать design и limitations;
-- выбрать dependencies;
-- добавить tests, доказывающие отсутствие silent plaintext fallback.
-
-Implementation должна добавить tests:
-
-- unencrypted stores still work;
-- encrypted init works;
-- encrypted remember/recall/seal works after unlock;
-- encrypted store cannot open without key;
-- wrong key fails clearly;
-- `hot/hot.mgl` payload is not plaintext;
-- `hot/snapshot.mgs` payload is not plaintext;
-- sealed page payload is not plaintext;
-- checkpoint/recovery works encrypted;
-- corrupted final encrypted frame handling preserves earlier valid data;
-- validate/deep validate behavior is clear;
-- MCP locked-store error shape is stable;
-- SDK encrypted smoke if safe;
-- JSON remains protocol/debug only, not runtime storage.
-
-## Current Limitations
-
-- Encryption design и manifest-level encrypted/locked foundation реализованы, но authenticated payload encryption ещё не реализована.
-- Команды session unlock пока нет.
-- Stores, созданные через `mge init --encrypted`, locked для remember/recall/seal/checkpoint/stats/validate/rebuild/export до реализации unlock/encryption support.
-- Metadata and indexes are not blind.
-- Markdown export plaintext by design, пока не добавлен future encrypted export mode.
-- Runtime process memory может содержать plaintext while unlocked.
-- Текущий `NoSecurity` не является encryption.
+Следующий пакет Мандата 3: sealed page payload encryption. Он должен сохранить явные boundaries для page headers/catalog и не должен молча шифровать indexes или blind marker metadata без отдельного design.

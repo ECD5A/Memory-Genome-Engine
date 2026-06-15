@@ -79,6 +79,7 @@ Input:
 - optional `subject`
 - optional `source_type` and `source_ref`
 - optional `links`
+- optional `passphrase_env` for encrypted stores
 
 ### `mge_recall`
 
@@ -93,6 +94,7 @@ Input:
 - optional `kind`
 - optional `include_deprecated`
 - optional `include_secret_references`
+- optional `passphrase_env` for encrypted stores
 
 Output contains the `ContextPacket` under `result.context_packet`.
 
@@ -115,6 +117,8 @@ For SDK stability, recall also includes `result.context`, an adapter-level wrapp
 - `mge_validate`: `{ "store_path": "...", "deep": true }`
 - `mge_rebuild_indexes`: `{ "store_path": "..." }`
 - `mge_export_markdown`: `{ "store_path": "...", "output_path": "optional/path.md" }`
+
+All store operations also accept optional `passphrase_env` for encrypted stores. The value is an environment variable name, not a passphrase.
 
 ## Example
 
@@ -159,7 +163,8 @@ Replace `$STORE_PATH` with a created store path and `$EXPORT_PATH` with a Markdo
 - Unknown tools return `-32601` with `details.error_kind = "unknown_method"`.
 - Missing or invalid arguments return `-32602` with `details.error_kind = "invalid_params"`.
 - A missing or invalid store path returns `-32000` with `details.error_kind = "store_open_failed"`.
-- An encrypted-mode store opened without session unlock returns `-32000` with `details.error_kind = "store_locked"`. Payload encryption/unlock is not implemented yet, so this is currently a safe locked-store foundation rather than usable encrypted recall.
+- An encrypted-mode store opened without session unlock returns `-32000` with `details.error_kind = "store_locked"`.
+- A wrong passphrase or authenticated decryption failure returns `-32000` with `details.error_kind = "auth_failed"`.
 - `full_scope` without `scope` returns `-32000` with `details.error_kind = "invalid_request"`.
 - Invalid recall modes such as `sideways` are parameter errors, not core runtime failures.
 - `output_path` on `mge_export_markdown` is explicit; otherwise export goes to the store default `exports/memory.md`.

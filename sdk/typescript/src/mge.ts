@@ -10,6 +10,7 @@ export type RecallMode = "focused" | "broad" | "full_scope" | "full-scope";
 export interface MemoryGenomeClientOptions {
   command?: string[];
   cwd?: string;
+  passphraseEnv?: string;
 }
 
 export interface InitOptions {
@@ -142,11 +143,13 @@ export class MemoryGenomeClient {
   private storePath: string;
   private command: string[];
   private cwd?: string;
+  private passphraseEnv?: string;
 
   constructor(storePath: string, options: MemoryGenomeClientOptions = {}) {
     this.storePath = storePath;
     this.command = options.command ?? commandFromEnv();
     this.cwd = options.cwd;
+    this.passphraseEnv = options.passphraseEnv;
   }
 
   init(profile = "fast", options: InitOptions = {}): string {
@@ -154,6 +157,7 @@ export class MemoryGenomeClient {
     if (options.encrypted) {
       args.push("--encrypted");
     }
+    args.push(...this.securityArgs());
     return this.runText(args);
   }
 
@@ -178,6 +182,7 @@ export class MemoryGenomeClient {
     for (const marker of options.markers ?? []) {
       args.push("--marker", marker);
     }
+    args.push(...this.securityArgs());
 
     const output = this.runText(args);
     const match = output.match(/Remembered cell (\d+)/);
@@ -208,19 +213,20 @@ export class MemoryGenomeClient {
     for (const marker of options.markers ?? []) {
       args.push("--marker", marker);
     }
+    args.push(...this.securityArgs());
     return this.runJson(args);
   }
 
   seal(): unknown {
-    return this.runJson(["seal"]);
+    return this.runJson(["seal", ...this.securityArgs()]);
   }
 
   checkpoint(): unknown {
-    return this.runJson(["checkpoint", "--json"]);
+    return this.runJson(["checkpoint", "--json", ...this.securityArgs()]);
   }
 
   stats(): StoreStats {
-    return this.runJson(["stats", "--json"]);
+    return this.runJson(["stats", "--json", ...this.securityArgs()]);
   }
 
   securityConfig(): SecurityConfig {
@@ -232,15 +238,16 @@ export class MemoryGenomeClient {
     if (options.deep) {
       args.splice(1, 0, "--deep");
     }
+    args.push(...this.securityArgs());
     return this.runJson(args, true);
   }
 
   rebuildIndexes(): unknown {
-    return this.runJson(["rebuild-indexes", "--json"]);
+    return this.runJson(["rebuild-indexes", "--json", ...this.securityArgs()]);
   }
 
   exportMarkdown(outputPath?: string): string {
-    this.runText(["export", "--format", "markdown"]);
+    this.runText(["export", "--format", "markdown", ...this.securityArgs()]);
     const defaultPath = join(this.storePath, "exports", "memory.md");
     if (!outputPath) {
       return defaultPath;
@@ -272,6 +279,10 @@ export class MemoryGenomeClient {
       );
     }
     return completed.stdout;
+  }
+
+  private securityArgs(): string[] {
+    return this.passphraseEnv ? ["--passphrase-env", this.passphraseEnv] : [];
   }
 }
 

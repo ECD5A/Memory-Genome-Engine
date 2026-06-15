@@ -1,3 +1,4 @@
+use std::env;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -42,6 +43,9 @@ enum Commands {
 
         #[arg(long)]
         encrypted: bool,
+
+        #[arg(long)]
+        passphrase_env: Option<String>,
     },
     Remember {
         text: Option<String>,
@@ -87,6 +91,9 @@ enum Commands {
 
         #[arg(long = "link")]
         links: Vec<CellId>,
+
+        #[arg(long)]
+        passphrase_env: Option<String>,
     },
     Recall {
         query: Option<String>,
@@ -114,35 +121,59 @@ enum Commands {
 
         #[arg(long)]
         include_secret_references: bool,
+
+        #[arg(long)]
+        passphrase_env: Option<String>,
     },
-    Seal,
+    Seal {
+        #[arg(long)]
+        passphrase_env: Option<String>,
+    },
     Checkpoint {
         #[arg(long)]
         json: bool,
+
+        #[arg(long)]
+        passphrase_env: Option<String>,
     },
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
     },
-    Inspect,
+    Inspect {
+        #[arg(long)]
+        passphrase_env: Option<String>,
+    },
     Validate {
         #[arg(long)]
         deep: bool,
 
         #[arg(long)]
         json: bool,
+
+        #[arg(long)]
+        passphrase_env: Option<String>,
     },
     RebuildIndexes {
         #[arg(long)]
         json: bool,
+
+        #[arg(long)]
+        passphrase_env: Option<String>,
     },
     Stats {
         #[arg(long)]
         json: bool,
+
+        #[arg(long)]
+        passphrase_env: Option<String>,
     },
     Export {
         #[arg(long, default_value = "markdown")]
         format: String,
+
+        #[arg(long)]
+        passphrase_env: Option<String>,
     },
 }
 
@@ -193,6 +224,7 @@ fn main() -> Result<()> {
             index_kind,
             durability,
             encrypted,
+            passphrase_env,
         } => {
             let options = init_options_from_args(
                 &profile,
@@ -203,8 +235,13 @@ fn main() -> Result<()> {
                 durability.as_deref(),
                 encrypted,
             )?;
-            let engine = MemoryEngine::init_with_options(&cli.store, options)
-                .with_context(|| format!("failed to initialize {}", cli.store.display()))?;
+            let passphrase = passphrase_from_env(passphrase_env.as_deref())?;
+            let engine = MemoryEngine::init_with_options_and_passphrase(
+                &cli.store,
+                options,
+                passphrase.as_deref(),
+            )
+            .with_context(|| format!("failed to initialize {}", cli.store.display()))?;
             let security = engine.security_config();
             println!(
                 "Initialized Memory Genome store at {} (profile={}, security_mode={}, page_codec={}, compression={}, page_clusterer={}, index_kind={}, durability={})",
@@ -234,8 +271,9 @@ fn main() -> Result<()> {
             source_type,
             source_ref,
             links,
+            passphrase_env,
         } => {
-            let mut engine = open_engine(&cli.store)?;
+            let mut engine = open_engine(&cli.store, passphrase_env.as_deref())?;
             let parsed_kind = MemoryKind::from_str(&kind)?;
             let parsed_trust = TrustLevel::from_str(&trust)?;
             let parsed_status = MemoryStatus::from_str(&status)?;
@@ -266,8 +304,9 @@ fn main() -> Result<()> {
             json,
             include_deprecated,
             include_secret_references,
+            passphrase_env,
         } => {
-            let engine = open_engine(&cli.store)?;
+            let engine = open_engine(&cli.store, passphrase_env.as_deref())?;
             let parsed_mode = RecallMode::from_str(&mode)?;
             let query = match (query, parsed_mode) {
                 (Some(query), _) => query,
@@ -295,13 +334,16 @@ fn main() -> Result<()> {
                 print!("{}", packet.to_prompt_text());
             }
         }
-        Commands::Seal => {
-            let mut engine = open_engine(&cli.store)?;
+        Commands::Seal { passphrase_env } => {
+            let mut engine = open_engine(&cli.store, passphrase_env.as_deref())?;
             let report = engine.seal()?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
-        Commands::Checkpoint { json } => {
-            let mut engine = open_engine(&cli.store)?;
+        Commands::Checkpoint {
+            json,
+            passphrase_env,
+        } => {
+            let mut engine = open_engine(&cli.store, passphrase_env.as_deref())?;
             let report = engine.checkpoint()?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
@@ -317,7 +359,7 @@ fn main() -> Result<()> {
         }
         Commands::Config { command } => match command {
             ConfigCommands::Show { json } => {
-                let engine = open_engine(&cli.store)?;
+                let engine = open_engine(&cli.store, None)?;
                 let config = engine.storage_config();
                 if json {
                     println!("{}", serde_json::to_string_pretty(&config)?);
@@ -364,7 +406,7 @@ fn main() -> Result<()> {
                     bail!("config set requires durability <fast|balanced|safe>, --durability, --page-codec, --compression, --page-clusterer, or --index-kind");
                 }
 
-                let mut engine = open_engine(&cli.store)?;
+                let mut engine = open_engine(&cli.store, None)?;
                 let mut update = mge_core::StorageConfigUpdate {
                     page_codec: page_codec
                         .as_deref()
@@ -410,12 +452,16 @@ fn main() -> Result<()> {
                 }
             }
         },
-        Commands::Inspect => {
-            let engine = open_engine(&cli.store)?;
+        Commands::Inspect { passphrase_env } => {
+            let engine = open_engine(&cli.store, passphrase_env.as_deref())?;
             println!("{}", serde_json::to_string_pretty(&engine.inspect()?)?);
         }
-        Commands::Validate { deep, json } => {
-            let engine = open_engine(&cli.store)?;
+        Commands::Validate {
+            deep,
+            json,
+            passphrase_env,
+        } => {
+            let engine = open_engine(&cli.store, passphrase_env.as_deref())?;
             let report = if deep {
                 engine.validate_deep()?
             } else {
@@ -430,8 +476,11 @@ fn main() -> Result<()> {
                 bail!("store validation failed");
             }
         }
-        Commands::RebuildIndexes { json } => {
-            let engine = open_engine(&cli.store)?;
+        Commands::RebuildIndexes {
+            json,
+            passphrase_env,
+        } => {
+            let engine = open_engine(&cli.store, passphrase_env.as_deref())?;
             let report = engine.rebuild_catalog_and_indexes()?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
@@ -439,8 +488,11 @@ fn main() -> Result<()> {
                 print!("{}", report.to_human_text());
             }
         }
-        Commands::Stats { json } => {
-            let engine = open_engine(&cli.store)?;
+        Commands::Stats {
+            json,
+            passphrase_env,
+        } => {
+            let engine = open_engine(&cli.store, passphrase_env.as_deref())?;
             let stats = engine.stats()?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&stats)?);
@@ -448,8 +500,11 @@ fn main() -> Result<()> {
                 print!("{}", stats.to_human_text());
             }
         }
-        Commands::Export { format } => {
-            let engine = open_engine(&cli.store)?;
+        Commands::Export {
+            format,
+            passphrase_env,
+        } => {
+            let engine = open_engine(&cli.store, passphrase_env.as_deref())?;
             match format.as_str() {
                 "markdown" | "md" => {
                     let path = engine.export_markdown_to_default_path()?;
@@ -466,13 +521,27 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn open_engine(store: &PathBuf) -> Result<MemoryEngine> {
-    MemoryEngine::open_at(store).with_context(|| {
+fn open_engine(store: &PathBuf, passphrase_env: Option<&str>) -> Result<MemoryEngine> {
+    let passphrase = passphrase_from_env(passphrase_env)?;
+    MemoryEngine::open_at_with_passphrase(store, passphrase.as_deref()).with_context(|| {
         format!(
             "failed to open {}; run `mge init` first or pass --store",
             store.display()
         )
     })
+}
+
+fn passphrase_from_env(passphrase_env: Option<&str>) -> Result<Option<String>> {
+    let Some(name) = passphrase_env else {
+        return Ok(None);
+    };
+    let value = env::var(name).with_context(|| {
+        format!("passphrase env var {name} is not set; pass the name with --passphrase-env")
+    })?;
+    if value.is_empty() {
+        bail!("passphrase env var {name} is empty");
+    }
+    Ok(Some(value))
 }
 
 fn init_options_from_args(

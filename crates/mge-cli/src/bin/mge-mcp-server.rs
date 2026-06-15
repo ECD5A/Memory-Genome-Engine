@@ -1,3 +1,4 @@
+use std::env;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
@@ -61,6 +62,8 @@ struct ToolError {
 #[derive(Debug, Deserialize)]
 struct StoreParams {
     store_path: PathBuf,
+    #[serde(default)]
+    passphrase_env: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,6 +90,8 @@ struct RememberParams {
     source_ref: Option<String>,
     #[serde(default)]
     links: Vec<CellId>,
+    #[serde(default)]
+    passphrase_env: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,6 +113,8 @@ struct RecallParams {
     include_deprecated: bool,
     #[serde(default)]
     include_secret_references: bool,
+    #[serde(default)]
+    passphrase_env: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,6 +122,8 @@ struct ValidateParams {
     store_path: PathBuf,
     #[serde(default)]
     deep: bool,
+    #[serde(default)]
+    passphrase_env: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -122,6 +131,8 @@ struct ExportMarkdownParams {
     store_path: PathBuf,
     #[serde(default)]
     output_path: Option<PathBuf>,
+    #[serde(default)]
+    passphrase_env: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -211,6 +222,8 @@ fn with_tool(tool: &str, result: Result<Value>) -> std::result::Result<Value, To
         let error_kind = classify_error_kind_from_error(&err);
         let message = if error_kind == "store_locked" {
             message_with_cause(&err, "store is locked")
+        } else if error_kind == "auth_failed" {
+            message_with_cause(&err, "authentication failed")
         } else {
             err.to_string()
         };
@@ -233,6 +246,9 @@ fn classify_error_kind_from_error(err: &anyhow::Error) -> &'static str {
         let message = cause.to_string();
         if message.contains("store is locked") {
             return "store_locked";
+        }
+        if message.contains("authentication failed") {
+            return "auth_failed";
         }
     }
     classify_error_kind(&err.to_string())
@@ -263,7 +279,7 @@ fn mge_schema() -> Value {
 
 fn mge_remember(params: Value) -> Result<Value> {
     let params: RememberParams = parse_params(params)?;
-    let mut engine = open_engine(&params.store_path)?;
+    let mut engine = open_engine(&params.store_path, params.passphrase_env.as_deref())?;
     let mut request = RememberRequest::new(
         MemoryKind::from_str(&params.kind)?,
         MemoryValue::Text(params.content),
@@ -293,7 +309,7 @@ fn mge_remember(params: Value) -> Result<Value> {
 
 fn mge_recall(params: Value) -> Result<Value> {
     let params: RecallParams = parse_params(params)?;
-    let engine = open_engine(&params.store_path)?;
+    let engine = open_engine(&params.store_path, params.passphrase_env.as_deref())?;
     let mode = RecallMode::from_str(&params.mode)?;
     if mode == RecallMode::FullScope && params.scope.is_none() {
         bail!("full_scope recall requires scope");
@@ -333,14 +349,14 @@ fn mge_recall(params: Value) -> Result<Value> {
 
 fn mge_seal(params: Value) -> Result<Value> {
     let params: StoreParams = parse_params(params)?;
-    let mut engine = open_engine(&params.store_path)?;
+    let mut engine = open_engine(&params.store_path, params.passphrase_env.as_deref())?;
     let report = engine.seal()?;
     Ok(tool_result("mge_seal", true, json!({ "seal": report })))
 }
 
 fn mge_checkpoint(params: Value) -> Result<Value> {
     let params: StoreParams = parse_params(params)?;
-    let mut engine = open_engine(&params.store_path)?;
+    let mut engine = open_engine(&params.store_path, params.passphrase_env.as_deref())?;
     let report = engine.checkpoint()?;
     Ok(tool_result(
         "mge_checkpoint",
@@ -351,14 +367,14 @@ fn mge_checkpoint(params: Value) -> Result<Value> {
 
 fn mge_stats(params: Value) -> Result<Value> {
     let params: StoreParams = parse_params(params)?;
-    let engine = open_engine(&params.store_path)?;
+    let engine = open_engine(&params.store_path, params.passphrase_env.as_deref())?;
     let stats = engine.stats()?;
     Ok(tool_result("mge_stats", true, json!({ "stats": stats })))
 }
 
 fn mge_validate(params: Value) -> Result<Value> {
     let params: ValidateParams = parse_params(params)?;
-    let engine = open_engine(&params.store_path)?;
+    let engine = open_engine(&params.store_path, params.passphrase_env.as_deref())?;
     let report = if params.deep {
         engine.validate_deep()?
     } else {
@@ -373,7 +389,7 @@ fn mge_validate(params: Value) -> Result<Value> {
 
 fn mge_rebuild_indexes(params: Value) -> Result<Value> {
     let params: StoreParams = parse_params(params)?;
-    let engine = open_engine(&params.store_path)?;
+    let engine = open_engine(&params.store_path, params.passphrase_env.as_deref())?;
     let report = engine.rebuild_catalog_and_indexes()?;
     Ok(tool_result(
         "mge_rebuild_indexes",
@@ -384,7 +400,7 @@ fn mge_rebuild_indexes(params: Value) -> Result<Value> {
 
 fn mge_export_markdown(params: Value) -> Result<Value> {
     let params: ExportMarkdownParams = parse_params(params)?;
-    let engine = open_engine(&params.store_path)?;
+    let engine = open_engine(&params.store_path, params.passphrase_env.as_deref())?;
     let path = if let Some(path) = params.output_path {
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -446,9 +462,21 @@ fn parse_params<T: for<'de> Deserialize<'de>>(params: Value) -> Result<T> {
     serde_json::from_value(params).map_err(|err| anyhow!("invalid params: {err}"))
 }
 
-fn open_engine(store_path: &PathBuf) -> Result<MemoryEngine> {
-    MemoryEngine::open_at(store_path)
+fn open_engine(store_path: &PathBuf, passphrase_env: Option<&str>) -> Result<MemoryEngine> {
+    let passphrase = passphrase_from_env(passphrase_env)?;
+    MemoryEngine::open_at_with_passphrase(store_path, passphrase.as_deref())
         .with_context(|| format!("failed to open store {}", store_path.display()))
+}
+
+fn passphrase_from_env(passphrase_env: Option<&str>) -> Result<Option<String>> {
+    let Some(name) = passphrase_env else {
+        return Ok(None);
+    };
+    let value = env::var(name).with_context(|| format!("passphrase env var {name} is not set"))?;
+    if value.is_empty() {
+        bail!("passphrase env var {name} is empty");
+    }
+    Ok(Some(value))
 }
 
 fn parse_memory_source(
@@ -487,6 +515,8 @@ fn classify_error_kind(message: &str) -> &'static str {
         "invalid_params"
     } else if message.contains("store is locked") {
         "store_locked"
+    } else if message.contains("authentication failed") {
+        "auth_failed"
     } else if message.contains("failed to open store") {
         "store_open_failed"
     } else if message.contains("requires scope") || message.contains("requires query") {
@@ -523,7 +553,8 @@ fn tool_schemas() -> Value {
                     "subject": "optional subject string",
                     "source_type": "optional source type; requires source_ref",
                     "source_ref": "optional source reference; requires source_type",
-                    "links": "array of linked CellId numbers"
+                    "links": "array of linked CellId numbers",
+                    "passphrase_env": "optional environment variable name used to unlock encrypted stores"
                 }
             },
             "output": ["ok", "tool", "protocol_version", "integration_schema_version", "cell_id", "scope", "kind", "status", "json_runtime_storage"]
@@ -540,7 +571,8 @@ fn tool_schemas() -> Value {
                     "max_items": "optional positive integer",
                     "kind": "optional memory kind string",
                     "include_deprecated": "boolean",
-                    "include_secret_references": "boolean"
+                    "include_secret_references": "boolean",
+                    "passphrase_env": "optional environment variable name used to unlock encrypted stores"
                 }
             },
             "output": ["ok", "tool", "protocol_version", "integration_schema_version", "context_packet", "context", "json_runtime_storage"]
@@ -553,7 +585,8 @@ fn tool_schemas() -> Value {
                 "required": ["store_path"],
                 "properties": {
                     "store_path": "string path to existing Memory Genome store",
-                    "deep": "boolean, default false"
+                    "deep": "boolean, default false",
+                    "passphrase_env": "optional environment variable name used to unlock encrypted stores"
                 }
             },
             "output": ["ok", "tool", "protocol_version", "integration_schema_version", "validation"]
@@ -564,7 +597,8 @@ fn tool_schemas() -> Value {
                 "required": ["store_path"],
                 "properties": {
                     "store_path": "string path to existing Memory Genome store",
-                    "output_path": "optional markdown output path"
+                    "output_path": "optional markdown output path",
+                    "passphrase_env": "optional environment variable name used to unlock encrypted stores"
                 }
             },
             "output": ["ok", "tool", "protocol_version", "integration_schema_version", "output_path", "format", "json_runtime_storage"]
@@ -577,7 +611,8 @@ fn store_tool_schema(output_field: &str) -> Value {
         "input": {
             "required": ["store_path"],
             "properties": {
-                "store_path": "string path to existing Memory Genome store"
+                "store_path": "string path to existing Memory Genome store",
+                "passphrase_env": "optional environment variable name used to unlock encrypted stores"
             }
         },
         "output": ["ok", "tool", "protocol_version", "integration_schema_version", output_field]

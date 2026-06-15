@@ -38,8 +38,8 @@ use crate::retrieval::{
     RecallRequest, Retriever, ScoringContext,
 };
 use crate::security::{
-    AuditEvent, AuditLogger, NoSecurity, NoopAuditLogger, SecurityConfig, SecurityMode,
-    SecurityProvider,
+    create_security_metadata, unlock_security_metadata, AuditEvent, AuditLogger, NoSecurity,
+    NoopAuditLogger, SecurityConfig, SecurityMetadata, SecurityMode, SecurityProvider, SessionKey,
 };
 
 pub const DEFAULT_STORE_DIR: &str = ".memory-genome";
@@ -69,6 +69,7 @@ pub struct MemoryEngine {
     hot_unsynced_events: u64,
     last_hot_sync: Instant,
     page_cache: RefCell<DecodedPageCache>,
+    session_key: Option<SessionKey>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -136,6 +137,8 @@ pub struct Manifest {
     pub durability: DurabilityPolicy,
     #[serde(default)]
     pub security_mode: SecurityMode,
+    #[serde(default)]
+    pub security: SecurityMetadata,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -592,6 +595,14 @@ impl MemoryEngine {
     }
 
     pub fn init_with_options(store_root: impl AsRef<Path>, options: InitOptions) -> Result<Self> {
+        Self::init_with_options_and_passphrase(store_root, options, None)
+    }
+
+    pub fn init_with_options_and_passphrase(
+        store_root: impl AsRef<Path>,
+        options: InitOptions,
+        passphrase: Option<&str>,
+    ) -> Result<Self> {
         ensure_runtime_page_codec(options.page_codec)?;
 
         let root = store_root.as_ref().to_path_buf();
@@ -605,6 +616,15 @@ impl MemoryEngine {
         let created_manifest = !manifest_path.exists();
         if created_manifest {
             let now = current_timestamp();
+            let security = if options.security_mode.is_encrypted() {
+                if let Some(passphrase) = passphrase {
+                    create_security_metadata(passphrase)?.0
+                } else {
+                    SecurityMetadata::default()
+                }
+            } else {
+                SecurityMetadata::default()
+            };
             let manifest = Manifest {
                 version: 1,
                 created_at: now,
@@ -618,6 +638,7 @@ impl MemoryEngine {
                 page_clusterer: options.page_clusterer,
                 durability: options.durability,
                 security_mode: options.security_mode,
+                security,
             };
             binary::write_messagepack_file(&manifest_path, FileKind::Manifest, &manifest)?;
         }
@@ -646,13 +667,23 @@ impl MemoryEngine {
         if created_manifest && options.security_mode.is_encrypted() {
             let manifest: Manifest =
                 binary::read_messagepack_file(&manifest_path, FileKind::Manifest)?;
+            if let Some(passphrase) = passphrase {
+                return Self::open_at_with_passphrase(root, Some(passphrase));
+            }
             return Ok(Self::locked_empty_engine(root, manifest, dictionary));
         }
 
-        Self::open_at(root)
+        Self::open_at_with_passphrase(root, passphrase)
     }
 
     pub fn open_at(store_root: impl AsRef<Path>) -> Result<Self> {
+        Self::open_at_with_passphrase(store_root, None)
+    }
+
+    pub fn open_at_with_passphrase(
+        store_root: impl AsRef<Path>,
+        passphrase: Option<&str>,
+    ) -> Result<Self> {
         let root = store_root.as_ref().to_path_buf();
         let manifest_path = root.join(MANIFEST_FILE);
         if !manifest_path.exists() {
@@ -662,16 +693,20 @@ impl MemoryEngine {
         let mut manifest: Manifest =
             binary::read_messagepack_file(&manifest_path, FileKind::Manifest)?;
         ensure_runtime_page_codec(manifest.page_codec)?;
-        if manifest.security_mode.is_encrypted() {
-            return Err(MgeError::StoreLocked(
-                "encrypted store requires session unlock; payload encryption/unlock is not implemented in this build"
-                    .to_string(),
-            ));
-        }
+        let session_key = if manifest.security_mode.is_encrypted() {
+            let passphrase = passphrase.ok_or_else(|| {
+                MgeError::StoreLocked(
+                    "encrypted store requires session unlock via passphrase env".to_string(),
+                )
+            })?;
+            Some(unlock_security_metadata(&manifest.security, passphrase)?)
+        } else {
+            None
+        };
         let dictionary =
             MarkerDictionary::load_from_path(root.join("dictionary").join(MARKER_DICTIONARY_FILE))?;
         let hot_store = HotStore::new(root.join("hot").join(HOT_LOG_FILE));
-        let hot_recovery = hot_store.load_recovering()?;
+        let hot_recovery = hot_store.load_recovering_with_key(session_key.as_ref())?;
         if hot_recovery.recovered_bad_tail {
             hot_store.truncate_to_valid_offset(hot_recovery.valid_log_offset)?;
         }
@@ -695,6 +730,7 @@ impl MemoryEngine {
             hot_unsynced_events: 0,
             last_hot_sync: Instant::now(),
             page_cache: RefCell::new(DecodedPageCache::new(DECODED_PAGE_CACHE_CAPACITY)),
+            session_key,
         })
     }
 
@@ -713,6 +749,7 @@ impl MemoryEngine {
             hot_unsynced_events: 0,
             last_hot_sync: Instant::now(),
             page_cache: RefCell::new(DecodedPageCache::new(DECODED_PAGE_CACHE_CAPACITY)),
+            session_key: None,
         }
     }
 
@@ -735,7 +772,7 @@ impl MemoryEngine {
     }
 
     pub fn security_config(&self) -> SecurityConfig {
-        security_config_from_mode(self.manifest.security_mode)
+        security_config_from_parts(self.manifest.security_mode, &self.manifest.security)
     }
 
     pub fn security_config_at(store_root: impl AsRef<Path>) -> Result<SecurityConfig> {
@@ -745,7 +782,10 @@ impl MemoryEngine {
             return Err(MgeError::NotInitialized(root.display().to_string()));
         }
         let manifest: Manifest = binary::read_messagepack_file(&manifest_path, FileKind::Manifest)?;
-        Ok(security_config_from_mode(manifest.security_mode))
+        Ok(security_config_from_parts(
+            manifest.security_mode,
+            &manifest.security,
+        ))
     }
 
     pub fn update_storage_config(
@@ -1372,7 +1412,7 @@ impl MemoryEngine {
         self.flush_pending_hot(true)?;
         let hot_store = HotStore::new(self.hot_cells_path());
         let cells = self.hot.all_cells();
-        let snapshot = hot_store.write_snapshot(&cells)?;
+        let snapshot = hot_store.write_snapshot_with_key(&cells, self.session_key.as_ref())?;
         self.hot_unsynced_events = 0;
         self.last_hot_sync = Instant::now();
 
@@ -1548,10 +1588,9 @@ impl MemoryEngine {
     }
 
     fn ensure_payload_unlocked(&self) -> Result<()> {
-        if self.manifest.security_mode.is_encrypted() {
+        if self.manifest.security_mode.is_encrypted() && self.session_key.is_none() {
             return Err(MgeError::StoreLocked(
-                "encrypted store requires session unlock; payload encryption/unlock is not implemented in this build"
-                    .to_string(),
+                "encrypted store requires session unlock via passphrase env".to_string(),
             ));
         }
         Ok(())
@@ -1616,7 +1655,9 @@ impl MemoryEngine {
 
         let mut cell_ids = BTreeSet::new();
         let mut cell_links = Vec::new();
-        if let Err(err) = HotStore::new(self.hot_cells_path()).load_cells() {
+        if let Err(err) =
+            HotStore::new(self.hot_cells_path()).load_recovering_with_key(self.session_key.as_ref())
+        {
             report.error(format!("hot memory load failed: {err}"));
         }
         let hot_cells = self.hot.all_cells();
@@ -1781,7 +1822,9 @@ impl MemoryEngine {
         let pending = std::mem::take(&mut self.pending_hot_cells);
         for (index, cell) in pending.iter().enumerate() {
             let sync_each_record = self.manifest.durability == DurabilityPolicy::Safe;
-            if let Err(err) = hot_store.append_cell(cell, sync_each_record) {
+            if let Err(err) =
+                hot_store.append_cell_with_key(cell, sync_each_record, self.session_key.as_ref())
+            {
                 self.pending_hot_cells = pending[index..].to_vec();
                 return Err(err);
             }
@@ -2425,6 +2468,11 @@ fn page_storage_details_from_codec(codec: CodecId) -> Result<(PageCodecKind, Com
     match codec {
         CodecId::MessagePack => Ok((PageCodecKind::MessagePack, CompressionKind::None)),
         CodecId::MessagePackZstd => Ok((PageCodecKind::MessagePack, CompressionKind::Zstd)),
+        CodecId::MessagePackEncrypted | CodecId::MessagePackZstdEncrypted => {
+            Err(MgeError::StorageFormat(
+                "encrypted page payload codec is not supported in this build".to_string(),
+            ))
+        }
         CodecId::None => Err(MgeError::StorageFormat(
             "page frame codec none is not valid for runtime page storage".to_string(),
         )),
@@ -2441,18 +2489,26 @@ fn ensure_runtime_page_codec(page_codec: PageCodecKind) -> Result<()> {
     Ok(())
 }
 
-fn security_config_from_mode(mode: SecurityMode) -> SecurityConfig {
+fn security_config_from_parts(mode: SecurityMode, metadata: &SecurityMetadata) -> SecurityConfig {
+    let key_verification_configured = metadata.is_configured();
+    let hot_payload_encryption = mode.is_encrypted() && key_verification_configured;
     SecurityConfig {
         mode,
-        payload_encryption: false,
+        payload_encryption: hot_payload_encryption,
+        hot_payload_encryption,
+        sealed_page_payload_encryption: false,
         session_unlock_required: mode.is_encrypted(),
+        key_verification_configured,
         metadata_plaintext: true,
-        implementation_status: match mode {
-            SecurityMode::Unencrypted => {
+        implementation_status: match (mode, key_verification_configured) {
+            (SecurityMode::Unencrypted, _) => {
                 "unencrypted store; NoSecurity pass-through is active".to_string()
             }
-            SecurityMode::Encrypted => {
-                "encrypted mode configured; payload encryption and session unlock are not implemented in this build, so payload operations remain locked".to_string()
+            (SecurityMode::Encrypted, true) => {
+                "encrypted hot storage configured; hot log/snapshot payload operations require session unlock".to_string()
+            }
+            (SecurityMode::Encrypted, false) => {
+                "encrypted mode configured without key metadata; payload operations remain locked until security metadata is initialized".to_string()
             }
         },
     }

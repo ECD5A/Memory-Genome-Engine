@@ -132,15 +132,18 @@ class MemoryGenomeClient:
         store_path: str | Path,
         command: Sequence[str] | None = None,
         cwd: str | Path | None = None,
+        passphrase_env: str | None = None,
     ) -> None:
         self.store_path = Path(store_path)
         self.command = list(command) if command is not None else _default_command()
         self.cwd = Path(cwd) if cwd is not None else None
+        self.passphrase_env = passphrase_env
 
     def init(self, profile: str = "fast", *, encrypted: bool = False) -> str:
         args = ["init", "--profile", profile]
         if encrypted:
             args.append("--encrypted")
+        args.extend(self._security_args())
         return self._run_text(args)
 
     def remember(
@@ -173,6 +176,7 @@ class MemoryGenomeClient:
             args.extend(["--subject", subject])
         for marker in markers:
             args.extend(["--marker", marker])
+        args.extend(self._security_args())
 
         output = self._run_text(args)
         match = re.search(r"Remembered cell (\d+)", output)
@@ -200,16 +204,17 @@ class MemoryGenomeClient:
             args.extend(["--kind", kind])
         for marker in markers:
             args.extend(["--marker", marker])
+        args.extend(self._security_args())
         return cast(ContextPacket, self._run_json(args))
 
     def seal(self) -> Mapping[str, Any]:
-        return self._run_json(["seal"])
+        return self._run_json(["seal", *self._security_args()])
 
     def checkpoint(self) -> Mapping[str, Any]:
-        return self._run_json(["checkpoint", "--json"])
+        return self._run_json(["checkpoint", "--json", *self._security_args()])
 
     def stats(self) -> StoreStats:
-        return cast(StoreStats, self._run_json(["stats", "--json"]))
+        return cast(StoreStats, self._run_json(["stats", "--json", *self._security_args()]))
 
     def security_config(self) -> SecurityConfig:
         return cast(SecurityConfig, self._run_json(["config", "security", "--json"]))
@@ -218,13 +223,14 @@ class MemoryGenomeClient:
         args = ["validate", "--json"]
         if deep:
             args.insert(1, "--deep")
+        args.extend(self._security_args())
         return cast(ValidationReport, self._run_json(args, allow_failure=True))
 
     def rebuild_indexes(self) -> Mapping[str, Any]:
-        return self._run_json(["rebuild-indexes", "--json"])
+        return self._run_json(["rebuild-indexes", "--json", *self._security_args()])
 
     def export_markdown(self, output_path: str | Path | None = None) -> Path:
-        self._run_text(["export", "--format", "markdown"])
+        self._run_text(["export", "--format", "markdown", *self._security_args()])
         default_path = self.store_path / "exports" / "memory.md"
         if output_path is None:
             return default_path
@@ -244,6 +250,11 @@ class MemoryGenomeClient:
                 completed.stderr,
             )
         return completed.stdout
+
+    def _security_args(self) -> list[str]:
+        if self.passphrase_env is None:
+            return []
+        return ["--passphrase-env", self.passphrase_env]
 
     def _run_json(
         self, args: Sequence[str], *, allow_failure: bool = False
