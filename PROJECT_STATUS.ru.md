@@ -1,759 +1,160 @@
-# Memory Genome Engine - Статус Проекта
+# Статус Проекта
 
 [English version](PROJECT_STATUS.md)
 
-Этот файл - рабочий журнал репозитория. Его нужно держать актуальным, чтобы не повторять уже сделанную работу и не возвращаться к закрытым решениям без причины.
+Этот файл - статусный source of truth. Usage, architecture, security, integration, SDK, benchmark и release instructions вынесены в отдельные docs по ссылкам ниже.
 
-## Source Of Truth
+## Текущее Состояние
 
-Цель проекта задаётся исходным промптом и твоими уточнениями: сделать компактный, быстрый, локальный Rust-first memory engine для LLM agents, где память хранится как typed cells + marker genomes + sealed pages + candidate filters, а агент получает только `ContextPacket`.
+Memory Genome Engine - Rust-first локальный memory engine для агентов.
 
-Главная логика:
+Закрыто:
 
-```text
-Memory = Cells + Markers + Pages + Filters + Context Packets
-Hot memory = mutable
-Sealed memory = static indexed pages
-ExactMarkerPageIndex = default
-BinaryFusePageIndex = opt-in probabilistic candidate page filter
-Agent receives ContextPacket, not raw memory store
-```
+- Mandate 1: Developer-ready Core.
+- Mandate 2: Agent Integration / MCP / SDK.
+- Mandate 3: Security / Encryption.
 
-Непереговорные правила:
+Текущий этап:
 
-- Не превращать проект в chatbot, UI, cloud service, Markdown memory или vector DB.
-- Не хранить raw credentials/secrets; только `SecretReference` placeholders.
-- Не делать fake encryption или fake Binary Fuse.
-- Не ломать defaults ради экспериментов; быстрые/новые режимы сначала идут как opt-in.
-- Не раздувать проект: маленькие модули, понятные traits, тесты, отдельные коммиты.
-- Не добавлять Bloom, Counting Bloom, Cuckoo, XOR, Ribbon или новые filter families без benchmark-доказательства и стабильного `CandidatePageIndex` boundary.
+- Pre-Mandate 4 Documentation Tree Cleanup закрыт в этом cleanup-проходе.
+- Следующий рекомендуемый мандат: Mandate 4 Product UI / Packaging.
+- Опциональная проверка перед Mandate 4: real user corpus run плюс проверка с реальным local host/agent runner.
 
-JSON policy:
+## Карта Документации
 
-- JSON/JSONL не являются internal runtime storage, defaults или частью storage architecture.
-- JSON разрешён только как explicit debug output, CLI `--json` output или API-level structured input parsing.
-- Runtime storage уже использует compact binary files: MessagePack-based `.mgm`, `.mgd`, `.mgl`, `.mgp` и `.mgi`.
-- `MemoryValue::Structured(serde_json::Value)` является API-level structured value, а не обязательством хранить память как JSON.
+- [README](README.ru.md): короткая продуктовая точка входа и навигация.
+- [Quickstart](QUICKSTART.ru.md): первые команды и основной CLI workflow.
+- [Architecture](docs/ARCHITECTURE.ru.md): core design, storage и index model.
+- [Security](docs/SECURITY.ru.md): encryption, threat model, plaintext metadata risks.
+- [Integration](docs/INTEGRATION.ru.md): agent lifecycle и local host pattern.
+- [MCP](docs/MCP.ru.md): JSON-RPC adapter contract.
+- [SDK](docs/SDK.ru.md): Python/TypeScript thin wrappers.
+- [Benchmarks](docs/BENCHMARKS.ru.md): performance tools и чтение отчетов.
+- [Release](docs/RELEASE.ru.md): build, smoke и packaging checks.
 
 ## Roadmap Snapshot
 
 | Stage | Status | Notes |
 | --- | --- | --- |
-| v0.1 core/CLI | Done / hardening | Rust core, CLI, cells, markers, hot memory, sealed pages, exact index, recall, context packets работают. |
-| v0.2 storage/index foundation | Done / hardening | Binary runtime storage layout, MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in и validation hardening сделаны. |
-| v0.2 remaining | Closed | Benchmark foundation готов; дальнейший core cleanup только benchmark-gated. |
-| v0.3 SDK/MCP | In progress | Mandate 2 integration foundation активен: MCP-ready adapter и thin Python/TypeScript wrappers уже есть. |
-| v0.4 security | Closed / future hardening | Mandate 3 имеет threat model плюс real session unlock и authenticated hot log/snapshot/sealed-page payload encryption; encrypted indexes/blind markers остаются optional future work. |
-| v0.5 safety/search | Partial foundation | Policy/capabilities есть; poisoning/conflict/vector reranking ещё не начаты. |
-
-## Текущий Фокус
-
-- Держать Mandate 1 core, Mandate 2 integration и Mandate 3 payload encryption стабильными.
-- Держать JSON вне internal runtime storage; использовать его только для explicit debug output и structured input parsing.
-- Не начинать новую crypto/index/storage work без отдельного design и benchmark или migration evidence.
+| v0.1 core/CLI | Closed | Rust core, CLI, `MemoryCell`, `MarkerDictionary`, hot memory, sealed pages, exact index, recall и `ContextPacket` работают. |
+| v0.2 storage/index foundation | Closed | Binary runtime storage, MessagePack pages, zstd, binary headers/checksums, L1 Hot RAM, validation/rebuild, Binary Fuse opt-in и benchmark foundation готовы. |
+| v0.3 SDK/MCP | Closed | Local JSON-RPC MCP-ready adapter, thin Python SDK, thin TypeScript SDK, typed contracts, examples и smokes готовы. |
+| v0.4 security | Closed / future hardening | Encrypted store mode, session unlock, encrypted hot log, encrypted snapshot, encrypted sealed page payloads и metadata risk memo готовы. |
+| v0.5 safety/search | Partial foundation | Policy/capabilities и audit hook foundation есть; poisoning/conflict detection и optional vector reranking остаются future work. |
 
 ## Mandate 1 Closure Status
 
-Mandate 1 закрыт на commit `d441ca1`.
+Developer-ready core закрыт.
 
 Готово:
 
-- Binary runtime storage layout реализован и валидируется.
-- L1 Hot RAM indexes и RAM-first durability/recovery реализованы.
-- `MarkerGenome` явный, а `MemoryCell.markers` сохранён как flattened compatibility/index view.
-- Sealed pages, page catalog metadata, metadata pruning, decoded page cache и runtime scoring cache реализованы.
-- `ExactMarkerPageIndex` остаётся default; `BinaryFusePageIndex` остаётся optional и benchmark-gated.
-- `validate --deep` и `rebuild-indexes` работают без переписывания sealed page payloads.
-- CLI workflow и Rust core API usable для init/open, remember, recall, seal, checkpoint, validate и rebuild.
-- `mge-synthetic-bench` и `mge-corpus-bench` готовы для generated и local real-workload measurements.
+- Binary runtime storage layout: `.mgm`, `.mgd`, `.mgl`, `.mgs`, `.mgp`, `.mgi`.
+- L1 Hot RAM с exact mutable indexes и durable hot-log recovery.
+- Явный `MarkerGenome`; `MemoryCell.markers` остается flattened runtime/index compatibility view.
+- Sealed pages, page catalog metadata, metadata pruning, decoded page cache и runtime scoring cache.
+- `ExactMarkerPageIndex` default; `BinaryFusePageIndex` optional и benchmark-gated.
+- Focused, broad и full-scope recall.
+- Deep validation и safe catalog/index rebuild.
+- Synthetic и corpus benchmark harnesses.
 
-Последняя проверка:
+Core constraints:
 
-- `cargo fmt`: passed.
-- `cargo test`: passed, 115 tests total.
-- CLI smoke: passed.
-- Synthetic benchmark smoke: passed, exact/BinaryFuse subset check true.
-- Generated corpus profiles `small`, `medium`, `code-heavy`, `docs-heavy` и `mixed`: passed.
-- Repo-local corpus: passed на 38 files, 622884 bytes, 794 chunks, subset check true.
-
-Benchmark decision summary:
-
-- L1 Hot RAM не является bottleneck.
-- Sealed repeated recall достаточно стабилен для developer-ready core.
-- BinaryFuse иногда помогает, но недостаточно стабильно, чтобы заменить exact.
-- Page decode share сейчас не обосновывает custom codec work.
-- Scoring/filtering - единственный повторяющийся bottleneck signal, но нужен большой user-provided corpus перед дальнейшим cleanup.
-
-Closure benchmark summary, exact baseline:
-
-- Generated profiles прошли: `small`, `medium`, `code-heavy`, `docs-heavy`, `mixed`.
-- Generated repeated focused recall range: 1596-2713 us; hot focused range: 261-420 us.
-- Generated page decode share range: 8-14%; scoring/filtering share range: 15-31%; ContextPacket share range: 4-6%.
-- Repo-local corpus: 38 files, 622884 bytes, 794 chunks, repeated focused 9647 us, repeated broad 15867 us, repeated full-scope 7804 us.
-- Repo-local shares: page decode 13%, scoring/filtering 23%, ContextPacket 2%; repeated locality benefit 39%.
-- Repo-local BinaryFuse repeated focused: 8778 us vs exact 9647 us, но BinaryFuse остаётся optional, потому что profile results mixed.
-
-Оставшиеся closure gaps:
-
-- Прогнать большой user-provided corpus, если он доступен.
-- Держать `docs/BENCHMARKS.md` и `docs/BENCHMARKS.ru.md` актуальными по мере изменения benchmark output.
-- Поддерживать минимальный Rust API example в `examples/basic_usage.rs`.
-- Optional scoring/filtering cleanup только если большой real corpus подтвердит тот же bottleneck.
-
-## Mandate 2 Progress
-
-Active mandate: Agent Integration / MCP / SDK.
-
-Сделано в Mandate 2 foundation:
-
-- Stable Rust integration boundary reviewed; `MemoryEngine` уже покрывает init/open, remember, recall, seal, checkpoint, stats, validate, validate_deep, rebuild indexes и Markdown export.
-- Добавлен `mge-mcp-server` как local JSON-RPC stdin/stdout adapter с tools для remember, recall, seal, checkpoint, stats, validate, rebuild indexes и Markdown export.
-- MCP tool contracts стабилизированы через `protocol_version = mge-jsonrpc-1`, `integration_schema_version = 1`, `mge_schema`, structured errors, adapter-level recall `context` и golden JSON contract fixtures.
-- Добавлен thin Python SDK wrapper в `sdk/python`.
-- Добавлен thin TypeScript SDK wrapper в `sdk/typescript`.
-- Добавлены typed Python и TypeScript SDK contract surfaces плюс structured protocol error helpers.
-- Добавлены runnable Python и TypeScript basic examples.
-- Добавлены agent workflow examples для CLI, MCP-style JSON-RPC, Python и TypeScript.
-- Добавлены integration docs: `docs/INTEGRATION.md`, `docs/MCP.md`, `docs/SDK.md` и русские mirrors.
-- Добавлена локальная developer packaging metadata для thin SDK wrappers: `sdk/python/pyproject.toml`, `sdk/typescript/package.json` и `sdk/typescript/tsconfig.json`.
-- MCP adapter tests усилены для malformed JSON, unknown tool names, missing required args, invalid recall modes, `full_scope` без scope, invalid store paths и explicit Markdown export paths.
-- Документация обновлена по local SDK install/use, MCP adapter commands, JSON-RPC workflow examples, troubleshooting и schema versioning notes.
-- Добавлены runnable local agent host examples для Rust/CLI, Python SDK, TypeScript SDK и MCP JSON-RPC transcript replay.
-- Добавлено compatibility smoke coverage для single-process MCP multi-call session, relative и absolute store paths, Python agent host workflow, TypeScript agent host workflow where supported и Rust CLI host workflow.
-
-Mandate 2 constraints сохранены:
-
-- Rust остаётся core.
-- Python и TypeScript не дублируют memory logic; они вызывают Rust CLI.
-- JSON является только protocol/debug output, а не runtime storage.
-- Storage layout, filters, page codec, recall modes, `MarkerGenome` и `MemoryCell.markers` не менялись.
-
-Следующий шаг Mandate 2:
-
-- Оставляем текущий versioned JSON-RPC stdin/stdout adapter основной local MCP-ready поверхностью; full external MCP SDK dependency откладывается до конкретной host integration необходимости.
-- Следующий полезный пакет: прогнать JSON-RPC adapter против реального local agent runner/host harness или добавить package-level release checks для thin SDK без изменения core.
+- JSON/JSONL не являются runtime storage.
+- Custom page codec, vector reranking и новые filter families отложены до benchmark-доказательства.
+- `CandidatePageIndex`, recall modes и storage layout нельзя менять без отдельного решения.
 
 ## Mandate 2 Closure Status
 
-Mandate 2 готов к закрытию как local agent integration-ready layer.
+Local agent integration закрыт.
 
 Готово:
 
-- MCP adapter: `mge-mcp-server` является основной local MCP-ready поверхностью через JSON-RPC over stdin/stdout.
-- Protocol contract: `protocol_version = mge-jsonrpc-1`, `integration_schema_version = 1`.
-- Tool schema: `mge_schema` отдаёт contracts для remember, recall, seal, checkpoint, stats, validate, rebuild indexes и Markdown export.
-- Error model: structured JSON-RPC errors содержат `code`, `message`, `tool_name`, `recoverable`, protocol/schema versions и `details.error_kind`.
-- Python SDK: thin wrapper over Rust CLI с typed request/response surfaces, `py.typed`, local README, import smoke, agent-host smoke и wheel metadata check без публикации.
-- TypeScript SDK: thin wrapper over Rust CLI с typed interfaces, `types`/typed export metadata, local README, runtime smoke и agent-host smoke. `tsc` остаётся optional и в текущем окружении недоступен.
-- Examples: CLI/Rust host, Python host, TypeScript host, MCP JSONL session transcript и agent workflow docs есть.
-- Docs: README, Integration, MCP, SDK и project status описывают local host pattern, lifecycle, recall modes, schema versioning и limitations.
-
-Последняя Mandate 2 проверка:
-
-- `cargo fmt`: passed.
-- `cargo test`: passed, 124 tests total.
-- CLI smoke: passed.
-- MCP workflow smoke: passed.
-- Python SDK smoke: passed.
-- TypeScript SDK runtime smoke: passed.
-- Rust example smoke: passed.
-- Python wheel metadata check: passed через `python -m pip wheel --no-deps --no-build-isolation sdk/python`.
-- TypeScript compile check: skipped, потому что `tsc` не установлен.
+- `mge-mcp-server`: versioned local JSON-RPC stdin/stdout adapter.
+- `protocol_version = mge-jsonrpc-1`.
+- `integration_schema_version = 1`.
+- Tool contracts для remember, recall, seal, checkpoint, stats, validate, rebuild indexes и Markdown export.
+- Structured error model со стабильным `error.details.error_kind`.
+- Python SDK thin wrapper over Rust CLI.
+- TypeScript SDK thin wrapper over Rust CLI.
+- Agent host examples для CLI/Rust, Python, TypeScript и MCP-style JSON-RPC.
 
 Намеренно не реализовано:
 
-- Нет external MCP SDK dependency.
-- Нет package publishing.
-- Нет PyO3/maturin Python native binding.
-- Нет UI, encryption, vector DB, новых filters, storage layout changes, codec changes или recall semantic changes.
-
-Known limitations:
-
-- MCP adapter является MCP-ready JSON-RPC stdin/stdout, а не full external MCP SDK transport/server implementation.
-- Python и TypeScript SDK вызывают Rust CLI; это integration wrappers, не альтернативные engines.
-- TypeScript source execution требует Node runtime с TypeScript stripping или локальный TypeScript toolchain, выбранный host-ом.
-
-Recommended next mandate:
-
-- Mandate 3 security work закрыт как payload-encryption ready. Следующее рекомендуемое направление - Mandate 4 product UI/packaging или optional pre-Mandate-4 real user corpus плюс real host compatibility check.
-
-## Mandate 3 Security Status
-
-Active mandate: Security / Encryption.
-
-Сделано в Mandate 3 foundation:
-
-- Добавлены `docs/SECURITY.md` и `docs/SECURITY.ru.md`.
-- Документирован threat model: protected assets, in-scope threats, out-of-scope threats, metadata policy, session model, validation/rebuild behavior и implementation gates.
-- Документирован encryption design direction перед implementation.
-- Зафиксировано на foundation phase, что `NoSecurity` является pass-through, а не fake encryption.
-- Зафиксировано, что JSON/JSONL остаются только protocol/debug/benchmark output, а не runtime storage.
-- Добавлены manifest-level `SecurityMode` и `SecurityConfig`.
-- Добавлен `mge init --encrypted` как opt-in encrypted-mode store marker.
-- Добавлен `mge config security` для manifest-level security status без открытия payload.
-- Добавлены locked-store errors для encrypted-mode payload operations без session unlock.
-- Добавлена MCP `store_locked` structured error classification.
-
-Сделано в Mandate 3 hot-encryption package:
-
-- Добавлены crypto dependencies: `chacha20poly1305`, `argon2`, `rand` и `zeroize`.
-- Добавлен session unlock через passphrase environment variables: `--passphrase-env MGE_PASSPHRASE`.
-- Добавлена manifest security metadata для KDF params, AEAD scheme/version, salt и encrypted key-check block без хранения passphrase или raw key.
-- Добавлен runtime-only `SessionKey` с zeroize при drop.
-- Hot record payloads в `hot/hot.mgl` теперь encrypted/authenticated для stores с key metadata.
-- Checkpoint payloads в `hot/snapshot.mgs` теперь encrypted/authenticated.
-- Hot recovery сохранён: valid encrypted records replay-ятся после snapshot offset, а corrupted/truncated final encrypted frame отбрасывается без уничтожения предыдущей valid hot memory.
-- CLI поддерживает passphrase-env для init, remember, recall, seal, checkpoint, inspect, validate, rebuild-indexes, stats и export.
-- MCP поддерживает optional `passphrase_env` и structured `auth_failed` для wrong key.
-- Python SDK поддерживает `passphrase_env`, TypeScript SDK поддерживает `passphraseEnv`.
-
-Сделано в Mandate 3 sealed-page encryption package:
-
-- Sealed page payloads в `pages/*.mgp` теперь encrypted/authenticated для stores с key metadata.
-- Page frame headers остаются readable для file kind/version/codec/payload length/checksum handling.
-- Добавлены encrypted page codec ids для MessagePack и MessagePack+zstd page payloads без изменения page storage layout или `CandidatePageIndex` API.
-- Marker dictionary, candidate indexes, page catalog summaries и Markdown export остаются plaintext by design в этом package.
-- Sealed recall decrypt-ит page payloads только после session unlock; missing unlock возвращает `store_locked`, wrong key или corrupted AEAD payload возвращает `auth_failed`.
-- `validate --deep` и `rebuild-indexes` читают encrypted pages через тот же session unlock path и не silently skip encrypted pages.
-- MCP, Python SDK и TypeScript SDK encrypted sealed recall smokes покрыты через passphrase environment variables.
-
-Сделано в Mandate 3 metadata/index risk memo:
-
-- В `docs/SECURITY.md` и `docs/SECURITY.ru.md` добавлена risk model для encrypted metadata и indexes.
-- Зафиксировано, что остаётся plaintext: manifest safe metadata, marker dictionary, catalog summaries, candidate indexes, encoded sizes, marker/scope/kind/status/sensitivity/trust summaries и explicit Markdown export.
-- Сравнены current plaintext metadata mode, hashed marker dictionary, blind marker indexes, encrypted dictionary with plaintext derived index IDs и fully encrypted metadata.
-- Рекомендовано оставить payload-encrypted mode default encrypted mode и отложить blind marker mode до prototype, который докажет correctness, rebuild behavior и benchmark impact.
-- Повторно зафиксировано, что `CandidatePageIndex`, `MarkerGenome`, recall modes, storage layout, Exact/BinaryFuse strategy и filter minimalism должны оставаться стабильными.
-
-Security design decisions:
-
-- Сначала защищать payload bytes: `hot/hot.mgl`, `hot/snapshot.mgs` и `pages/*.mgp`.
-- Оставить binary file headers readable для file kind/version/codec/payload length/integrity handling.
-- Разрешить части catalog/index metadata оставаться plaintext на первом этапе ради deterministic recall и validation, с явным описанием risks.
-- Не допускать silent fallback из encrypted mode в plaintext.
-- Existing unencrypted stores должны продолжать работать.
-- Conversion существующего unencrypted store должен быть отдельной future operation, а не silent config flip.
-- При implementation использовать well-known Rust crypto crates; не писать custom crypto.
-
-Crypto dependencies in use:
-
-- AEAD: `chacha20poly1305` with XChaCha20-Poly1305.
-- KDF: `argon2`.
-- Random salt/nonce generation: `rand`.
-- Memory hygiene: `zeroize`.
-
-Current limitations:
-
-- Hot storage payloads и sealed page payloads шифруются для encrypted stores с key metadata: `hot/hot.mgl`, `hot/snapshot.mgs` и `pages/*.mgp`.
-- `mge init --encrypted` без `--passphrase-env` всё ещё создаёт locked encrypted-mode marker/config state, но payload operations остаются locked, потому что нет key metadata.
-- Нет blind marker indexes или encrypted indexes.
-- Markdown export остаётся plaintext by design.
-
-Latest Mandate 3 verification:
-
-- `cargo fmt`: passed.
-- `cargo test`: passed, 135 tests total.
-- CLI unencrypted smoke: passed.
-- CLI encrypted smoke: passed, включая отсутствие plaintext в hot log/snapshot/page и wrong-key failure.
-- Encrypted reopen sealed recall smoke: passed.
-- Encrypted validate/rebuild smoke: passed.
-- MCP encrypted sealed recall и wrong-key smoke: passed.
-- Python SDK encrypted sealed recall smoke: passed.
-- TypeScript SDK encrypted sealed recall smoke: passed.
-- Rust example smoke: passed.
-
-Next Mandate 3 step:
-
-- Если metadata privacy станет hard requirement, сделать prototype Phase 1 keyed marker fingerprints для encrypted stores. Не реализовывать blind indexes напрямую без benchmark и migration evidence.
+- External MCP SDK dependency.
+- Package publishing.
+- PyO3/maturin native Python binding.
+- Remote service hosting.
 
 ## Mandate 3 Closure Status
 
-Mandate 3 готов к закрытию как текущий security/encryption-ready layer.
+Security/encryption-ready layer закрыт.
 
 Готово:
 
-- Encrypted store mode включается явно через `mge init --encrypted`.
-- Session unlock использует `--passphrase-env`; passphrase передаётся именем environment variable и не хранится в manifest, logs, protocol output или errors.
-- KDF/AEAD implementation использует стандартные Rust crates: `argon2`, `chacha20poly1305`, `rand` и `zeroize`.
-- `hot/hot.mgl` hot record payloads encrypted/authenticated для encrypted stores с key metadata.
-- `hot/snapshot.mgs` checkpoint payloads encrypted/authenticated.
-- `pages/*.mgp` sealed page payloads encrypted/authenticated.
-- MCP, Python SDK и TypeScript SDK передают только имена passphrase environment variables.
-- `validate --deep` и `rebuild-indexes` работают с encrypted sealed pages после unlock и не silently skip encrypted pages.
+- Opt-in encrypted store mode через `mge init --encrypted`.
+- Session unlock через `--passphrase-env`.
+- KDF/AEAD crates: `argon2`, `chacha20poly1305`, `rand`, `zeroize`.
+- Encrypted/authenticated `hot/hot.mgl` hot record payloads.
+- Encrypted/authenticated `hot/snapshot.mgs` checkpoint payloads.
+- Encrypted/authenticated `pages/*.mgp` sealed page payloads.
+- MCP/Python/TypeScript passphrase environment variable passthrough.
+- `validate --deep` и `rebuild-indexes` работают после unlock с encrypted sealed pages.
 - Locked encrypted stores возвращают `store_locked`; wrong key или AEAD failure возвращают `auth_failed` / authentication failure.
-- Encrypted-mode payload operations не делают silent fallback в plaintext.
+- Нет silent plaintext fallback для encrypted-mode payload operations.
+- Plaintext metadata risk analysis задокументирован.
 
-Остаётся plaintext by design:
+Plaintext by design:
 
-- `manifest.mgm` safe metadata, key-derivation parameters, binary frame headers и storage version/kind fields.
+- `manifest.mgm` safe metadata и key-derivation parameters.
+- Binary frame headers.
 - `dictionary/markers.mgd`.
 - `indexes/*.mgi` и page catalog summaries.
-- Encoded page sizes, marker/scope/kind/status/sensitivity/trust summaries и index/page shape.
-- Markdown export, если он явно создан.
-- Process memory и `ContextPacket`, пока store unlocked.
+- Encoded page sizes и marker/scope/kind/status/sensitivity/trust summaries.
+- Markdown export, если пользователь явно его создает.
+- Process memory и `ContextPacket` во время unlocked session.
 
-Почему metadata остаётся plaintext:
+Future security work не блокирует текущий продукт:
 
-- Recall зависит от page/index pruning до page payload decode.
-- `ExactMarkerPageIndex` и `BinaryFusePageIndex` используют deterministic marker IDs для fast candidate selection.
-- `validate --deep` и `rebuild-indexes` требуют, чтобы catalog/index structure можно было проверять и пересобирать.
-- Fully encrypted metadata вероятно приведёт к slower full scans или потребует отдельного private-index design.
-- Сохранение `CandidatePageIndex`, `MarkerGenome`, recall modes, storage layout и filter minimalism - намеренное product constraint.
-
-Non-blocking future work:
-
-- Optional keyed marker fingerprint prototype для encrypted stores.
+- Optional keyed marker fingerprint prototype.
 - Optional blind marker metadata/index design после benchmark и migration evidence.
 - Optional encrypted Markdown export.
-- Optional interactive unlock или host key-management integration.
-- Automatic migration from unencrypted stores to encrypted stores только как explicit future operation.
+- Optional interactive unlock / host key-management integration.
+- Explicit migration tool from unencrypted stores to encrypted stores.
 
-Recommended next mandate:
+## Текущие Ограничения
 
-- Mandate 4: Product UI / Packaging.
-- Optional pre-Mandate-4: real user corpus run плюс real host compatibility check.
+- Product UI еще нет.
+- Vector database нет.
+- Encrypted indexes и blind marker metadata пока нет.
+- Encrypted Markdown export пока нет.
+- Package publishing пока нет.
+- External MCP SDK dependency не добавлена.
+- Automatic migration from unencrypted stores to encrypted stores пока нет.
+- Большой user-provided corpus все еще полезен перед новой performance work.
 
-## Сделано
+## Последняя Verification Baseline
 
-- Git-репозиторий инициализирован.
-- Rust toolchain подтвержден: `cargo 1.95.0`, `rustc 1.95.0`.
-- Создан Rust workspace.
-- Реализован `mge-core`:
-  - typed memory models;
-  - explicit `MarkerGenome` model для structured marker DNA;
-  - marker canonicalization и persistent dictionary;
-  - deterministic marker extraction;
-  - deterministic shallow marker extraction для structured JSON keys и коротких scalar values;
-  - append-only binary hot log;
-  - page model и MessagePack page codec;
-  - exact marker-to-page candidate index;
-  - recall, reranking, filtering и context packet output;
-  - extension traits для store, page codec, compression, index, retrieval и security.
-- Реализован `mge-cli`:
-  - `init`
-  - `remember`
-  - `recall`
-  - `seal`
-  - `inspect`
-  - `validate`
-  - `stats`
-  - `export` / `export --format markdown`
-  - `export --format json` как explicit debug output
-- CLI `remember` поддерживает structured values через `--json-value`, сохраняемые как `MemoryValue::Structured`.
-- CLI `remember` поддерживает typed reference и timestamp values через `--reference-value` и `--timestamp-value`.
-- CLI `remember` поддерживает provenance и graph hints через `--source-type`, `--source-ref` и повторяемый `--link`.
-- Sealing сохраняет cell `source` metadata и `links` в sealed pages.
-- CLI `stats` поддерживает `--json`, сохраняя human output default.
-- `MemoryCell` теперь хранит explicit `MarkerGenome` плюс flattened `markers: Vec<MarkerId>` runtime/index view для backward compatibility.
-- `MarkerGenome` разделяет scope, kind, status, trust, sensitivity, subject, value/domain и custom marker IDs.
-- `MarkerGenome` отдаёт all marker IDs, system marker IDs, custom marker IDs, ключевые system markers, page-summary markers и deterministic fingerprint.
-- L1 Hot RAM indexes, page grouping, page summaries, recall filtering/scoring, markdown export и validation теперь используют genome-compatible marker access, сохраняя старые vec-style records.
-- Recall hot path теперь использует borrowed `MemoryValue` text где возможно, static stopword lookup для tokenization, более дешёвую scope filtering и single-pass ContextPacket assembly, чтобы уменьшить allocations и temporary rebuilds.
-- Keyword tokenization теперь имеет ASCII fast path для обычного text/code corpus, уменьшая временные string allocations без изменения normalized token output.
-- Marker value canonicalization теперь имеет ASCII fast path и избегает лишнего trim/copy прохода для обычного marker/query/value text.
-- Engine recall ranking теперь использует lightweight ranked cell handles для hot/sealed candidates, поэтому `MemoryCell` больше не clone-ится для каждого scored candidate до reranking.
-- ContextPacket output по-прежнему allocates только returned items; marker string vectors и content strings строятся после final ranking и dedupe.
-- Добавлена документация:
-  - `README.md`
-  - `README.ru.md`
-  - `docs/ARCHITECTURE.md`
-  - `docs/ARCHITECTURE.ru.md`
-  - `docs/ROADMAP.md`
-  - `docs/ROADMAP.ru.md`
-  - `examples/basic_usage.md`
-  - `examples/basic_usage.ru.md`
-- Roadmap обновлён: completed v0.1/v0.2 foundation work и deferred experiments отмечены явно.
-- Добавлены Rust tests для marker canonicalization, dictionary IDs, cell creation, marker generation, hot recall, sealing, sealed recall, index lookup, filtering, context packet text и stats output.
-- Добавлен CLI milestone integration test против реального binary `mge`.
-- Добавлена MIT license от ECD5A.
-- README оформлен бейджами, EN/RU навигацией, Donate-блоком и license section.
-- Добавлен `MessagePackPageCodec` за существующим trait `PageCodec` как первый v0.2 codec step.
-- Добавлен `ZstdCompression` за существующим trait `Compressor`.
-- Store manifest теперь хранит default `page_codec` и `compression` для новых sealed pages.
-- Page catalog entries теперь хранят per-page codec/compression для mixed-store и backward-compatible reads.
-- Page catalog entries теперь также хранят lightweight pre-decode summaries: scope marker summary, kind marker summary, direct status summary, direct sensitivity summary, trust summary и encoded page size.
-- Sealed recall теперь имеет маленький bounded decoded-page cache для immutable sealed pages; validation и rebuild paths намеренно обходят cache и читают page files напрямую.
-- Decoded sealed pages теперь могут держать runtime-only scoring data для повторного recall: per-cell value tokens, canonical value text и subject tokens кэшируются в RAM после decoded page cache hit. Это не меняет `.mgp` storage, ContextPacket output, validation или rebuild behavior.
-- Decoded sealed page scoring data теперь lazy per cell: page cache хранит runtime cache slots и строит token/canonical scoring data только для cells, которые прошли cheap metadata/filter checks и реально требуют text scoring.
-- Internal store files теперь используют final binary layout:
-  - `manifest.mgm`
-  - `dictionary/markers.mgd`
-  - `hot/hot.mgl`
-  - `pages/*.mgp`
-  - `indexes/page_index.mgi`
-  - `indexes/marker_index.mgi`
-  - `indexes/fuse_index.mgi`
-  - `exports/memory.md` для human-readable Markdown export
-- Hot memory теперь использует length-prefixed MessagePack records вместо JSONL.
-- Marker dictionary, manifest, page catalog и candidate indexes теперь persist как MessagePack binary files.
-- Binary runtime files теперь имеют fixed headers с magic bytes, file kind, format version, codec identifier, payload length и SHA-256 payload checksum.
-- Full-file storage writes теперь используют temp-file writes, flush/sync и same-directory rename where practical.
-- Hot memory теперь хранит `hot_log` frame, затем `hot_record` frames.
-- Добавлен `HotMemoryLayer` как L1 RAM layer для mutable hot memory.
-- `HotMemoryLayer` держит exact in-memory indexes:
-  - `cells_by_id: CellId -> MemoryCell`
-  - `marker_to_cells: MarkerId -> Vec<CellId>`
-  - `scope_to_cells: ScopeId -> Vec<CellId>`
-  - `kind_to_cells: KindId -> Vec<CellId>`
-  - `status_to_cells: Status -> Vec<CellId>`
-- `HotMemoryLayer` также держит runtime-only derived scoring data per hot cell для focused/broad hot recall. Этот cache пересобирается из hot log/snapshot recovery, обновляется на `remember` и очищается на `seal`; он не пишется в `hot/hot.mgl`.
-- `MemoryEngine::open_at` / `init_at` теперь один раз читают `hot/hot.mgl` и восстанавливают L1 RAM layer из durable binary log.
-- Hot memory теперь работает по RAM-first модели: `remember` сразу обновляет `HotMemoryLayer` и ставит cell в queue для hot-log persistence; `recall` не ждёт диск.
-- Pending hot events flush через queued persistence path на `checkpoint`, `seal` и normal engine drop boundaries.
-- Durability policy настраивается как `fast`, `balanced` default или `safe`.
-- `mge checkpoint` пишет optional binary `hot/snapshot.mgs` после flush pending hot events.
-- Recovery может загрузить `hot/snapshot.mgs`, replay `hot/hot.mgl` после snapshot offset и truncate corrupted final hot record без потери более ранних valid frames.
-- Hot recall теперь берёт candidates из `HotMemoryLayer` через marker/scope/kind/status indexes до существующего filtering/scoring path.
-- `seal` теперь flush pending hot events, использует текущие hot cells из `HotMemoryLayer`, архивирует/очищает `hot/hot.mgl`, удаляет stale `hot/snapshot.mgs` и очищает RAM indexes после успешного seal.
-- `stats` и exports используют текущий RAM hot view там, где это безопасно; `validate` всё ещё читает durable hot storage для проверки recovery/integrity.
-- Новые sealed pages теперь хранят codec-independent SHA-256 content checksums.
-- Canonical bytes для page checksum и logical page-size estimates теперь используют MessagePack вместо JSON.
-- CLI `init` теперь использует binary runtime storage by default; JSON page codec отклоняется для runtime store initialization/config.
-- CLI `init --profile fast` добавлен как opt-in compact storage profile: MessagePack + zstd + exact index.
-- CLI `export` теперь по умолчанию пишет Markdown в `.memory-genome/exports/memory.md`; JSON export является explicit debug output.
-- Добавлены CLI `config show` и `config set` для существующих stores.
-- Storage config updates меняют только defaults для будущих seals; существующие pages остаются нетронутыми и читаются через catalog metadata.
-- Добавлены tests для zstd roundtrip, init options, MessagePack+zstd sealed recall, binary storage layout, Markdown export и binary catalog defaults.
-- Добавлен trait `PageClusterer`.
-- `ScopeKindClusterer` сохранен как default seal clustering strategy.
-- Добавлен `MarkerOverlapClusterer` как deterministic no-ML extension strategy.
-- Добавлен `PageBuildOptions` с defaults: 64 KiB target page bytes и 512 max cells.
-- Page builder теперь соблюдает logical page limits.
-- Добавлен `ContextDebugInfo.score_details` для transparent reranking в JSON/debug output.
-- Reranking теперь записывает marker, subject, value overlap, exact value match, trust, status и sensitivity score components.
-- Context packet building теперь deduplicate ranked cells по `cell_id` перед возвратом memory агентам.
-- Prompt text output остается компактным и не раскрывает score internals.
-- Добавлены явные recall modes: `focused` по умолчанию, `broad` и `full_scope`.
-- `ContextPacket` считается task-relevant и size-controlled, а не искусственно маленьким.
-- `ContextDebugInfo` теперь показывает recall mode, effective max items, scanned cells, returned items и full-scope usage.
-- `ContextDebugInfo` теперь содержит detailed recall timing breakdown: query marker extraction, hot memory lookup, candidate page index lookup, page file read/load, page decode, cell filtering, reranking, ContextPacket build и total recall.
-- Добавлен `IndexKind` с реализованным kind `exact_marker_page`.
-- Manifest, page catalog, stats и exact index files теперь несут index kind metadata.
-- `CandidatePageIndex` теперь раскрывает `kind()` и query statistics для static index implementations.
-- Добавлен `BinaryFusePageIndex` как opt-in `binary_fuse_page`, при этом `ExactMarkerPageIndex` остается default.
-- Binary Fuse page filters - реальные `xorf::BinaryFuse16` filters, построенные per sealed page по `marker_summary`; fake Binary Fuse implementation не добавлялся.
-- CLI `init` и `config set` теперь поддерживают `--index-kind exact_marker_page|binary_fuse_page`.
-- При смене `index_kind` пересобирается только candidate index по существующим sealed pages; sealed page files не переписываются.
-- Recall debug теперь показывает index kind, page filters scanned, candidate pages returned, loaded pages, sealed cells scanned и post-load false-positive candidate pages.
-- Recall debug теперь также показывает pages considered, pruned candidate pages, pages pruned by metadata, cells decoded, cells filtered и cells ranked.
-- Tests теперь проверяют `exact_candidates ⊆ binary_fuse_candidates` на тех же sealed pages и проверяют смену index kind без rewrite page files.
-- Добавлен synthetic benchmark tool: `cargo run -p mge-cli --bin mge-synthetic-bench`.
-- Synthetic benchmark сравнивает `exact_marker_page` и opt-in `binary_fuse_page` на одинаковых generated stores и проверяет `exact_candidates ⊆ binary_fuse_candidates`.
-- Synthetic benchmark harness теперь показывает remember, seal, hot focused/broad/full-scope recall до seal, sealed focused/broad/full-scope recall после seal, index lookup, page decode, ContextPacket build, candidate pages, pages pruned by metadata, hot total/candidate/scanned cells, cells scanned, returned items, storage size, seal hot-clear correctness и p50/p95/avg metrics where practical.
-- Corpus benchmark comparison output теперь содержит прямые exact-vs-Binary-Fuse summaries для hot/cold/repeated focused/broad/full-scope recall, repeated timing breakdowns, ContextPacket build time, storage size, average encoded page size и average cells per page.
-- Corpus benchmark comparison output теперь также содержит repeated recall locality summaries и top timing bottlenecks для hot focused, sealed cold focused, sealed repeated focused и sealed repeated broad workloads.
-- Recall debug и corpus benchmark output теперь показывают sealed cells, пропущенные до token scoring, и sealed cells, которые реально дошли до token scoring.
-- Index/filter minimalism задокументирован: L1 Hot RAM использует только exact mutable indexes; L2 использует `ExactMarkerPageIndex` по умолчанию и `BinaryFusePageIndex` как единственный optional static probabilistic filter backend.
-- Hot log archiving теперь использует уникальные archive names, если несколько seals попадают в одно timestamp window.
-- Добавлены `ValidationReport` и CLI `validate` как read-only consistency checks для manifest, catalog, pages, page checksums, marker references и candidate index coverage.
-- Добавлены `validate_deep()` и CLI `validate --deep` для более строгих проверок sealed page/catalog/index.
-- Store validation теперь проверяет cell links на unknown targets и self-links.
-- Store validation теперь предупреждает об orphan page files и unknown unmanaged index files.
-- Deep validation считает orphan `pages/*.mgp`, missing page catalog и missing active candidate index files ошибками.
-- Store validation теперь проверяет marker dictionary forward/reverse consistency, canonical markers и `next_id`.
-- Добавлен `rebuild_catalog_and_indexes()` как safe rebuild tooling для L2 sealed memory metadata.
-- CLI `rebuild-indexes` пересобирает `indexes/page_index.mgi`, `indexes/marker_index.mgi` и active `indexes/fuse_index.mgi`, если включён `binary_fuse_page`.
-- Catalog/index rebuild читает existing `pages/*.mgp` как source of truth, декодирует binary page frames по header codec, atomically writes rebuilt `.mgi` files и не переписывает sealed page payloads, memory cells или hot memory.
-- Seal/config index rebuild paths теперь держат `ExactMarkerPageIndex` как reliable baseline, а `BinaryFusePageIndex` остаётся opt-in.
-- Добавлен `RecallPolicy` как центральная recall filtering policy.
-- Добавлен `AgentCapabilities` для explicit future access grants.
-- CLI recall теперь имеет `--mode focused|broad|full-scope`, а также opt-in flags `--include-deprecated` и `--include-secret-references`.
-- Full-scope recall требует явный `--scope`; deprecated/rejected/superseded memories фильтруются по умолчанию.
-- Добавлены `AuditLogger` interface и `NoopAuditLogger` recall hook.
-- Добавлен `PageClustererKind` в manifest/config.
-- CLI `init` и `config set` теперь поддерживают `--page-clusterer scope_kind|marker_overlap`.
-- Seal path теперь использует configured page clusterer, default остается `scope_kind`.
-
-## В Работе
-
-- Нет активного implementation item на этот момент.
-
-## Дальше
-
-- Продолжать core hardening через validation, storage и index tests без изменения defaults.
-- Durable audit log storage добавлять только в более позднем security package.
-- Conflict/poisoning detection рассматривать только после стабилизации текущего storage/index core.
-- SDK wrappers добавлять только после стабилизации Rust core API.
-
-## Откаты / Не Повторять
-
-- Не начинать с UI, chatbot, cloud service, vector DB, fake encryption, fake Binary Fuse или Markdown как внутреннего storage format.
-- Не хранить реальные credentials или secrets. Sensitive values должны быть представлены metadata/placeholders через `SecretReference`.
-- Не заменять marker/page API на vector-only retrieval flow.
-- Не превращать проект в filter zoo. Новые filter/index families требуют benchmark evidence, correctness proof и отсутствия public API sprawl.
-
-## Команды Проверки
-
-```bash
-cargo build
-cargo test
-cargo run -p mge-cli -- init
-cargo run -p mge-cli -- init --profile fast
-cargo run -p mge-cli -- remember "User prefers concise technical explanations" --kind user_preference --scope global --trust user_confirmed
-cargo run -p mge-cli -- remember --kind user_preference --subject answer_style --json-value '{"style":"concise","max_examples":2}'
-cargo run -p mge-cli -- remember --kind project_fact --reference-value vault://references/api-key --sensitivity secret_reference
-cargo run -p mge-cli -- remember --kind task_state --timestamp-value 1760000000
-cargo run -p mge-cli -- remember "Decision recorded" --kind decision --source-type issue --source-ref MGE-1 --link 1
-cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
-cargo run -p mge-cli -- recall "How should the agent answer technical questions?" --mode broad
-cargo run -p mge-cli -- recall --mode full-scope --scope global
-cargo run -p mge-cli -- seal
-cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
-cargo run -p mge-cli -- stats
-cargo run -p mge-cli -- stats --json
-cargo run -p mge-cli -- validate
-cargo run -p mge-cli -- validate --deep
-cargo run -p mge-cli -- rebuild-indexes
-cargo run -p mge-cli -- export
-cargo run -p mge-cli -- config set durability safe
-cargo run -p mge-cli -- checkpoint
-cargo run -p mge-cli -- init --index-kind binary_fuse_page
-cargo run -p mge-cli -- config set --index-kind binary_fuse_page
-cargo run -p mge-cli --bin mge-synthetic-bench -- --cells 1200 --pages 120 --scopes 16 --markers-per-cell 5 --marker-groups 12 --targeted-queries 6 --noise-queries 3 --repeats 5 --seed 1
-```
-
-## Статус Проверки
+Последняя полная проверка до этого docs cleanup:
 
 - `cargo fmt`: passed.
-- `cargo test`: passed, 115 tests total (13 CLI unit tests + 9 CLI integration tests + 2 core unit tests + 91 core integration tests).
-- Validation/rebuild tests: passed для clean deep validation, corrupted/mismatched catalog summaries, missing exact index restore, active Binary Fuse index restore, recall after rebuild, hot memory untouched и no JSON/JSONL runtime storage regression.
-- Recall modes tests: passed для focused top result, broad expanded output, full-scope scoped output, full-scope missing-scope error, default status filtering и no JSON/JSONL runtime storage regression.
-- Recall modes CLI smoke command: passed для `--mode broad`, `--mode full-scope --scope` и full-scope missing-scope failure.
-- Benchmark harness integration smoke test: passed для exact + Binary Fuse modes и required metrics.
-- Corpus benchmark integration smoke test: passed for local corpus import, exact + Binary Fuse modes, cold/repeated recall metrics, validation/rebuild checks, subset check, and no JSON/JSONL runtime storage regression.
-- Latest corpus benchmark smoke command: passed на 24 local files, 246015 imported bytes, 225 chunks.
-  - exact_marker_page: cold focused avg 33769 us, repeated focused avg 20853 us, repeated broad avg 3761 us, page decode avg 2481 us, scoring cache build avg 7652 us, cell filtering avg 7943 us.
-  - binary_fuse_page: repeated focused avg 20497 us, repeated broad avg 3483 us, page decode avg 2476 us, scoring cache build avg 7648 us, cell filtering avg 7919 us.
-  - subset check: focused exact candidates subset of binary_fuse candidates passed.
-- Latest canonicalization benchmark smoke command: passed на 24 local files, 250192 imported bytes, 229 chunks.
-  - exact_marker_page: cold focused avg 30434 us, repeated focused avg 18186 us, repeated broad avg 3729 us, page decode avg 2518 us, scoring cache build avg 6149 us, cell filtering avg 6770 us.
-  - binary_fuse_page: repeated focused avg 17851 us, repeated broad avg 3395 us, page decode avg 2529 us, scoring cache build avg 6040 us, cell filtering avg 6839 us.
-  - subset check: focused exact candidates subset of binary_fuse candidates passed.
-- Safe generated corpus benchmark command: passed на 36 generated files, 748536 imported bytes, 960 chunks, avg chunk 774 bytes, avg markers per cell 4, 6 scopes, 6 extensions.
-  - storage: exact 2567669 bytes, binary_fuse 2584948 bytes, avg encoded page 54594 bytes, avg cells/page 43.64.
-  - hot recall avg: focused exact 44978 us / binary 44729 us, broad exact 45374 us / binary 45176 us, full-scope exact 4218 us / binary 4085 us.
-  - sealed cold avg: focused exact 69505 us / binary 69090 us, broad exact 70348 us / binary 69116 us, full-scope exact 21184 us / binary 21303 us.
-  - sealed repeated avg: focused exact 20894 us / binary 20718 us, broad exact 6439 us / binary 6507 us, full-scope exact 6655 us / binary 6627 us.
-  - repeated focused exact timing: total 20894 us, page decode 2953 us, scoring cache build 6125 us, cell filtering 7715 us, ContextPacket build 530 us.
-  - repeated broad exact timing: total 6439 us, page decode 0 us, scoring cache build 0 us, cell filtering 2475 us, ContextPacket build 505 us.
-  - subset check: focused exact candidates subset of binary_fuse candidates passed.
-- Hot scoring cache benchmark command: passed на том же generated corpus shape, 36 files, 748536 imported bytes, 960 chunks.
-  - hot focused exact: 44978 us -> 4082 us.
-  - hot broad exact: 45374 us -> 4718 us.
-  - hot full-scope exact: 4218 us -> 4047 us.
-  - sealed repeated focused exact stayed comparable: 20894 us -> 21144 us.
-  - sealed repeated broad exact stayed comparable: 6439 us -> 6669 us.
-  - subset check: focused exact candidates subset of binary_fuse candidates passed.
-- Lazy sealed scoring cache benchmark command: passed на том же generated corpus shape, 36 files, 748536 imported bytes, 960 chunks.
-  - sealed repeated focused exact: 21252 us -> 15859 us.
-  - sealed repeated focused binary_fuse: 21774 us -> 15546 us.
-  - sealed repeated broad exact: 6642 us -> 6405 us.
-  - repeated focused exact timing after: total 15859 us, page decode 2976 us, scoring cache build 6221 us, cell filtering 8806 us, ContextPacket build 518 us.
-  - subset check: focused exact candidates subset of binary_fuse candidates passed.
-- Benchmark harness CLI smoke command: passed.
-  - config: 120 cells, 12 sealed pages, 4 logical scopes, 5 markers per cell, 4 marker groups, 4 targeted queries, 2 noise queries, 3 repeats, seed 7.
-  - exact_marker_page: remember avg 8367 us, seal avg 61834 us, focused recall avg 5270 us, broad recall avg 12575 us, full-scope recall avg 1764 us, index lookup avg 1 us, page decode avg 391 us, ContextPacket build avg 944 us, storage 108585 bytes.
-  - binary_fuse_page: remember avg 8040 us, seal avg 54785 us, focused recall avg 5312 us, broad recall avg 12805 us, full-scope recall avg 1871 us, index lookup avg 1 us, page decode avg 395 us, ContextPacket build avg 952 us, storage 112749 bytes.
-  - subset check: focused exact candidates subset of binary_fuse candidates passed.
-- Recall detailed breakdown package: passed.
-  - Safe hot-path optimization: scoring теперь переиспользует precomputed query marker/token sets, canonical query/scope values и effective recall policy вместо пересборки на каждую cell.
-  - Safe page pruning: candidate pages, где catalog `marker_summary` доказывает отсутствие query marker match, пропускаются до page decode.
-  - Benchmark before/after на той же smoke config:
-    - before exact focused/broad/full-scope avg: 5856 / 13152 / 1991 us.
-    - after exact focused/broad/full-scope avg: 5102 / 12722 / 2019 us.
-    - before binary_fuse focused/broad/full-scope avg: 5327 / 13753 / 1913 us.
-    - after binary_fuse focused/broad/full-scope avg: 5132 / 12333 / 2100 us.
-  - Current broad bottlenecks: cell filtering и page decode; index lookup не главный расход на этом dataset.
-- Recall hot-path optimization package: passed.
-  - Page-level prefiltering теперь использует catalog `marker_summary` для required scope/kind markers, query marker impossibility, status summary и sensitivity summary до page decode, когда summary дает точный вывод.
-  - Cell filtering теперь отбрасывает explicit-marker misses и scope-marker misses до scoring/token work.
-  - Benchmark before/after на той же smoke config:
-    - before exact focused/broad/full-scope avg: 5091 / 12503 / 1750 us.
-    - after exact focused/broad/full-scope avg: 5835 / 7746 / 1788 us.
-    - before binary_fuse focused/broad/full-scope avg: 5089 / 12617 / 1946 us.
-    - after binary_fuse focused/broad/full-scope avg: 5290 / 7814 / 1970 us.
-  - Broad cell filtering улучшился на benchmark: exact 7094 -> 2427 us, binary_fuse 6908 -> 2407 us; broad ranked cells снизились с 90 до 30, returned items остались 20.
-  - Page pruning smoke command: passed with pages considered 2, loaded 1, pruned 1, returned 1.
-  - Remaining broad bottleneck: page decode теперь самый стабильный крупный расход на этом dataset; index lookup остается маленьким.
-- Sealed page metadata/catalog pruning package: passed.
-  - Page catalog теперь хранит lightweight pre-decode summaries для scope markers, kind markers, status, sensitivity, trust и encoded page size.
-  - Recall теперь prune candidate pages по metadata до full page read/decode, когда решение детерминированное: missing required scope/kind markers, missing explicit query markers, only disallowed statuses или only disallowed sensitivities.
-  - CLI smoke command passed with pages considered 2, loaded 1, pages pruned by metadata 1, returned 1.
-  - Benchmark before/after на 240 cells, 24 sealed pages, 6 marker groups, 6 targeted + 2 noise queries, 3 repeats, seed 11:
-    - exact broad avg: 17077 -> 12919 us; broad pages loaded avg: 21 -> 11; broad cells decoded avg: 210 -> 117; broad page decode avg: 7689 -> 4264 us.
-    - binary_fuse broad avg: 16559 -> 12976 us; broad pages loaded avg: 21 -> 11; broad cells decoded avg: 210 -> 117; broad page decode avg: 7508 -> 4229 us.
-    - focused exact остался page-limited на 11 loaded pages; full-scope остается scope-limited и correctness-preserving.
-  - New tests покрывают explicit-marker metadata pruning, status-summary pruning, sensitivity-summary pruning, catalog metadata summaries, no false negatives for broad pruning, full-scope correctness, default status exclusion и no JSON/JSONL runtime storage regression.
-  - Remaining broad bottleneck: page decode и cell filtering всё еще доминируют, когда candidate set реально пересекается; index lookup остается маленьким.
-- MarkerGenome package: passed.
-  - Добавлен explicit `MarkerGenome` core type без изменения storage layout.
-  - `remember` теперь строит marker IDs через `MarkerDictionary`, затем сохраняет structured `MarkerGenome` плюс flattened marker IDs в `MemoryCell`.
-  - Старые named MessagePack `MemoryCell` records без `marker_genome` всё еще deserialize и остаются indexable через flattened `markers`.
-  - Tests покрывают genome construction, system/custom separation, old vec-style compatibility и существующие hot/sealed/full-scope recall paths.
-  - Benchmark smoke config: 120 cells, 12 pages, 4 scopes, 4 marker groups, 4 targeted queries, 2 noise queries, 3 repeats, seed 7.
-  - exact_marker_page: hot focused avg 3933 us, hot lookup avg 166 us, sealed focused avg 6672 us, broad avg 6955 us, broad pages loaded avg 3, broad pages pruned by metadata avg 6.
-  - binary_fuse_page: hot focused avg 3741 us, hot lookup avg 139 us, sealed focused avg 6746 us, broad avg 6785 us, broad pages loaded avg 3, broad pages pruned by metadata avg 6.
-  - Benchmark subset check passed.
-- Marker access allocation reduction package: passed.
-  - Добавлены borrowed/iterator marker accessors: `iter_all_marker_ids`, `iter_system_marker_ids`, `iter_custom_marker_ids`, `*_marker_id`, `flattened_marker_ids`, `iter_flattened_marker_ids`, `for_each_marker_id_for_indexing` и `marker_overlap_count`.
-  - Core hot paths больше не вызывают `marker_ids_for_indexing()`; этот метод остался только как compatibility helper.
-  - Убраны intermediate marker Vec rebuilds из L1 Hot RAM indexing, page grouping, page summaries, sealed recall scoring, ContextPacket marker export, validation и Markdown export.
-  - Benchmark before/after на том же 120 cells / 12 pages / seed 7 smoke config:
-    - exact_marker_page: hot focused 3933 -> 2955 us; hot lookup 166 -> 145 us; sealed focused 6672 -> 5762 us; broad 6955 -> 5895 us.
-    - binary_fuse_page: hot focused 3741 -> 2880 us; hot lookup 139 -> 139 us; sealed focused 6746 -> 5846 us; broad 6785 -> 5800 us.
-    - after exact timing: focused filter 2214 us, broad filter 2263 us, focused context build 378 us, broad context build 379 us, focused decode 1448 us, broad decode 1487 us.
-  - Benchmark subset check passed.
-- Sealed scoring cache package: passed.
-  - Добавлен runtime-only `CachedCellScoringData` для decoded sealed pages: value tokens, canonical value text и subject tokens derived один раз для cached pages и переиспользуются в focused/broad scoring.
-  - Cold page decode не строит этот cache; cache data прикрепляется только после decoded page cache hit, поэтому first-read latency и `.mgp` layout не меняются.
-  - `score_cell_debug_with_cached_context()` убирает per-cell value/subject tokenization для cached sealed pages; fallback scoring используется только когда cached scoring entry отсутствует.
-  - Validate/deep-validate и rebuild-indexes по-прежнему обходят decoded/scoring caches и читают sealed page files напрямую.
-  - Benchmark before/after на 1200 cells / 120 pages / 16 scopes / seed 23:
-    - before exact focused/broad/full-scope avg: 34428 / 34707 / 11463 us.
-    - after exact focused/broad/full-scope avg: 34090 / 34371 / 11335 us.
-    - before binary_fuse focused/broad/full-scope avg: 35556 / 35917 / 12793 us.
-    - after binary_fuse focused/broad/full-scope avg: 35174 / 36421 / 12875 us.
-    - exact broad cell filtering улучшился 9119 -> 5825 us; exact broad page decode accounting вырос 11634 -> 14710 us, потому что scoring-cache construction считается там на cache hits.
-  - Benchmark smoke на 120 cells / 12 pages / seed 7 прошёл; subset check остался true.
-  - Remaining bottleneck: MessagePack full-page decode/cache-miss cost и ContextPacket build на больших returned sets; Binary Fuse всё ещё не главный расход на этом dataset.
-- Sealed recall timing cleanup package: passed.
-  - `page_decode_micros` теперь показывает только page frame decode/decompress/page decode work.
-  - `scoring_cache_build_micros` отдельно показывает runtime scoring-cache construction.
-  - Debug output теперь включает `decoded_page_cache_hits`, `decoded_page_cache_misses`, `scoring_cache_hits` и `scoring_cache_misses`.
-  - Synthetic benchmark JSON теперь отдельно выводит page decode, scoring cache build, cell filtering, reranking, ContextPacket build и total recall timings.
-  - Benchmark after cleanup на 1200 cells / 120 pages / 16 scopes / seed 23:
-    - exact focused total 34199 us, page decode 11628 us, scoring cache build 3115 us, cell filtering 5851 us.
-    - exact broad total 34257 us, page decode 11576 us, scoring cache build 3090 us, cell filtering 5848 us.
-    - binary focused total 35181 us, page decode 11557 us, scoring cache build 3104 us, cell filtering 5798 us.
-    - binary broad total 35393 us, page decode 11526 us, scoring cache build 3132 us, cell filtering 5777 us.
-  - Total latency materially не изменился; очищен только accounting.
-- Corpus benchmark package: passed.
-  - Добавлен `mge-corpus-bench` для local real-workload measurement перед решениями про custom codec или partial decode.
-  - Supported corpus extensions: `.txt`, `.md`, `.rs`, `.toml`, `.json` как text import only, `.py`, `.ts`, `.js`.
-  - Safety: no downloads, no corpus execution, skips symlinks, skips common generated dirs, respects max-files/max-bytes/max-file-bytes, fresh `--store-root` outside corpus root required.
-  - Metrics include files/bytes/chunks, avg chunk bytes, avg markers per cell, scopes/extensions, remember/seal/storage/page size, hot recall, sealed cold recall, sealed repeated recall, cache hits/misses, page read/decode, scoring cache build, filtering, reranking, ContextPacket build, cells decoded/filtered/ranked, returned items, validation/rebuild status, and exact-vs-Binary-Fuse subset check.
-  - Local repo corpus smoke: 24 files, 239826 bytes, 220 chunks, avg chunk 1089 bytes, 6 scopes, 3 extensions.
-  - exact repeated focused: total 25033 us, page decode 2528 us, scoring cache build 9862 us, cell filtering 9786 us, ContextPacket build 322 us.
-  - exact cold focused: total 40544 us, page decode 9084 us, cell filtering 28046 us, ContextPacket build 323 us.
-  - binary repeated focused: total 24266 us, page decode 2442 us, scoring cache build 9741 us, cell filtering 9653 us.
-  - repeated broad loaded about 3 pages / 78 cells on this limited repo corpus; metadata pruning kept broad recall small.
-  - Current real-ish bottleneck: cell filtering/scoring and scoring-cache construction dominate repeated focused recall; cold focused recall is dominated by filtering plus page decode.
-- ASCII tokenizer hot-path package: passed.
-  - `tokenize_keywords` теперь использует byte-level ASCII fast path для обычного text/code corpus и сохраняет Unicode fallback, совместимый с предыдущей реализацией.
-  - Временные token strings теперь по возможности создаются только после stopword/singularization/dedup checks.
-  - Corpus before/after на сопоставимом 24-file repo corpus smoke:
-    - before exact repeated focused: total 26480 us, scoring cache build 10116 us, cell filtering 10619 us.
-    - after exact repeated focused: total 20853 us, scoring cache build 7652 us, cell filtering 7943 us.
-    - after binary repeated focused: total 20497 us, scoring cache build 7648 us, cell filtering 7919 us.
-  - Recall/storage architecture unchanged; новые filters, codec, storage layout, SDK, UI, vector DB или JSON runtime storage не добавлялись.
-- ASCII canonicalization hot-path package: passed.
-  - `canonicalize_marker_value` теперь использует byte-level ASCII canonicalization для обычного marker/query/value text и сохраняет совместимый Unicode fallback.
-  - Функция избегает прежнего trailing `trim_matches('_').to_string()` copy: leading separators пропускаются, trailing separator убирается через один `pop`.
-  - Corpus after tokenizer vs after canonicalization на сопоставимом 24-file repo corpus smoke:
-    - exact repeated focused: 20853 us -> 18186 us.
-    - exact scoring cache build: 7652 us -> 6149 us.
-    - exact cell filtering: 7943 us -> 6770 us.
-    - binary repeated focused: 20497 us -> 17851 us.
-  - Recall/storage architecture unchanged; новые filters, codec, storage layout, SDK, UI, vector DB или JSON runtime storage не добавлялись.
-- Corpus benchmark summary package: passed.
-  - Добавлен decision-ready `comparison` summary для exact vs BinaryFuse по hot/cold/repeated recall и focused/broad/full-scope modes.
-  - Repeated sealed recall summary теперь показывает total recall, query marker extraction, hot lookup, index lookup, page read/load, page decode, scoring cache build, cell filtering, reranking и ContextPacket build по recall mode.
-  - Existing detailed `modes` output оставлен без изменений; это только форма отчёта, а не изменение retrieval/storage behavior.
-- Corpus benchmark bottleneck summary package: passed.
-  - Добавлен `sealed_repeated_locality` с decoded page cache hits/misses, scoring cache hits/misses, pages loaded/pruned, cells decoded/ranked и returned items.
-  - Добавлен `top_bottlenecks_avg_micros` для основных hot/cold/repeated workloads, отсортированный по average component time.
-  - Это только форма отчёта; recall, storage, indexes, filters и ContextPacket output не менялись.
-- Sealed token-scoring counter package: passed.
-  - `ContextDebugInfo` теперь содержит `sealed_cells_skipped_before_token_scoring` и `sealed_cells_token_scored`.
-  - `mge-corpus-bench` записывает эти counters в per-mode output и exact-vs-BinaryFuse locality summaries.
-  - Это только debug/reporting; storage layout, recall results, validation, rebuild-indexes и caches не менялись.
-- Sealed token overlap cache package: passed.
-  - `CachedCellScoringData` теперь строит runtime-only token set для длинных value token lists, а scoring проверяет короткую query сторону первой.
-  - Cache остаётся только в RAM; `.mgp` files, MessagePack page codec, storage layout, indexes, validation, rebuild-indexes и ContextPacket output не менялись.
-  - Generated safe corpus before/after на той же smoke-форме 18 imported files / 1980 chunks:
-    - exact repeated focused: 22513 -> 20201 us.
-    - exact repeated broad: 12280 -> 7970 us.
-    - binary_fuse repeated focused: 24127 -> 18740 us.
-    - binary_fuse repeated broad: 14459 -> 7151 us.
-    - exact focused cell filtering: 12212 -> 9134 us; scoring cache build вырос 6742 -> 8031 us, потому что per-cell cached token set строится один раз.
-  - `sealed_cells_skipped_before_token_scoring` показал только 43 skipped cells против 484 token-scored на этом corpus, поэтому дополнительный metadata/filter pruning не был правильной следующей оптимизацией.
-- Real-workload corpus benchmark readiness package: passed.
-  - `mge-corpus-bench` теперь принимает real-workload command shape с видимым alias `--corpus`, `--profile small|medium|code-heavy|docs-heavy|mixed`, `--chunk-lines` и `--seed`, сохраняя существующие `--corpus-root` и `--chunk-bytes`.
-  - Добавлен `--generated` diverse local corpus mode с markdown notes, Rust/Python/TypeScript/JS/config/long-text/fragment/noise files внутри `--store-root/generated-corpus`.
-  - Добавлен recommendation JSON с machine-readable bottleneck signals и human-readable summary lines: hot bottleneck, sealed cold/repeated bottleneck, BinaryFuse usefulness, page decode/scoring/filtering/ContextPacket shares, repeated locality benefit и suggested next core step.
-  - Safety остаётся local-only: no download, no corpus execution, symlinks skipped, unsupported binary extensions skipped before read, corpus files не меняются, stores пишутся внутри `--store-root`.
-  - Tests покрывают real local directory mode через `--corpus`, generated small и medium profiles, binary extension skip, optional symlink skip, recommendation output, exact subset BinaryFuse check и rejection of nested `--store-root` inside corpus.
-- L1 Hot RAM scoring cache package: passed.
-  - Hot focused/broad recall теперь переиспользует `CachedCellScoringData`, построенный на `remember`/hot recovery, вместо tokenization hot cell value/subject на каждый recall.
-  - Runtime scoring data очищается через `HotMemoryLayer::clear()` при seal и не сохраняется в `hot/hot.mgl` или snapshots как отдельный storage format.
-  - Correctness tests прошли для cache build/clear, hot recall, reopen recovery, seal clearing, full-scope behavior и no JSON runtime storage regression.
-- Lazy sealed page scoring cache package: passed.
-  - `PageScoringCache` теперь хранит lazy per-cell `OnceLock<CachedCellScoringData>` slots вместо tokenization каждой cell на page при попадании page в scoring cache.
-  - Sealed focused/broad recall теперь делает cheap filter checks до построения token/canonical scoring data и использует prechecked scoring, чтобы не повторять filter work.
-  - Runtime cache остаётся только в RAM; `.mgp` files, page codec, storage layout, validation и rebuild-indexes не менялись.
-- L1 Hot RAM layer package: passed.
-  - `HotMemoryLayer` индексирует hot cells в RAM по cell id, marker id, canonical scope, kind и status.
-  - Correctness tests прошли для immediate recall после remember, reopen recovery из `hot/hot.mgl`, очистки hot после seal, sealed recall после seal, full-scope hot+sealed recall и default status exclusion before scoring.
-  - Hot-only broad recall smoke before/after на 80 hot cells:
-    - before: total 3970 us, hot lookup 2568 us, hot scanned 80.
-    - after: total 1345 us, hot lookup 189 us, hot scanned 80, sealed index lookup 0 us.
-  - Latest benchmark smoke config: 120 cells, 12 pages, 4 scopes, 4 markers per cell, 4 marker groups, 4 targeted queries, 2 noise queries, 3 repeats, seed 7.
-  - exact_marker_page: hot focused avg 2890 us, hot lookup avg 144 us, hot candidates avg 30, sealed focused avg 11256 us, sealed page decode avg 4103 us, broad avg 11155 us, full-scope avg 1791 us, post-seal hot cells 0.
-  - binary_fuse_page: hot focused avg 2888 us, hot lookup avg 140 us, hot candidates avg 30, sealed focused avg 11461 us, sealed page decode avg 4153 us, broad avg 11227 us, full-scope avg 1927 us, post-seal hot cells 0.
-  - Benchmark subset check: focused exact candidates subset of binary_fuse candidates passed.
-- RAM-first hot durability package: passed.
-  - `remember` RAM-first и queue hot persistence без ожидания `hot/hot.mgl`.
-  - `checkpoint` и `seal` сначала flush pending hot events.
-  - `mge config set durability fast|balanced|safe` и `mge checkpoint` реализованы.
-  - `hot/snapshot.mgs` - optional binary checkpoint storage, а не новый слой памяти.
-  - Crash recovery сохраняет valid hot frames и truncates только corrupted final frame.
-  - Tests прошли для immediate RAM recall до log flush, checkpoint/reopen recovery, corrupted final frame recovery, safe/balanced flush paths, seal hot-log/snapshot clearing, checkpoint snapshot + replay и no JSON runtime storage regression.
-- Milestone smoke commands: passed.
-- MessagePack+zstd smoke commands: passed.
-- Config show/set mixed-store smoke commands: passed.
-- Default clustering smoke commands: passed.
-- Recall JSON score debug smoke command: passed.
-- Index kind stats/config smoke command: passed.
-- Binary Fuse init/recall/stats smoke command: passed.
-- Exact-to-Binary-Fuse config switch smoke command: passed; sealed page hash unchanged.
-- Binary storage layout CLI smoke command: passed; required `.mgm/.mgd/.mgl/.mgp/.mgi` files существуют, старые JSON/JSONL storage files отсутствуют, Markdown export size 621 bytes.
-- Binary header CLI smoke command: passed; все runtime `.mg*` files имели `MGEFILE` magic, а corrupted page validation вернул `wrong magic for page`.
-- JSON runtime page codec reject smoke command: passed; `mge init --page-codec json` завершается с `invalid input`.
-- Synthetic exact-vs-Binary-Fuse benchmark smoke command: passed.
-  - config: 1200 cells, 120 sealed pages, 12 marker groups, 6 targeted queries, 3 noise queries.
-  - exact: avg recall latency 11545 us, total candidate pages 60, loaded pages 60, sealed cells scanned 600, result count 120.
-  - binary_fuse_page: avg recall latency 13426 us, total candidate pages 60, loaded pages 60, sealed cells scanned 600, result count 120, post-load false-positive pages 0.
-  - subset check: `exact_candidates ⊆ binary_fuse_candidates` passed.
-- Small post-binary-layout benchmark smoke command: passed.
-  - config: 120 cells, 12 sealed pages, 4 marker groups, 3 targeted queries, 1 noise query.
-  - exact: avg recall latency 7410 us, total candidate pages 9, loaded pages 9, sealed cells scanned 90, result count 60.
-  - binary_fuse_page: avg recall latency 4182 us, total candidate pages 9, loaded pages 9, sealed cells scanned 90, result count 60, post-load false-positive pages 0.
-  - subset check: `exact_candidates ⊆ binary_fuse_candidates` passed.
-- Validate CLI smoke commands: passed для `exact_marker_page` и `binary_fuse_page`.
-- Page checksum smoke command: passed для MessagePack+zstd sealed page, checksum length 64, `mge validate --json` ok.
-- Structured JSON remember smoke command: passed, exported value type `structured`.
-- Typed reference/timestamp remember smoke command: passed, exported value types `reference` и `timestamp`.
-- Source/link remember smoke command: passed, exported source и links retained.
-- Source/link seal persistence test: passed.
-- Link validation smoke command: passed для valid link и failed as expected для unknown link.
-- Orphan storage validation tests: passed для orphan page files и unknown unmanaged index files.
-- Context packet dedupe test: passed для duplicate ranked cells с одинаковым `cell_id`.
-- Structured JSON marker extraction tests: passed для marker generation и hot recall.
-- Structured JSON marker extraction CLI smoke command: passed, recall matched `tag:style` и `tag:concise`.
-- CLI milestone integration test: passed для init, remember, recall JSON, seal, stats JSON и validate JSON.
-- Fast profile CLI integration test: passed для `mge init --profile fast`.
-- Binary storage layout tests: passed для `.mgm/.mgd/.mgl/.mgp/.mgi` files и отсутствия старых JSON/JSONL storage files.
-- Binary storage header validation tests: passed для wrong magic, wrong file kind, unsupported version, truncated payload, corrupted payload, wrong hot log magic и wrong index magic.
-- Markdown export test: passed для `.memory-genome/exports/memory.md`.
-- Marker dictionary consistency validation test: passed.
-- Stats JSON smoke command: passed, `sealed_pages` и `current_index_kind` exported.
-- Recall policy secret-reference opt-in smoke command: passed.
-- Marker-overlap clusterer seal smoke command: passed.
-- Smoke result после sealing:
-  - hot cells: 0
-  - sealed pages: 1-2 depending on smoke scenario
-  - sealed cells: 1-2 depending on smoke scenario
-  - index type: `exact_marker_page` или `binary_fuse_page` depending on smoke scenario
-  - current index kind: `exact_marker_page` или `binary_fuse_page` depending on smoke scenario
-  - current page codec: `messagepack`
-  - current compression: `none` или `zstd` depending on smoke scenario
+- `cargo test`: passed, 135 tests.
+- CLI unencrypted smoke: passed.
+- CLI encrypted hot+sealed smoke: passed.
+- Encrypted reopen recall smoke: passed.
+- Encrypted validate/rebuild smoke: passed.
+- MCP encrypted smoke: passed.
+- Python SDK encrypted smoke: passed.
+- TypeScript SDK encrypted smoke: passed.
+- Rust example smoke: passed.
+
+Этот documentation cleanup меняет только Markdown. Core/storage/codec/filter/recall/security behavior не менялся.
+
+## Следующий Рекомендуемый Шаг
+
+Начать Mandate 4: Product UI / Packaging.
+
+Опциональная работа перед Mandate 4:
+
+- Прогнать большой real user corpus через `mge-corpus-bench`.
+- Проверить JSON-RPC adapter с реальным local host/agent runner.
+- Решить release packaging target и distribution format.
