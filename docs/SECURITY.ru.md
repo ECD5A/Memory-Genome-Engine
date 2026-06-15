@@ -80,6 +80,113 @@ Encrypted store без unlock возвращает `store is locked`. Невер
 
 Encrypted indexes, blind marker tokens и encrypted export - отдельные будущие пакеты. Index/catalog metadata остаётся plaintext ради deterministic search, pruning, validation и rebuild.
 
+## Encrypted Metadata And Index Risk Model
+
+Текущий encrypted mode сначала защищает payload bytes:
+
+- hot record payloads;
+- hot checkpoint snapshots;
+- sealed page payloads.
+
+Следующая metadata остаётся plaintext by design:
+
+- manifest safe metadata, включая security mode, storage versions, default codec/compression, index kind и key-derivation params;
+- marker dictionary: `dictionary/markers.mgd`;
+- page catalog summaries и candidate index files: `indexes/*.mgi`;
+- encoded page sizes и binary frame sizes;
+- marker, scope, kind, status, sensitivity и trust summaries, которые используются для pruning;
+- Markdown export, если пользователь явно его создал.
+
+Risks у plaintext metadata:
+
+- marker names могут раскрывать темы, названия продуктов, людей, repositories или incident areas;
+- file, project и scope markers могут раскрывать структуру проекта;
+- kind/status/sensitivity/trust summaries могут раскрывать categories вроде decisions, task states, rejected/deprecated memory или наличие secret-reference;
+- index size, page count, page sizes и encoded sizes раскрывают примерный объём памяти и паттерны роста;
+- access pattern, timing и repeated recall locality не скрываются at-rest encryption;
+- Markdown export намеренно human-readable и должен считаться plaintext disclosure.
+
+Почему это сейчас остаётся plaintext:
+
+- recall зависит от marker/page pruning до page payload decode;
+- `ExactMarkerPageIndex` и `BinaryFusePageIndex` требуют deterministic marker IDs, чтобы не уходить в full scan;
+- `validate --deep` и `rebuild-indexes` требуют проверки catalog/index consistency по existing pages;
+- performance резко просядет, если encrypted stores будут decode-ить каждую page на каждый query;
+- существующие stores и tools завязаны на текущие dictionary/index/catalog boundaries;
+- metadata privacy нужно менять отдельным index design, а не скрытым storage tweak.
+
+### Metadata Privacy Design Options
+
+Option A: current mode, encrypted payloads with plaintext metadata/indexes.
+
+- Private: hot content, checkpoint content, sealed page MemoryCell payloads.
+- Still leaked: marker strings, scope/kind/status/sensitivity/trust summaries, index shape, page counts/sizes.
+- Performance: лучший текущий путь; exact и Binary Fuse pruning остаются быстрыми.
+- Validate/rebuild: без изменений и надёжно.
+- Compatibility: без API или storage-layout break.
+- Migration complexity: none.
+- `CandidatePageIndex` API: без изменений.
+- Binary Fuse: остаётся useful как optional static page filter.
+
+Option B: hashed marker dictionary, canonical marker string -> keyed hash / opaque ID.
+
+- Private: raw marker strings больше не хранятся напрямую в dictionary, если key доступен.
+- Still leaked: equality, frequency, page/index shape, marker reuse patterns и любые unblinded manifest/catalog fields.
+- Performance: близко к current, если hashes deterministic после unlock.
+- Validate/rebuild: должны работать после unlock и проверять keyed hashes вместо strings.
+- Compatibility: старые plaintext dictionaries требуют migration или dual-read support.
+- Migration complexity: medium.
+- `CandidatePageIndex` API: скорее всего можно сохранить, если `MarkerId` остаётся public index unit.
+- Binary Fuse: остаётся useful, если filters строятся по stable keyed IDs/fingerprints.
+
+Option C: blind marker indexes using keyed marker tokens for catalog and indexes.
+
+- Private: catalog/index files больше не раскрывают raw marker names и снижают topic leakage.
+- Still leaked: token equality, token frequency, page counts, page sizes, status of page hits, timing и access patterns.
+- Performance: должен быть близок к current, если query markers один раз превращаются в keyed tokens после unlock.
+- Validate/rebuild: требует unlock; rebuild должен regenerate keyed tokens из decrypted pages или keyed dictionary.
+- Compatibility: existing indexes требуют rebuild; для old plaintext catalog/index files нужна explicit migration policy.
+- Migration complexity: medium to high.
+- `CandidatePageIndex` API: должен остаться unchanged, если tokens укладываются в существующий `MarkerId`/u64-style path; не добавлять новую filter family.
+- Binary Fuse: остаётся useful, потому что Binary Fuse может работать по keyed marker fingerprints вместо raw marker IDs.
+
+Option D: encrypted dictionary with plaintext derived index IDs.
+
+- Private: raw marker strings at rest в dictionary.
+- Still leaked: derived ID equality/frequency, index membership, catalog summaries, page sizes и stable ID correlations across backups.
+- Performance: почти current после unlock, потому что indexes всё ещё используют plaintext derived IDs.
+- Validate/rebuild: dictionary operations требуют unlock; indexes можно проверять structurally.
+- Compatibility: moderate; меняется dictionary read/write path, indexes в основном остаются стабильными.
+- Migration complexity: medium.
+- `CandidatePageIndex` API: unchanged.
+- Binary Fuse: остаётся useful.
+
+Option E: fully encrypted metadata.
+
+- Private: максимальная at-rest metadata privacy для dictionary, catalog, summaries и indexes.
+- Still leaked: file count, file sizes, timestamps, access timing и process-memory data while unlocked.
+- Performance: вероятно намного медленнее без нового private index design; naive mode превращается в page full-scan или broad decrypt/decode.
+- Validate/rebuild: требует unlock и может стать expensive; offline structural validation будет ограничен.
+- Compatibility: высокий break risk для tools, smokes и mixed stores.
+- Migration complexity: high.
+- `CandidatePageIndex` API: вероятно требует redesign или adapter layer.
+- Binary Fuse: useful только если rebuilt по keyed/private tokens; иначе теряет текущую роль.
+
+Recommendation for Memory Genome Engine:
+
+- Оставить current payload-encrypted mode как default encrypted mode.
+- Честно документировать plaintext metadata leakage и считать это explicit tradeoff, а не скрытым bug.
+- Добавлять optional blind marker mode позже только после prototype, который докажет recall correctness, rebuild behavior и benchmark impact.
+- Не шифровать всю metadata по умолчанию; это подтолкнёт recall к медленным full scans и усложнит validation.
+- Не ломать `CandidatePageIndex`, `MarkerGenome`, recall modes или Exact/BinaryFuse strategy.
+- Не создавать filter zoo. Если blind mode будет добавлен, reuse existing exact/BinaryFuse boundary через keyed marker IDs или keyed marker fingerprints.
+
+Future phased plan, не реализуется сейчас:
+
+- Phase 1: keyed marker fingerprints для encrypted stores, чтобы снизить plaintext dictionary risk, сохранив public marker/query input и existing index API.
+- Phase 2: catalog summaries и index files переходят на keyed marker IDs/fingerprints; validate/rebuild требуют unlock и explicit rebuild existing indexes.
+- Phase 3: optional higher-privacy mode с reduced pruning или более дорогой validation для users, которые принимают slower recall.
+
 ## Recovery
 
 Hot recovery остаётся crash-safe:

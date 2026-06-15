@@ -217,6 +217,14 @@ Done in Mandate 3 sealed-page encryption package:
 - `validate --deep` and `rebuild-indexes` read encrypted pages with the same session unlock path and do not silently skip encrypted pages.
 - MCP, Python SDK, and TypeScript SDK encrypted sealed recall smokes are covered through passphrase environment variables.
 
+Done in Mandate 3 metadata/index risk memo:
+
+- Added an encrypted metadata and index risk model to `docs/SECURITY.md` and `docs/SECURITY.ru.md`.
+- Documented exactly what remains plaintext: manifest safe metadata, marker dictionary, catalog summaries, candidate indexes, encoded sizes, marker/scope/kind/status/sensitivity/trust summaries, and explicit Markdown export.
+- Compared current plaintext metadata mode, hashed marker dictionary, blind marker indexes, encrypted dictionary with plaintext derived index IDs, and fully encrypted metadata.
+- Recommended keeping payload-encrypted mode as the default encrypted mode and deferring blind marker mode until a prototype proves correctness, rebuild behavior, and benchmark impact.
+- Reconfirmed that `CandidatePageIndex`, `MarkerGenome`, recall modes, storage layout, Exact/BinaryFuse strategy, and filter minimalism must remain stable.
+
 Security design decisions:
 
 - Protect payload bytes first: `hot/hot.mgl`, `hot/snapshot.mgs`, and `pages/*.mgp`.
@@ -256,7 +264,7 @@ Latest Mandate 3 verification:
 
 Next Mandate 3 step:
 
-- Design encrypted indexes / blind marker metadata next. Do not encrypt indexes, marker dictionary, or page catalog summaries without a separate design because they define recall pruning and validation behavior.
+- If metadata privacy becomes a hard requirement, prototype Phase 1 keyed marker fingerprints for encrypted stores. Do not implement blind indexes directly without benchmark and migration evidence.
 
 ## Done
 
