@@ -164,6 +164,4 @@ node examples/typescript_basic_usage.ts
 
 Подробнее:
 
-- [Интеграция](docs/INTEGRATION.ru.md)
-- [MCP Adapter](docs/MCP.ru.md)
-- [SDK](docs/SDK.ru.md)
+- [Интеграция / MCP / SDK](docs/INTEGRATION.ru.md)

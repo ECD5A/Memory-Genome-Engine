@@ -26,9 +26,7 @@ Current stage:
 - [Quickstart](QUICKSTART.md): first commands and core CLI workflow.
 - [Architecture](docs/ARCHITECTURE.md): core design and storage/index model.
 - [Security](docs/SECURITY.md): encryption, threat model, plaintext metadata risks.
-- [Integration](docs/INTEGRATION.md): agent lifecycle and local host pattern.
-- [MCP](docs/MCP.md): JSON-RPC adapter contract.
-- [SDK](docs/SDK.md): Python/TypeScript thin wrappers.
+- [Integration / MCP / SDK](docs/INTEGRATION.md): agent lifecycle, JSON-RPC adapter contract, and Python/TypeScript thin wrappers.
 - [Benchmarks](docs/BENCHMARKS.md): performance tools and report interpretation.
 - [Release](docs/RELEASE.md): build, smoke, and packaging checks.
 

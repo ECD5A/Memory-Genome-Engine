@@ -47,9 +47,7 @@ cargo run -p mge-cli -- validate --deep
 - [Quickstart](QUICKSTART.ru.md)
 - [Архитектура](docs/ARCHITECTURE.ru.md)
 - [Security](docs/SECURITY.ru.md)
-- [Интеграция](docs/INTEGRATION.ru.md)
-- [MCP Adapter](docs/MCP.ru.md)
-- [SDK](docs/SDK.ru.md)
+- [Интеграция / MCP / SDK](docs/INTEGRATION.ru.md)
 - [Бенчмарки](docs/BENCHMARKS.ru.md)
 - [Release](docs/RELEASE.ru.md)
 - [Статус проекта](PROJECT_STATUS.ru.md)
@@ -90,7 +88,6 @@ Metadata остаётся plaintext by design: marker dictionary, index files, p
 
 ## Примеры
 
-- [Agent workflow](examples/agent_workflow.ru.md)
 - [Rust API example](examples/basic_usage.rs)
 - [Rust CLI host example](examples/agent_host_cli.rs)
 - [Python SDK example](examples/python_basic_usage.py)

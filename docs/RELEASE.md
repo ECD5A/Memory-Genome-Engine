@@ -103,7 +103,7 @@ Benchmark JSON is report/debug output only, not runtime storage.
 - CLI smoke passes.
 - Encrypted smoke passes if security docs or encrypted storage changed.
 - MCP/SDK smoke passes if integration docs or wrappers changed.
-- README, Quickstart, Security, Integration, MCP, SDK, Benchmarks, and Project Status links are current.
+- README, Quickstart, Security, Integration, Benchmarks, and Project Status links are current.
 - No secret material is committed.
 - `LICENSE` is present and MIT.
 

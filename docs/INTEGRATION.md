@@ -2,7 +2,9 @@
 
 [Russian version](INTEGRATION.ru.md)
 
-Memory Genome Engine is integrated as a local-first memory service for agents. The agent does not read store files directly. It calls an integration boundary, gets a `ContextPacket`, works with that context, then stores useful results back through `remember`.
+This document is the single integration reference for agent hosts, the local JSON-RPC MCP-ready adapter, and the thin Python/TypeScript SDK wrappers.
+
+JSON in this layer is protocol/debug output only. It is not runtime storage.
 
 Core flow stays unchanged:
 
@@ -14,31 +16,22 @@ recall -> ContextPacket
 
 ## Agent Lifecycle
 
-1. Agent receives a task.
-2. Agent calls `recall` with `focused`, `broad`, or explicit `full_scope`.
-3. Memory Genome Engine returns a `ContextPacket`.
-4. Agent uses the packet as task-relevant memory.
-5. Agent stores durable lessons, decisions, preferences, or task state through `remember`.
-6. Agent may call `checkpoint` for hot-memory durability or `seal` to move hot cells into sealed pages.
-
-## Agent Host Pattern
-
-The host owns orchestration. Memory Genome Engine owns memory:
+The host owns orchestration. Memory Genome Engine owns memory.
 
 ```text
 host starts task
 -> recall focused or broad
--> host does local work using ContextPacket
+-> host works using ContextPacket
 -> remember useful result
 -> checkpoint for hot durability
 -> recall again if the task continues
--> seal when the task/session boundary is stable
+-> seal at a stable task/session boundary
 -> validate --deep in smoke or maintenance flows
 ```
 
-Use recall modes conservatively:
+Recall modes:
 
-- `focused`: default for a narrow question, next action, or small tool decision.
+- `focused`: default for a narrow question, next action, or tool decision.
 - `broad`: project/module/task planning where the agent needs more related memory.
 - `full_scope`: explicit audit/export/review inside a known scope; always pass `scope`.
 
@@ -51,17 +44,15 @@ Local host examples:
 
 ## ContextPacket Contract
 
-`ContextPacket` is the integration result for recall. It contains:
+`ContextPacket` is the recall result. It contains:
 
-- `query`: the request text.
-- `relevant_memory`: returned memory items with kind, content, trust, status, scope, sensitivity, and marker strings.
-- `constraints`: retrieval constraints the agent should obey.
-- `warnings`: safety or recall warnings.
-- `debug`: recall mode, index kind, candidate/page/cell counters, cache counters, and timing breakdown.
+- `query`
+- `relevant_memory`
+- `constraints`
+- `warnings`
+- `debug`
 
-The packet is task-relevant and size-controlled, not necessarily tiny. `focused` is narrow, `broad` is wider, and `full_scope` requires an explicit scope.
-
-MCP/SDK recall responses keep the core `ContextPacket` under `context_packet` and also expose a stable adapter wrapper under `context`:
+The packet is task-relevant and size-controlled, not necessarily tiny. MCP/SDK recall responses keep the core `ContextPacket` under `context_packet` and expose an adapter wrapper under `context`:
 
 - `query`
 - `mode`
@@ -72,89 +63,245 @@ MCP/SDK recall responses keep the core `ContextPacket` under `context_packet` an
 - `debug`
 - `store_stats`
 
-## Integration Boundaries
+## Integration Surfaces
 
 Use the lowest layer that fits the host:
 
-- Rust: use `mge-core::MemoryEngine` directly.
-- CLI: use the `mge` binary for scripts and shell-based agents.
-- MCP-style: use `mge-mcp-server` for JSON-RPC over stdin/stdout.
-- Python: use the thin wrapper in `sdk/python`.
-- TypeScript: use the thin wrapper in `sdk/typescript`.
+- Rust: `mge-core::MemoryEngine`.
+- CLI: `mge`.
+- MCP-ready local adapter: `mge-mcp-server`, JSON-RPC over stdin/stdout.
+- Python: thin wrapper in `sdk/python`.
+- TypeScript: thin wrapper in `sdk/typescript`.
 
 Rust remains the core. Python and TypeScript wrappers delegate to the Rust CLI and do not duplicate memory logic.
+
+## MCP-Ready JSON-RPC Adapter
+
+Run:
+
+```bash
+cargo run -p mge-cli --bin mge-mcp-server
+```
+
+Contract:
+
+- JSON-RPC version: `2.0`
+- `protocol_version`: `mge-jsonrpc-1`
+- `integration_schema_version`: `1`
+
+Each input line is one JSON-RPC request:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"mge_stats","params":{"store_path":".memory-genome"}}
+```
+
+Each output line is one JSON-RPC response:
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{"ok":true,"tool":"mge_stats","protocol_version":"mge-jsonrpc-1","integration_schema_version":1,"stats":{}}}
+```
+
+Schema discovery:
+
+```json
+{"jsonrpc":"2.0","id":"schema","method":"mge_schema","params":{}}
+```
+
+The schema response includes tool schemas, the `ContextPacket` wrapper contract, and the structured error contract. Golden fixtures live under `crates/mge-cli/tests/fixtures/mcp`.
+
+### MCP Tools
+
+`mge_remember` input:
+
+- `store_path`
+- `content`
+- `kind`, default `temporary_note`
+- `scope`, default `global`
+- `markers`, default `[]`
+- `trust`, default `agent_inferred`
+- `sensitivity`, default `private`
+- `status`, default `active`
+- optional `subject`
+- optional `source_type` and `source_ref`
+- optional `links`
+- optional `passphrase_env`
+
+`mge_recall` input:
+
+- `store_path`
+- `query`
+- `mode`: `focused`, `broad`, or `full_scope`
+- `scope`, required for `full_scope`
+- optional `markers`
+- optional `max_items`
+- optional `kind`
+- optional `include_deprecated`
+- optional `include_secret_references`
+- optional `passphrase_env`
+
+Store tools:
+
+- `mge_seal`
+- `mge_checkpoint`
+- `mge_stats`
+- `mge_validate`
+- `mge_rebuild_indexes`
+- `mge_export_markdown`
+
+All store tools accept `store_path`; encrypted stores also accept `passphrase_env`. `mge_validate` accepts `deep`; `mge_export_markdown` accepts optional `output_path`.
+
+### Structured Errors
+
+Errors are stable for SDKs:
+
+```json
+{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params: missing field `content`","tool_name":"mge_remember","recoverable":true,"protocol_version":"mge-jsonrpc-1","integration_schema_version":1,"details":{"error_kind":"invalid_params"}}}
+```
+
+Important `details.error_kind` values:
+
+- `parse_error`
+- `unknown_method`
+- `invalid_params`
+- `store_open_failed`
+- `store_locked`
+- `auth_failed`
+- `invalid_request`
+
+Malformed JSON returns `-32700`; unknown tools return `-32601`; missing or invalid params return `-32602`; store/runtime failures use `-32000`.
+
+### MCP Workflow Example
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"mge_remember","params":{"store_path":".memory-genome","content":"Agent should recall memory before editing.","kind":"procedure","scope":"agent","markers":["topic:agent_memory"],"trust":"user_confirmed","sensitivity":"private"}}
+{"jsonrpc":"2.0","id":2,"method":"mge_recall","params":{"store_path":".memory-genome","query":"agent memory","mode":"focused","scope":"agent","max_items":5}}
+{"jsonrpc":"2.0","id":3,"method":"mge_checkpoint","params":{"store_path":".memory-genome"}}
+{"jsonrpc":"2.0","id":4,"method":"mge_seal","params":{"store_path":".memory-genome"}}
+{"jsonrpc":"2.0","id":5,"method":"mge_validate","params":{"store_path":".memory-genome","deep":true}}
+```
+
+A reusable session transcript is in `examples/mcp_agent_session.jsonl`.
+
+## Python SDK
+
+Location:
+
+```text
+sdk/python/mge_sdk/__init__.py
+sdk/python/pyproject.toml
+sdk/python/README.md
+examples/python_basic_usage.py
+examples/python_agent_host.py
+```
+
+Run:
+
+```bash
+python examples/python_basic_usage.py
+python examples/python_agent_host.py
+```
+
+Optional editable install:
+
+```bash
+python -m pip install -e sdk/python
+python -c "import mge_sdk; print(mge_sdk.MemoryGenomeClient)"
+```
+
+Basic shape:
+
+```python
+from mge_sdk import MemoryGenomeClient
+
+client = MemoryGenomeClient(".memory-genome", passphrase_env="MGE_PASSPHRASE")
+client.init(profile="fast", encrypted=True)
+client.remember("Agent should use recalled context.", kind="procedure", scope="agent")
+packet = client.recall("agent context", mode="focused", scope="agent")
+client.checkpoint()
+client.seal()
+client.validate(deep=True)
+client.rebuild_indexes()
+client.export_markdown()
+```
+
+Typed surface includes `RecallMode`, `RememberOptions`, `ContextPacket`, `StoreStats`, `ValidationReport`, `McpError`, `MgeCommandError`, `MgeProtocolError`, and `result_or_raise_mcp_error(response)`.
+
+## TypeScript SDK
+
+Location:
+
+```text
+sdk/typescript/src/mge.ts
+sdk/typescript/package.json
+sdk/typescript/tsconfig.json
+sdk/typescript/README.md
+examples/typescript_basic_usage.ts
+examples/typescript_agent_host.ts
+```
+
+Run:
+
+```bash
+node examples/typescript_basic_usage.ts
+node examples/typescript_agent_host.ts
+```
+
+Optional package smoke:
+
+```bash
+cd sdk/typescript
+npm run smoke
+npm run check # if tsc is available
+```
+
+Basic shape:
+
+```typescript
+import { MemoryGenomeClient } from "./sdk/typescript/src/mge.ts";
+
+const client = new MemoryGenomeClient(".memory-genome", {
+  passphraseEnv: "MGE_PASSPHRASE",
+});
+client.init("fast", { encrypted: true });
+client.remember("Agent should use recalled context.", {
+  kind: "procedure",
+  scope: "agent",
+});
+const packet = client.recall("agent context", {
+  mode: "focused",
+  scope: "agent",
+});
+client.checkpoint();
+client.seal();
+client.validate({ deep: true });
+client.rebuildIndexes();
+client.exportMarkdown();
+```
+
+Typed surface includes `RecallMode`, `RememberOptions`, `RecallOptions`, `ContextPacket`, `StoreStats`, `ValidationReport`, `McpStructuredError`, `MemoryGenomeCommandError`, `MemoryGenomeProtocolError`, and `resultOrThrowMcpError(response)`.
 
 ## Encrypted Store Unlock
 
 Encrypted stores use the same integration paths. The host passes only the environment variable name that contains the passphrase:
 
 - CLI: `--passphrase-env MGE_PASSPHRASE`
-- MCP JSON-RPC params: `"passphrase_env": "MGE_PASSPHRASE"`
-- Python SDK: `MemoryGenomeClient(..., passphrase_env="MGE_PASSPHRASE")`
-- TypeScript SDK: `new MemoryGenomeClient(..., { passphraseEnv: "MGE_PASSPHRASE" })`
+- MCP params: `"passphrase_env": "MGE_PASSPHRASE"`
+- Python: `MemoryGenomeClient(..., passphrase_env="MGE_PASSPHRASE")`
+- TypeScript: `new MemoryGenomeClient(..., { passphraseEnv: "MGE_PASSPHRASE" })`
 
-The passphrase value must stay outside protocol payloads and logs. Current encryption covers `hot/hot.mgl`, `hot/snapshot.mgs`, and sealed page payloads in `pages/*.mgp`. Indexes, marker dictionary, catalog summaries, and Markdown export remain plaintext by design. Missing unlock is reported as `store_locked`; wrong keys or AEAD failures are reported as `auth_failed`.
-
-## Local Developer Setup
-
-Build the Rust tools first:
-
-```bash
-cargo build
-```
-
-Run the MCP-ready adapter:
-
-```bash
-cargo run -p mge-cli --bin mge-mcp-server
-```
-
-Run SDK smokes from the repository root:
-
-```bash
-python examples/python_basic_usage.py
-node examples/typescript_basic_usage.ts
-```
-
-Optional local packaging checks:
-
-```bash
-python -m pip install -e sdk/python
-cd sdk/typescript
-npm run smoke
-npm run check # if tsc is available
-```
-
-The current decision is to keep the versioned JSON-RPC stdin/stdout adapter as the main local MCP-ready surface. A full external MCP SDK dependency is intentionally deferred until the contract needs host-specific transport features.
-
-## Versioning
-
-The current integration contract uses:
-
-- `protocol_version`: `mge-jsonrpc-1`
-- `integration_schema_version`: `1`
-
-These fields version only the MCP/SDK protocol contract. They do not change the binary storage format, page codec, filter strategy, or recall semantics.
+The passphrase value must stay outside protocol payloads and logs. Encrypted mode protects `hot/hot.mgl`, `hot/snapshot.mgs`, and sealed page payloads in `pages/*.mgp`. Indexes, marker dictionary, catalog summaries, and Markdown export remain plaintext by design.
 
 ## Local-First Safety
 
 - No internet access is required.
 - Corpus files are not executed.
 - Stores are opened only from explicit paths.
-- Markdown export writes to `exports/memory.md` by default or an explicit output path in the adapter.
-- JSON is used for CLI/MCP/SDK protocol output and debug reports only. It is not runtime storage.
-- Runtime storage remains binary: `manifest.mgm`, `dictionary/markers.mgd`, `hot/hot.mgl`, `pages/*.mgp`, and `indexes/*.mgi`.
+- Markdown export writes to `exports/memory.md` by default or an explicit output path.
+- `full_scope` recall requires `scope`.
+- The adapter and SDKs do not change storage layout, codec, filters, recall semantics, or encryption behavior.
 
 ## Current Limits
 
-- `mge-mcp-server` is an MCP-ready local JSON-RPC adapter, not a full external MCP SDK implementation.
+- `mge-mcp-server` is MCP-ready local JSON-RPC, not a full external MCP SDK implementation.
 - SDKs are thin local wrappers around `mge`; package publishing is not done yet.
 - Encrypted indexes/blind marker metadata, vector DB, UI, and remote service hosting are outside the current integration layer.
-
-## Troubleshooting
-
-- If a wrapper cannot find `mge`, pass the repository cargo command explicitly.
-- If an MCP request fails, check the structured `error.details.error_kind` before parsing the human-readable message.
-- If `full_scope` recall fails, provide `scope`; this is required to avoid accidental broad memory exposure.
-- If Markdown export writes somewhere unexpected, pass `output_path` explicitly or use the default store `exports/memory.md`.
-- JSON-RPC/CLI JSON is protocol or debug output only. Runtime storage remains binary.

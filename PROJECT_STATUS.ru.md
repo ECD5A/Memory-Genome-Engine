@@ -26,9 +26,7 @@ Memory Genome Engine - Rust-first локальный memory engine для аге
 - [Quickstart](QUICKSTART.ru.md): первые команды и основной CLI workflow.
 - [Architecture](docs/ARCHITECTURE.ru.md): core design, storage и index model.
 - [Security](docs/SECURITY.ru.md): encryption, threat model, plaintext metadata risks.
-- [Integration](docs/INTEGRATION.ru.md): agent lifecycle и local host pattern.
-- [MCP](docs/MCP.ru.md): JSON-RPC adapter contract.
-- [SDK](docs/SDK.ru.md): Python/TypeScript thin wrappers.
+- [Integration / MCP / SDK](docs/INTEGRATION.ru.md): agent lifecycle, JSON-RPC adapter contract и Python/TypeScript thin wrappers.
 - [Benchmarks](docs/BENCHMARKS.ru.md): performance tools и чтение отчетов.
 - [Release](docs/RELEASE.ru.md): build, smoke и packaging checks.
 

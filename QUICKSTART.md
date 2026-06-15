@@ -164,6 +164,4 @@ node examples/typescript_basic_usage.ts
 
 More integration details:
 
-- [Integration](docs/INTEGRATION.md)
-- [MCP Adapter](docs/MCP.md)
-- [SDKs](docs/SDK.md)
+- [Integration / MCP / SDK](docs/INTEGRATION.md)

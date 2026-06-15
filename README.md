@@ -47,9 +47,7 @@ Full setup and usage: [Quickstart](QUICKSTART.md).
 - [Quickstart](QUICKSTART.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security](docs/SECURITY.md)
-- [Integration](docs/INTEGRATION.md)
-- [MCP Adapter](docs/MCP.md)
-- [SDKs](docs/SDK.md)
+- [Integration / MCP / SDK](docs/INTEGRATION.md)
 - [Benchmarks](docs/BENCHMARKS.md)
 - [Release](docs/RELEASE.md)
 - [Project Status](PROJECT_STATUS.md)
@@ -90,7 +88,6 @@ Metadata remains plaintext by design: marker dictionary, index files, page catal
 
 ## Examples
 
-- [Agent workflow](examples/agent_workflow.md)
 - [Rust API example](examples/basic_usage.rs)
 - [Rust CLI host example](examples/agent_host_cli.rs)
 - [Python SDK example](examples/python_basic_usage.py)
