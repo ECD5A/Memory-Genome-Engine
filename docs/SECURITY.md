@@ -15,6 +15,7 @@ Current implementation status:
 - `pages/*.mgp` sealed page payloads are encrypted/authenticated when the store has key metadata.
 - Wrong passphrases fail with an authentication error.
 - Encrypted init without passphrase is still allowed as a locked marker/config state, but payload operations remain locked until key metadata exists.
+- Encrypted-mode payload operations do not silently fall back to plaintext; they fail locked/authenticated instead.
 - `mge config security` reads safe manifest-level security status without opening payloads.
 - Indexes, marker dictionary, page catalog summaries, Markdown export, and selected manifest metadata are not encrypted in this pass.
 - JSON remains protocol/debug/benchmark output only, not runtime storage.
@@ -52,12 +53,15 @@ mge init --encrypted --passphrase-env MGE_PASSPHRASE
 mge remember "private hot memory" --passphrase-env MGE_PASSPHRASE
 mge recall "private hot memory" --passphrase-env MGE_PASSPHRASE
 mge checkpoint --passphrase-env MGE_PASSPHRASE
+mge seal --passphrase-env MGE_PASSPHRASE
 mge validate --passphrase-env MGE_PASSPHRASE
 ```
 
 `--passphrase-env` takes the environment variable name, not the passphrase value.
 
 Encrypted stores without an unlock return `store is locked`. Wrong passphrases return `authentication failed`.
+
+No command should downgrade encrypted payload writes to plaintext. If an encrypted store cannot be unlocked, remember, recall, seal, checkpoint, validate, rebuild, stats, and export payload operations fail instead.
 
 ## What Is Encrypted Now
 
@@ -235,6 +239,13 @@ This pass does not protect against:
 - There is no encrypted export mode.
 - Existing unencrypted stores are not migrated to encrypted stores automatically.
 
-## Next Security Step
+## Future Security Work
 
-The next Mandate 3 package should be encrypted indexes / blind marker metadata design. Do not encrypt indexes, marker dictionary, or catalog summaries without a separate design, because those structures define search and pruning behavior.
+Mandate 3 closes with payload encryption ready for the current product. Future work is non-blocking and should start only from a separate design:
+
+- optional keyed marker fingerprints / blind marker metadata prototype;
+- encrypted indexes or encrypted marker dictionary, only after benchmark and migration evidence;
+- encrypted Markdown export mode;
+- interactive unlock prompt or host key-management integration.
+
+Do not encrypt indexes, marker dictionary, or catalog summaries by default, because those structures define recall pruning and validation behavior.

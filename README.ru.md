@@ -70,7 +70,7 @@ Markdown удобен для экспорта и чтения человеком
 
 Storage layer спроектирован под staged encryption, session keys, blind marker indexes и policy-gated access. Security model Мандата 3 описан в [Security model](docs/SECURITY.ru.md).
 
-Текущий статус: unencrypted stores остаются default и работают как раньше. Encrypted stores уже можно создать с passphrase environment variable; hot records в `hot/hot.mgl`, checkpoint payload в `hot/snapshot.mgs` и sealed page payloads в `pages/*.mgp` authenticated/encrypted. Indexes, marker dictionary, catalog metadata и Markdown export остаются plaintext by design в этом package.
+Текущий статус: unencrypted stores остаются default и работают как раньше. Encrypted stores уже можно создать с passphrase environment variable; hot records в `hot/hot.mgl`, checkpoint payload в `hot/snapshot.mgs` и sealed page payloads в `pages/*.mgp` authenticated/encrypted. Indexes, marker dictionary, catalog metadata и Markdown export остаются plaintext by design в этом package. Missing unlock падает как `store_locked`; wrong key падает как `auth_failed` / authentication failure, без silent plaintext fallback.
 
 ```powershell
 $env:MGE_PASSPHRASE = "use-a-real-secret"

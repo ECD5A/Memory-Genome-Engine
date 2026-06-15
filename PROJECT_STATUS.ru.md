@@ -43,14 +43,14 @@ JSON policy:
 | v0.2 storage/index foundation | Done / hardening | Binary runtime storage layout, MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in и validation hardening сделаны. |
 | v0.2 remaining | Closed | Benchmark foundation готов; дальнейший core cleanup только benchmark-gated. |
 | v0.3 SDK/MCP | In progress | Mandate 2 integration foundation активен: MCP-ready adapter и thin Python/TypeScript wrappers уже есть. |
-| v0.4 security | In progress | Mandate 3 имеет threat model плюс real session unlock и authenticated hot log/snapshot/sealed-page payload encryption; encrypted indexes/blind markers остаются future work. |
+| v0.4 security | Closed / future hardening | Mandate 3 имеет threat model плюс real session unlock и authenticated hot log/snapshot/sealed-page payload encryption; encrypted indexes/blind markers остаются optional future work. |
 | v0.5 safety/search | Partial foundation | Policy/capabilities есть; poisoning/conflict/vector reranking ещё не начаты. |
 
 ## Текущий Фокус
 
-- Развивать Mandate 3 security/encryption, сохраняя Mandate 1 core и Mandate 2 integration стабильными.
+- Держать Mandate 1 core, Mandate 2 integration и Mandate 3 payload encryption стабильными.
 - Держать JSON вне internal runtime storage; использовать его только для explicit debug output и structured input parsing.
-- Держать реализацию детерминированной, локальной, компактной, marker/page based и готовой к будущей security work.
+- Не начинать новую crypto/index/storage work без отдельного design и benchmark или migration evidence.
 
 ## Mandate 1 Closure Status
 
@@ -175,7 +175,7 @@ Known limitations:
 
 Recommended next mandate:
 
-- Mandate 3 должен быть явным product decision: либо real host integration с выбранным agent runner/MCP host, либо security/session work. Core optimization не возобновлять без benchmark или integration blocker.
+- Mandate 3 security work закрыт как payload-encryption ready. Следующее рекомендуемое направление - Mandate 4 product UI/packaging или optional pre-Mandate-4 real user corpus плюс real host compatibility check.
 
 ## Mandate 3 Security Status
 
@@ -265,6 +265,53 @@ Latest Mandate 3 verification:
 Next Mandate 3 step:
 
 - Если metadata privacy станет hard requirement, сделать prototype Phase 1 keyed marker fingerprints для encrypted stores. Не реализовывать blind indexes напрямую без benchmark и migration evidence.
+
+## Mandate 3 Closure Status
+
+Mandate 3 готов к закрытию как текущий security/encryption-ready layer.
+
+Готово:
+
+- Encrypted store mode включается явно через `mge init --encrypted`.
+- Session unlock использует `--passphrase-env`; passphrase передаётся именем environment variable и не хранится в manifest, logs, protocol output или errors.
+- KDF/AEAD implementation использует стандартные Rust crates: `argon2`, `chacha20poly1305`, `rand` и `zeroize`.
+- `hot/hot.mgl` hot record payloads encrypted/authenticated для encrypted stores с key metadata.
+- `hot/snapshot.mgs` checkpoint payloads encrypted/authenticated.
+- `pages/*.mgp` sealed page payloads encrypted/authenticated.
+- MCP, Python SDK и TypeScript SDK передают только имена passphrase environment variables.
+- `validate --deep` и `rebuild-indexes` работают с encrypted sealed pages после unlock и не silently skip encrypted pages.
+- Locked encrypted stores возвращают `store_locked`; wrong key или AEAD failure возвращают `auth_failed` / authentication failure.
+- Encrypted-mode payload operations не делают silent fallback в plaintext.
+
+Остаётся plaintext by design:
+
+- `manifest.mgm` safe metadata, key-derivation parameters, binary frame headers и storage version/kind fields.
+- `dictionary/markers.mgd`.
+- `indexes/*.mgi` и page catalog summaries.
+- Encoded page sizes, marker/scope/kind/status/sensitivity/trust summaries и index/page shape.
+- Markdown export, если он явно создан.
+- Process memory и `ContextPacket`, пока store unlocked.
+
+Почему metadata остаётся plaintext:
+
+- Recall зависит от page/index pruning до page payload decode.
+- `ExactMarkerPageIndex` и `BinaryFusePageIndex` используют deterministic marker IDs для fast candidate selection.
+- `validate --deep` и `rebuild-indexes` требуют, чтобы catalog/index structure можно было проверять и пересобирать.
+- Fully encrypted metadata вероятно приведёт к slower full scans или потребует отдельного private-index design.
+- Сохранение `CandidatePageIndex`, `MarkerGenome`, recall modes, storage layout и filter minimalism - намеренное product constraint.
+
+Non-blocking future work:
+
+- Optional keyed marker fingerprint prototype для encrypted stores.
+- Optional blind marker metadata/index design после benchmark и migration evidence.
+- Optional encrypted Markdown export.
+- Optional interactive unlock или host key-management integration.
+- Automatic migration from unencrypted stores to encrypted stores только как explicit future operation.
+
+Recommended next mandate:
+
+- Mandate 4: Product UI / Packaging.
+- Optional pre-Mandate-4: real user corpus run плюс real host compatibility check.
 
 ## Сделано
 

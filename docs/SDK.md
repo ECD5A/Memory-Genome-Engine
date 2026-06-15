@@ -141,7 +141,7 @@ Both wrappers cover:
 
 - init/open store
 - opt-in encrypted store init through passphrase env
-- encrypted hot log/snapshot unlock pass-through
+- encrypted hot log/snapshot/sealed-page unlock pass-through
 - security config readout
 - remember
 - focused/broad/full-scope recall

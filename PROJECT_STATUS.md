@@ -43,14 +43,14 @@ JSON policy:
 | v0.2 storage/index foundation | Done / hardening | Binary runtime storage layout, MessagePack, zstd, config, clustering, score debug, Binary Fuse opt-in, and validation hardening are done. |
 | v0.2 remaining | Closed | Benchmark foundation is ready; further core cleanup is benchmark-gated. |
 | v0.3 SDK/MCP | In progress | Mandate 2 integration foundation is active: MCP-ready adapter and thin Python/TypeScript wrappers are present. |
-| v0.4 security | In progress | Mandate 3 has threat model plus real session unlock and authenticated hot log/snapshot/sealed-page payload encryption; encrypted indexes/blind markers remain future work. |
+| v0.4 security | Closed / future hardening | Mandate 3 has threat model plus real session unlock and authenticated hot log/snapshot/sealed-page payload encryption; encrypted indexes/blind markers remain optional future work. |
 | v0.5 safety/search | Partial foundation | Policy/capabilities exist; poisoning/conflict/vector reranking are not started. |
 
 ## Current Focus
 
-- Build Mandate 3 security/encryption while keeping Mandate 1 core and Mandate 2 integration stable.
+- Keep Mandate 1 core, Mandate 2 integration, and Mandate 3 payload encryption stable.
 - Keep JSON out of internal runtime storage; use it only for explicit debug output and structured input parsing.
-- Keep the implementation deterministic, local, compact, marker/page based, and ready for later security work.
+- Do not start new crypto/index/storage work without a separate design and benchmark or migration evidence.
 
 ## Mandate 1 Closure Status
 
@@ -175,7 +175,7 @@ Known limitations:
 
 Recommended next mandate:
 
-- Mandate 3 should be an explicit product decision: either real host integration with a chosen agent runner/MCP host, or security/session work. Do not restart core optimization without a benchmark or integration blocker.
+- Mandate 3 security work is closed as payload-encryption ready. Next recommended direction is Mandate 4 product UI/packaging, or an optional pre-Mandate-4 real user corpus plus real host compatibility check.
 
 ## Mandate 3 Security Status
 
@@ -265,6 +265,53 @@ Latest Mandate 3 verification:
 Next Mandate 3 step:
 
 - If metadata privacy becomes a hard requirement, prototype Phase 1 keyed marker fingerprints for encrypted stores. Do not implement blind indexes directly without benchmark and migration evidence.
+
+## Mandate 3 Closure Status
+
+Mandate 3 is ready to close as the current security/encryption-ready layer.
+
+Ready:
+
+- Encrypted store mode is opt-in through `mge init --encrypted`.
+- Session unlock uses `--passphrase-env`; passphrases are passed by environment variable name and are not stored in manifest, logs, protocol output, or errors.
+- KDF/AEAD implementation uses standard Rust crates: `argon2`, `chacha20poly1305`, `rand`, and `zeroize`.
+- `hot/hot.mgl` hot record payloads are encrypted/authenticated for encrypted stores with key metadata.
+- `hot/snapshot.mgs` checkpoint payloads are encrypted/authenticated.
+- `pages/*.mgp` sealed page payloads are encrypted/authenticated.
+- MCP, Python SDK, and TypeScript SDK pass only passphrase environment variable names.
+- `validate --deep` and `rebuild-indexes` work on encrypted sealed pages after unlock and do not silently skip encrypted pages.
+- Locked encrypted stores return `store_locked`; wrong keys or AEAD failures return `auth_failed` / authentication failure.
+- Encrypted-mode payload operations do not silently fall back to plaintext.
+
+Still plaintext by design:
+
+- `manifest.mgm` safe metadata, key-derivation parameters, binary frame headers, and storage version/kind fields.
+- `dictionary/markers.mgd`.
+- `indexes/*.mgi` and page catalog summaries.
+- Encoded page sizes, marker/scope/kind/status/sensitivity/trust summaries, and index/page shape.
+- Markdown export if explicitly created.
+- Process memory and `ContextPacket` while the store is unlocked.
+
+Why metadata remains plaintext:
+
+- Recall depends on page/index pruning before page payload decode.
+- `ExactMarkerPageIndex` and `BinaryFusePageIndex` use deterministic marker IDs for fast candidate selection.
+- `validate --deep` and `rebuild-indexes` need catalog/index structure to remain checkable and rebuildable.
+- Fully encrypted metadata would likely force slower full scans or require a separate private-index design.
+- Preserving `CandidatePageIndex`, `MarkerGenome`, recall modes, storage layout, and filter minimalism is a deliberate product constraint.
+
+Non-blocking future work:
+
+- Optional keyed marker fingerprint prototype for encrypted stores.
+- Optional blind marker metadata/index design after benchmark and migration evidence.
+- Optional encrypted Markdown export.
+- Optional interactive unlock or host key-management integration.
+- Automatic migration from unencrypted stores to encrypted stores, only as an explicit future operation.
+
+Recommended next mandate:
+
+- Mandate 4: Product UI / Packaging.
+- Optional pre-Mandate-4: real user corpus run plus real host compatibility check.
 
 ## Done
 

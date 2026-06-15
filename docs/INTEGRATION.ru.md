@@ -93,7 +93,7 @@ Encrypted stores используют те же integration paths. Host пере
 - Python SDK: `MemoryGenomeClient(..., passphrase_env="MGE_PASSPHRASE")`
 - TypeScript SDK: `new MemoryGenomeClient(..., { passphraseEnv: "MGE_PASSPHRASE" })`
 
-Значение passphrase не должно попадать в protocol payloads и logs. Сейчас encryption покрывает `hot/hot.mgl`, `hot/snapshot.mgs` и sealed page payloads в `pages/*.mgp`. Indexes, marker dictionary, catalog summaries и Markdown export остаются plaintext by design.
+Значение passphrase не должно попадать в protocol payloads и logs. Сейчас encryption покрывает `hot/hot.mgl`, `hot/snapshot.mgs` и sealed page payloads в `pages/*.mgp`. Indexes, marker dictionary, catalog summaries и Markdown export остаются plaintext by design. Missing unlock возвращается как `store_locked`; wrong key или AEAD failure возвращается как `auth_failed`.
 
 ## Local Developer Setup
 

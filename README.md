@@ -70,7 +70,7 @@ Vector search can be added later as a reranker inside already selected candidate
 
 The storage layer is designed for staged encryption, session keys, blind marker indexes, and policy-gated access. The Mandate 3 security model is documented in [Security model](docs/SECURITY.md).
 
-Current status: unencrypted stores still work by default. Encrypted stores can now be initialized with a passphrase environment variable; `hot/hot.mgl` records, `hot/snapshot.mgs` checkpoint payloads, and `pages/*.mgp` sealed page payloads are authenticated and encrypted. Indexes, marker dictionary, catalog metadata, and Markdown export remain plaintext by design in this package.
+Current status: unencrypted stores still work by default. Encrypted stores can now be initialized with a passphrase environment variable; `hot/hot.mgl` records, `hot/snapshot.mgs` checkpoint payloads, and `pages/*.mgp` sealed page payloads are authenticated and encrypted. Indexes, marker dictionary, catalog metadata, and Markdown export remain plaintext by design in this package. Missing unlock fails as `store_locked`; wrong keys fail as `auth_failed` / authentication failure, with no silent plaintext fallback.
 
 ```bash
 export MGE_PASSPHRASE="use-a-real-secret"
