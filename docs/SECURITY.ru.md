@@ -6,7 +6,11 @@
 
 Текущее состояние:
 
-- Текущие stores ещё не зашифрованы.
+- Существующие unencrypted stores продолжают работать без изменений.
+- `mge init --encrypted` может создать store с encrypted-mode marker в `manifest.mgm`.
+- Encrypted-mode stores сейчас намеренно возвращают locked-store error для payload operations, пока не реализованы session unlock и authenticated encryption.
+- `mge config security` читает manifest-level security status без открытия payload.
+- Payload bytes пока не шифруются.
 - `NoSecurity` - честная pass-through реализация.
 - Проект не должен заявлять encryption, пока authenticated encryption реально не реализована и не покрыта тестами.
 - JSON остаётся только protocol/debug/benchmark output, а не runtime storage.
@@ -176,18 +180,19 @@ Migration story:
 - passphrase в MCP/SDK errors;
 - passphrase в config, manifest, benchmark output или debug output.
 
-Ожидаемая future CLI форма:
+Текущая и ожидаемая CLI форма:
 
 ```bash
 mge init --encrypted
-mge unlock --store .memory-genome
 mge config security
+# Future, пока не реализовано:
+mge unlock --store .memory-genome
 MGE_PASSPHRASE=... mge remember "..."
 ```
 
 MCP/SDK behavior:
 
-- locked encrypted stores возвращают structured locked-store error;
+- locked encrypted stores возвращают structured locked-store error (`details.error_kind = "store_locked"` в JSON-RPC adapter);
 - wrong keys возвращают structured authentication/unlock error;
 - SDK передают safe security options без дублирования crypto;
 - MCP/SDK protocol output не должен содержать passphrases или raw key material.
@@ -228,7 +233,9 @@ Implementation должна добавить tests:
 
 ## Current Limitations
 
-- Encryption designed, but not implemented yet.
+- Encryption design и manifest-level encrypted/locked foundation реализованы, но authenticated payload encryption ещё не реализована.
+- Команды session unlock пока нет.
+- Stores, созданные через `mge init --encrypted`, locked для remember/recall/seal/checkpoint/stats/validate/rebuild/export до реализации unlock/encryption support.
 - Metadata and indexes are not blind.
 - Markdown export plaintext by design, пока не добавлен future encrypted export mode.
 - Runtime process memory может содержать plaintext while unlocked.

@@ -9,7 +9,7 @@ use clap::{Parser, ValueEnum};
 use mge_core::{
     CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine, MemoryKind,
     MemoryStatus, MemoryValue, PageClustererKind, PageCodecKind, RecallMode, RecallRequest,
-    RememberRequest, SensitivityLevel, TrustLevel,
+    RememberRequest, SecurityMode, SensitivityLevel, TrustLevel,
 };
 use serde_json::json;
 
@@ -881,6 +881,7 @@ fn run_mode(
             index_kind,
             page_clusterer: PageClustererKind::ScopeKind,
             durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Unencrypted,
         },
     )?;
 

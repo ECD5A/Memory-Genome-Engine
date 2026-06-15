@@ -37,7 +37,10 @@ use crate::retrieval::{
     score_permitted_cell_debug_with_context, CachedCellScoringData, RecallFilterContext,
     RecallRequest, Retriever, ScoringContext,
 };
-use crate::security::{AuditEvent, AuditLogger, NoSecurity, NoopAuditLogger, SecurityProvider};
+use crate::security::{
+    AuditEvent, AuditLogger, NoSecurity, NoopAuditLogger, SecurityConfig, SecurityMode,
+    SecurityProvider,
+};
 
 pub const DEFAULT_STORE_DIR: &str = ".memory-genome";
 const MANIFEST_FILE: &str = "manifest.mgm";
@@ -131,6 +134,8 @@ pub struct Manifest {
     pub page_clusterer: PageClustererKind,
     #[serde(default)]
     pub durability: DurabilityPolicy,
+    #[serde(default)]
+    pub security_mode: SecurityMode,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -140,6 +145,7 @@ pub struct InitOptions {
     pub index_kind: IndexKind,
     pub page_clusterer: PageClustererKind,
     pub durability: DurabilityPolicy,
+    pub security_mode: SecurityMode,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -221,6 +227,7 @@ pub struct StoreStats {
     pub sealed_cells: usize,
     pub marker_count: usize,
     pub page_count: usize,
+    pub current_security_mode: SecurityMode,
     pub current_page_codec: PageCodecKind,
     pub current_compression: CompressionKind,
     pub current_index_kind: IndexKind,
@@ -240,6 +247,7 @@ sealed pages: {}
 sealed cells: {}
 marker count: {}
 page count: {}
+current security mode: {}
 current page codec: {}
 current compression: {}
 current index kind: {}
@@ -254,6 +262,7 @@ store size bytes: {}
             self.sealed_cells,
             self.marker_count,
             self.page_count,
+            self.current_security_mode,
             self.current_page_codec,
             self.current_compression,
             self.current_index_kind,
@@ -593,7 +602,8 @@ impl MemoryEngine {
         fs::create_dir_all(root.join("exports"))?;
 
         let manifest_path = root.join(MANIFEST_FILE);
-        if !manifest_path.exists() {
+        let created_manifest = !manifest_path.exists();
+        if created_manifest {
             let now = current_timestamp();
             let manifest = Manifest {
                 version: 1,
@@ -607,6 +617,7 @@ impl MemoryEngine {
                 index_kind: options.index_kind,
                 page_clusterer: options.page_clusterer,
                 durability: options.durability,
+                security_mode: options.security_mode,
             };
             binary::write_messagepack_file(&manifest_path, FileKind::Manifest, &manifest)?;
         }
@@ -632,6 +643,12 @@ impl MemoryEngine {
                 .save_to_path(root.join("indexes").join(BINARY_FUSE_INDEX_FILE))?;
         }
 
+        if created_manifest && options.security_mode.is_encrypted() {
+            let manifest: Manifest =
+                binary::read_messagepack_file(&manifest_path, FileKind::Manifest)?;
+            return Ok(Self::locked_empty_engine(root, manifest, dictionary));
+        }
+
         Self::open_at(root)
     }
 
@@ -645,6 +662,12 @@ impl MemoryEngine {
         let mut manifest: Manifest =
             binary::read_messagepack_file(&manifest_path, FileKind::Manifest)?;
         ensure_runtime_page_codec(manifest.page_codec)?;
+        if manifest.security_mode.is_encrypted() {
+            return Err(MgeError::StoreLocked(
+                "encrypted store requires session unlock; payload encryption/unlock is not implemented in this build"
+                    .to_string(),
+            ));
+        }
         let dictionary =
             MarkerDictionary::load_from_path(root.join("dictionary").join(MARKER_DICTIONARY_FILE))?;
         let hot_store = HotStore::new(root.join("hot").join(HOT_LOG_FILE));
@@ -675,6 +698,24 @@ impl MemoryEngine {
         })
     }
 
+    fn locked_empty_engine(
+        root: PathBuf,
+        manifest: Manifest,
+        dictionary: MarkerDictionary,
+    ) -> Self {
+        Self {
+            root,
+            manifest,
+            dictionary,
+            hot: HotMemoryLayer::default(),
+            pending_hot_cells: Vec::new(),
+            hot_metadata_dirty: false,
+            hot_unsynced_events: 0,
+            last_hot_sync: Instant::now(),
+            page_cache: RefCell::new(DecodedPageCache::new(DECODED_PAGE_CACHE_CAPACITY)),
+        }
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -691,6 +732,20 @@ impl MemoryEngine {
             page_clusterer: self.manifest.page_clusterer,
             durability: self.manifest.durability,
         }
+    }
+
+    pub fn security_config(&self) -> SecurityConfig {
+        security_config_from_mode(self.manifest.security_mode)
+    }
+
+    pub fn security_config_at(store_root: impl AsRef<Path>) -> Result<SecurityConfig> {
+        let root = store_root.as_ref();
+        let manifest_path = root.join(MANIFEST_FILE);
+        if !manifest_path.exists() {
+            return Err(MgeError::NotInitialized(root.display().to_string()));
+        }
+        let manifest: Manifest = binary::read_messagepack_file(&manifest_path, FileKind::Manifest)?;
+        Ok(security_config_from_mode(manifest.security_mode))
     }
 
     pub fn update_storage_config(
@@ -752,6 +807,8 @@ impl MemoryEngine {
     }
 
     pub fn remember(&mut self, request: RememberRequest) -> Result<MemoryCell> {
+        self.ensure_payload_unlocked()?;
+
         let marker_strings = marker_strings_for_cell_fields(
             &request.kind,
             request.subject.as_deref(),
@@ -806,6 +863,8 @@ impl MemoryEngine {
     }
 
     pub fn recall(&self, request: RecallRequest) -> Result<ContextPacket> {
+        self.ensure_payload_unlocked()?;
+
         let total_recall_started = Instant::now();
         if request.mode == RecallMode::FullScope && request.scope.is_none() {
             return Err(MgeError::InvalidInput(
@@ -1244,6 +1303,8 @@ impl MemoryEngine {
     }
 
     pub fn seal(&mut self) -> Result<SealReport> {
+        self.ensure_payload_unlocked()?;
+
         let hot_store = HotStore::new(self.hot_cells_path());
         self.flush_pending_hot(true)?;
         let hot_cells = self.hot.all_cells();
@@ -1306,6 +1367,8 @@ impl MemoryEngine {
     }
 
     pub fn checkpoint(&mut self) -> Result<HotCheckpointReport> {
+        self.ensure_payload_unlocked()?;
+
         self.flush_pending_hot(true)?;
         let hot_store = HotStore::new(self.hot_cells_path());
         let cells = self.hot.all_cells();
@@ -1322,6 +1385,8 @@ impl MemoryEngine {
     }
 
     pub fn stats(&self) -> Result<StoreStats> {
+        self.ensure_payload_unlocked()?;
+
         let hot_cells = self.hot.len();
         let catalog = self.load_page_catalog()?;
         let sealed_cells = catalog.pages.iter().map(|entry| entry.cell_count).sum();
@@ -1332,6 +1397,7 @@ impl MemoryEngine {
             sealed_cells,
             marker_count: self.dictionary.len(),
             page_count: catalog.pages.len(),
+            current_security_mode: self.manifest.security_mode,
             current_page_codec: self.manifest.page_codec,
             current_compression: self.manifest.compression,
             current_index_kind: self.manifest.index_kind,
@@ -1344,6 +1410,8 @@ impl MemoryEngine {
     }
 
     pub fn inspect(&self) -> Result<InspectReport> {
+        self.ensure_payload_unlocked()?;
+
         Ok(InspectReport {
             manifest: self.manifest.clone(),
             markers: self.dictionary.debug_view(),
@@ -1353,6 +1421,8 @@ impl MemoryEngine {
     }
 
     pub fn rebuild_catalog_and_indexes(&self) -> Result<RebuildIndexesReport> {
+        self.ensure_payload_unlocked()?;
+
         let hot_cells_unchanged = self.hot.len();
         let mut reads = self.read_all_page_files_for_rebuild()?;
         reads.sort_by_key(|read| (read.page.page_id, read.entry.file.clone()));
@@ -1394,6 +1464,8 @@ impl MemoryEngine {
     }
 
     pub fn export_json(&self) -> Result<serde_json::Value> {
+        self.ensure_payload_unlocked()?;
+
         let hot_cells = self.hot.all_cells();
         let page_catalog = self.load_page_catalog()?;
         let pages = self.load_all_pages()?;
@@ -1410,6 +1482,8 @@ impl MemoryEngine {
     }
 
     pub fn export_markdown(&self) -> Result<String> {
+        self.ensure_payload_unlocked()?;
+
         let hot_cells = self.hot.all_cells();
         let catalog = self.load_page_catalog()?;
         let pages = self.load_all_pages()?;
@@ -1462,11 +1536,25 @@ impl MemoryEngine {
     }
 
     pub fn validate(&self) -> Result<ValidationReport> {
+        self.ensure_payload_unlocked()?;
+
         self.validate_with_options(false)
     }
 
     pub fn validate_deep(&self) -> Result<ValidationReport> {
+        self.ensure_payload_unlocked()?;
+
         self.validate_with_options(true)
+    }
+
+    fn ensure_payload_unlocked(&self) -> Result<()> {
+        if self.manifest.security_mode.is_encrypted() {
+            return Err(MgeError::StoreLocked(
+                "encrypted store requires session unlock; payload encryption/unlock is not implemented in this build"
+                    .to_string(),
+            ));
+        }
+        Ok(())
     }
 
     fn validate_with_options(&self, deep: bool) -> Result<ValidationReport> {
@@ -2351,6 +2439,23 @@ fn ensure_runtime_page_codec(page_codec: PageCodecKind) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn security_config_from_mode(mode: SecurityMode) -> SecurityConfig {
+    SecurityConfig {
+        mode,
+        payload_encryption: false,
+        session_unlock_required: mode.is_encrypted(),
+        metadata_plaintext: true,
+        implementation_status: match mode {
+            SecurityMode::Unencrypted => {
+                "unencrypted store; NoSecurity pass-through is active".to_string()
+            }
+            SecurityMode::Encrypted => {
+                "encrypted mode configured; payload encryption and session unlock are not implemented in this build, so payload operations remain locked".to_string()
+            }
+        },
+    }
 }
 
 fn store_size_bytes(path: &Path) -> Result<u64> {

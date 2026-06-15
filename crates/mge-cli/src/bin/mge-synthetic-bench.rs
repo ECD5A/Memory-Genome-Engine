@@ -14,7 +14,7 @@ use mge_core::{
     build_context_packet, CandidateIndexData, ContextDebugInfo, IndexKind, InitOptions, MemoryCell,
     MemoryEngine, MemoryKind, MemoryPage, MemoryStatus, MemoryValue, NoSecurity, PageCatalogEntry,
     PageClustererKind, PageCodecKind, QueryMode, RecallMode, RecallRequest, RememberRequest,
-    SecurityProvider, SensitivityLevel, TrustLevel, DEFAULT_MAX_CELLS_PER_PAGE,
+    SecurityMode, SecurityProvider, SensitivityLevel, TrustLevel, DEFAULT_MAX_CELLS_PER_PAGE,
 };
 use serde_json::json;
 
@@ -320,6 +320,7 @@ fn run_mode(
             index_kind,
             page_clusterer: PageClustererKind::ScopeKind,
             durability: mge_core::DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Unencrypted,
         },
     )?;
 

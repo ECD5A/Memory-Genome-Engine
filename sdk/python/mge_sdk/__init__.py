@@ -53,8 +53,17 @@ class StoreStats(TypedDict, total=False):
     sealed_pages: int
     sealed_cells: int
     marker_count: int
+    current_security_mode: str
     current_index_kind: str
     store_size_bytes: int
+
+
+class SecurityConfig(TypedDict, total=False):
+    mode: str
+    payload_encryption: bool
+    session_unlock_required: bool
+    metadata_plaintext: bool
+    implementation_status: str
 
 
 class ValidationReport(TypedDict, total=False):
@@ -128,8 +137,11 @@ class MemoryGenomeClient:
         self.command = list(command) if command is not None else _default_command()
         self.cwd = Path(cwd) if cwd is not None else None
 
-    def init(self, profile: str = "fast") -> str:
-        return self._run_text(["init", "--profile", profile])
+    def init(self, profile: str = "fast", *, encrypted: bool = False) -> str:
+        args = ["init", "--profile", profile]
+        if encrypted:
+            args.append("--encrypted")
+        return self._run_text(args)
 
     def remember(
         self,
@@ -198,6 +210,9 @@ class MemoryGenomeClient:
 
     def stats(self) -> StoreStats:
         return cast(StoreStats, self._run_json(["stats", "--json"]))
+
+    def security_config(self) -> SecurityConfig:
+        return cast(SecurityConfig, self._run_json(["config", "security", "--json"]))
 
     def validate(self, *, deep: bool = False) -> ValidationReport:
         args = ["validate", "--json"]
@@ -293,6 +308,7 @@ __all__ = [
     "MgeProtocolError",
     "RecallMode",
     "RememberOptions",
+    "SecurityConfig",
     "StoreStats",
     "ValidationReport",
     "result_or_raise_mcp_error",

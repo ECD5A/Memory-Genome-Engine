@@ -37,7 +37,7 @@ pub use pages::{
 pub use retrieval::{build_context_packet, score_cell, score_cell_debug, RecallRequest, Retriever};
 pub use security::{
     AgentCapabilities, AgentCapability, AuditEvent, AuditLogger, NoSecurity, NoopAuditLogger,
-    RecallPolicy, SecurityProvider,
+    RecallPolicy, SecurityConfig, SecurityMode, SecurityProvider,
 };
 pub use store::{
     DurabilityPolicy, HotCheckpointReport, InitOptions, InspectReport, MemoryEngine,

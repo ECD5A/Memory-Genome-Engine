@@ -70,7 +70,7 @@ Vector search can be added later as a reranker inside already selected candidate
 
 The storage layer is designed for page-level encryption, session keys, blind marker indexes, and policy-gated access. The Mandate 3 security model is documented in [Security model](docs/SECURITY.md).
 
-Current status: stores are not encrypted yet. `NoSecurity` is an honest pass-through implementation and does not pretend to encrypt.
+Current status: unencrypted stores still work by default. `mge init --encrypted` can create an encrypted-mode store marker, but payload encryption and session unlock are not implemented yet, so payload operations return a clear locked-store error instead of silently writing plaintext. `NoSecurity` remains an honest pass-through implementation and does not pretend to encrypt.
 
 Future page write flow:
 
@@ -126,8 +126,10 @@ cargo run -p mge-cli -- config set --index-kind binary_fuse_page
 ```bash
 mge init
 mge init --profile fast
+mge init --encrypted
 mge init --page-codec messagepack --compression zstd
 mge init --index-kind binary_fuse_page
+mge config security
 mge config set --page-clusterer marker_overlap
 mge remember "..." --kind user_preference --scope global --trust user_confirmed
 mge remember --kind user_preference --subject answer_style --json-value '{"style":"concise","max_examples":2}'

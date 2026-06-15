@@ -12,6 +12,10 @@ export interface MemoryGenomeClientOptions {
   cwd?: string;
 }
 
+export interface InitOptions {
+  encrypted?: boolean;
+}
+
 export interface RememberOptions {
   kind?: string;
   scope?: string;
@@ -63,9 +67,18 @@ export interface StoreStats {
   sealed_pages: number;
   sealed_cells: number;
   marker_count: number;
+  current_security_mode?: string;
   current_index_kind: string;
   store_size_bytes: number;
   [key: string]: unknown;
+}
+
+export interface SecurityConfig {
+  mode: string;
+  payload_encryption: boolean;
+  session_unlock_required: boolean;
+  metadata_plaintext: boolean;
+  implementation_status: string;
 }
 
 export interface ValidationReport {
@@ -136,8 +149,12 @@ export class MemoryGenomeClient {
     this.cwd = options.cwd;
   }
 
-  init(profile = "fast"): string {
-    return this.runText(["init", "--profile", profile]);
+  init(profile = "fast", options: InitOptions = {}): string {
+    const args = ["init", "--profile", profile];
+    if (options.encrypted) {
+      args.push("--encrypted");
+    }
+    return this.runText(args);
   }
 
   remember(content: string, options: RememberOptions = {}): number {
@@ -204,6 +221,10 @@ export class MemoryGenomeClient {
 
   stats(): StoreStats {
     return this.runJson(["stats", "--json"]);
+  }
+
+  securityConfig(): SecurityConfig {
+    return this.runJson(["config", "security", "--json"]);
   }
 
   validate(options: { deep?: boolean } = {}): ValidationReport {

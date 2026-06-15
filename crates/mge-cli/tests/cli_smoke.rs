@@ -171,6 +171,34 @@ fn cli_fast_profile_initializes_compact_storage_defaults() {
     assert_eq!(stats["current_index_kind"], "exact_marker_page");
     assert_eq!(stats["current_page_clusterer"], "scope_kind");
     assert_eq!(stats["current_durability"], "balanced");
+    assert_eq!(stats["current_security_mode"], "unencrypted");
+}
+
+#[test]
+fn cli_encrypted_init_records_mode_and_locks_payload_commands() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+
+    let init = run_mge(&store, &["init", "--encrypted"]);
+    assert!(String::from_utf8_lossy(&init.stdout).contains("security_mode=encrypted"));
+
+    let security = run_mge_json(&store, &["config", "security", "--json"]);
+    assert_eq!(security["mode"], "encrypted");
+    assert_eq!(security["payload_encryption"], false);
+    assert_eq!(security["session_unlock_required"], true);
+    assert_eq!(security["metadata_plaintext"], true);
+    assert!(security["implementation_status"]
+        .as_str()
+        .unwrap()
+        .contains("locked"));
+
+    let failed_stats = run_mge_failure(&store, &["stats", "--json"]);
+    let stderr = String::from_utf8_lossy(&failed_stats.stderr);
+    assert!(stderr.contains("store is locked"));
+    assert!(!stderr.contains("MGE_PASSPHRASE"));
+
+    assert!(store.join("manifest.mgm").is_file());
+    assert!(!store.join("manifest.json").exists());
 }
 
 #[test]
@@ -529,6 +557,37 @@ fn mcp_server_hardens_error_paths() {
     assert!(export_path.is_file());
     assert!(!store.join("manifest.json").exists());
     assert!(!store.join("hot").join("hot_cells.jsonl").exists());
+}
+
+#[test]
+fn mcp_server_reports_locked_store_as_structured_error() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    let store_path = store.to_string_lossy().to_string();
+
+    run_mge(&store, &["init", "--encrypted"]);
+
+    let responses = run_mcp_json_lines(&[json!({
+        "jsonrpc": "2.0",
+        "id": "locked",
+        "method": "mge_stats",
+        "params": { "store_path": store_path }
+    })]);
+
+    assert_eq!(responses.len(), 1);
+    let error = &responses[0]["error"];
+    assert_eq!(error["code"], -32000);
+    assert_eq!(error["tool_name"], "mge_stats");
+    assert_eq!(error["recoverable"], true);
+    assert_eq!(error["details"]["error_kind"], "store_locked");
+    assert!(error["message"]
+        .as_str()
+        .unwrap()
+        .contains("store is locked"));
+    assert!(!error["message"]
+        .as_str()
+        .unwrap()
+        .contains("MGE_PASSPHRASE"));
 }
 
 #[test]

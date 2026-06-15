@@ -188,6 +188,11 @@ Active mandate: Security / Encryption.
 - Документирован encryption design direction перед implementation.
 - Зафиксировано, что current stores ещё не encrypted и `NoSecurity` является pass-through, а не fake encryption.
 - Зафиксировано, что JSON/JSONL остаются только protocol/debug/benchmark output, а не runtime storage.
+- Добавлены manifest-level `SecurityMode` и `SecurityConfig`.
+- Добавлен `mge init --encrypted` как opt-in encrypted-mode store marker.
+- Добавлен `mge config security` для manifest-level security status без открытия payload.
+- Добавлены locked-store errors для encrypted-mode payload operations, пока не реализованы session unlock/encryption.
+- Добавлена MCP `store_locked` structured error classification.
 
 Security design decisions:
 
@@ -208,16 +213,15 @@ Preferred crypto dependency direction:
 
 Current limitations:
 
-- Encryption designed, but not implemented.
-- Нет `mge init --encrypted`.
+- Encryption design и encrypted-mode/locked-store foundation реализованы, но authenticated payload encryption ещё не реализована.
 - Нет session unlock.
-- Нет locked-store MCP/SDK behavior.
+- `mge init --encrypted` пока не шифрует payloads; он создаёт locked encrypted-mode store marker и не допускает silent plaintext payload operations.
 - Нет blind marker indexes или encrypted indexes.
 - Markdown export остаётся plaintext by design.
 
 Next Mandate 3 step:
 
-- Сначала реализовать minimal tested security configuration и locked-store error path, затем authenticated encryption для hot log/snapshot payloads. Sealed pages не шифровать, пока metadata/catalog boundary не подтверждён в коде.
+- Добавить реальный session unlock и authenticated encryption для hot log/snapshot payloads. Sealed pages не шифровать, пока metadata/catalog boundary не подтверждён в коде.
 
 ## Сделано
 

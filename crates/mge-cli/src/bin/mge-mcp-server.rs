@@ -208,8 +208,12 @@ fn handle_request(request: JsonRpcRequest) -> std::result::Result<Value, ToolErr
 
 fn with_tool(tool: &str, result: Result<Value>) -> std::result::Result<Value, ToolError> {
     result.map_err(|err| {
-        let message = err.to_string();
-        let error_kind = classify_error_kind(&message);
+        let error_kind = classify_error_kind_from_error(&err);
+        let message = if error_kind == "store_locked" {
+            message_with_cause(&err, "store is locked")
+        } else {
+            err.to_string()
+        };
         ToolError {
             code: if error_kind == "invalid_params" {
                 -32602
@@ -222,6 +226,27 @@ fn with_tool(tool: &str, result: Result<Value>) -> std::result::Result<Value, To
             details: Some(json!({ "error_kind": error_kind })),
         }
     })
+}
+
+fn classify_error_kind_from_error(err: &anyhow::Error) -> &'static str {
+    for cause in err.chain() {
+        let message = cause.to_string();
+        if message.contains("store is locked") {
+            return "store_locked";
+        }
+    }
+    classify_error_kind(&err.to_string())
+}
+
+fn message_with_cause(err: &anyhow::Error, pattern: &str) -> String {
+    let outer = err.to_string();
+    for cause in err.chain().skip(1) {
+        let cause_message = cause.to_string();
+        if cause_message.contains(pattern) {
+            return format!("{outer}: {cause_message}");
+        }
+    }
+    outer
 }
 
 fn mge_schema() -> Value {
@@ -460,6 +485,8 @@ fn error_response(err: ToolError, id: Option<Value>) -> JsonRpcResponse {
 fn classify_error_kind(message: &str) -> &'static str {
     if message.contains("invalid params") || is_invalid_enum_value(message) {
         "invalid_params"
+    } else if message.contains("store is locked") {
+        "store_locked"
     } else if message.contains("failed to open store") {
         "store_open_failed"
     } else if message.contains("requires scope") || message.contains("requires query") {

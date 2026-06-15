@@ -13,8 +13,8 @@ use mge_core::{
     MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
     MessagePackPageCodec, NoopAuditLogger, PageBuildOptions, PageCatalog, PageCatalogEntry,
     PageClustererKind, PageCodec, PageCodecKind, QueryMode, RecallMode, RecallPolicy,
-    RecallRequest, RememberRequest, ScopeKindClusterer, SensitivityLevel, StorageConfigUpdate,
-    TrustLevel, ZstdCompression,
+    RecallRequest, RememberRequest, ScopeKindClusterer, SecurityMode, SensitivityLevel,
+    StorageConfigUpdate, TrustLevel, ZstdCompression,
 };
 use serde::Serialize;
 use tempfile::tempdir;
@@ -307,6 +307,7 @@ fn init_options_are_saved_in_manifest() {
             index_kind: IndexKind::ExactMarkerPage,
             page_clusterer: PageClustererKind::ScopeKind,
             durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Unencrypted,
         },
     )
     .unwrap();
@@ -320,6 +321,53 @@ fn init_options_are_saved_in_manifest() {
         inspect.manifest.page_clusterer,
         PageClustererKind::ScopeKind
     );
+    assert_eq!(inspect.manifest.security_mode, SecurityMode::Unencrypted);
+    assert_eq!(
+        engine.stats().unwrap().current_security_mode,
+        SecurityMode::Unencrypted
+    );
+}
+
+#[test]
+fn encrypted_store_init_records_security_mode_and_locks_payload_operations() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_with_options(
+        dir.path(),
+        InitOptions {
+            page_codec: PageCodecKind::MessagePack,
+            compression: CompressionKind::None,
+            index_kind: IndexKind::ExactMarkerPage,
+            page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Encrypted,
+        },
+    )
+    .unwrap();
+
+    let security = engine.security_config();
+    assert_eq!(security.mode, SecurityMode::Encrypted);
+    assert!(!security.payload_encryption);
+    assert!(security.session_unlock_required);
+    assert!(security.metadata_plaintext);
+    assert!(security.implementation_status.contains("locked"));
+    assert_eq!(
+        MemoryEngine::security_config_at(dir.path()).unwrap().mode,
+        SecurityMode::Encrypted
+    );
+
+    let err = engine.stats().unwrap_err();
+    assert!(err.to_string().contains("store is locked"));
+    let err = engine.recall(RecallRequest::new("anything")).unwrap_err();
+    assert!(err.to_string().contains("store is locked"));
+    let err = engine.seal().unwrap_err();
+    assert!(err.to_string().contains("store is locked"));
+    let err = engine.checkpoint().unwrap_err();
+    assert!(err.to_string().contains("store is locked"));
+    let err = MemoryEngine::open_at(dir.path()).unwrap_err();
+    assert!(err.to_string().contains("store is locked"));
+
+    assert!(dir.path().join("manifest.mgm").is_file());
+    assert!(!dir.path().join("manifest.json").exists());
 }
 
 #[test]
@@ -413,6 +461,7 @@ fn init_rejects_json_runtime_page_codec() {
             index_kind: IndexKind::ExactMarkerPage,
             page_clusterer: PageClustererKind::ScopeKind,
             durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Unencrypted,
         },
     )
     .unwrap_err();
@@ -624,6 +673,7 @@ fn safe_and_balanced_durability_flush_paths_restore_hot_memory() {
                 index_kind: IndexKind::ExactMarkerPage,
                 page_clusterer: PageClustererKind::ScopeKind,
                 durability,
+                security_mode: SecurityMode::Unencrypted,
             },
         )
         .unwrap();
@@ -1178,6 +1228,7 @@ fn recall_from_messagepack_zstd_sealed_pages() {
             index_kind: IndexKind::ExactMarkerPage,
             page_clusterer: PageClustererKind::ScopeKind,
             durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Unencrypted,
         },
     )
     .unwrap();
@@ -1447,6 +1498,7 @@ fn recall_from_binary_fuse_page_index() {
             index_kind: IndexKind::BinaryFusePage,
             page_clusterer: PageClustererKind::ScopeKind,
             durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Unencrypted,
         },
     )
     .unwrap();
@@ -2099,6 +2151,7 @@ fn validate_clean_binary_fuse_store_passes() {
             index_kind: IndexKind::BinaryFusePage,
             page_clusterer: PageClustererKind::ScopeKind,
             durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Unencrypted,
         },
     )
     .unwrap();
@@ -2515,6 +2568,7 @@ fn rebuild_indexes_restores_binary_fuse_index_when_configured() {
             index_kind: IndexKind::BinaryFusePage,
             page_clusterer: PageClustererKind::ScopeKind,
             durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Unencrypted,
         },
     )
     .unwrap();
@@ -2624,6 +2678,7 @@ fn synthetic_binary_fuse_candidates_cover_exact_candidates() {
             index_kind: IndexKind::ExactMarkerPage,
             page_clusterer: PageClustererKind::ScopeKind,
             durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Unencrypted,
         },
     )
     .unwrap();
@@ -2635,6 +2690,7 @@ fn synthetic_binary_fuse_candidates_cover_exact_candidates() {
             index_kind: IndexKind::BinaryFusePage,
             page_clusterer: PageClustererKind::ScopeKind,
             durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Unencrypted,
         },
     )
     .unwrap();

@@ -159,6 +159,7 @@ Replace `$STORE_PATH` with a created store path and `$EXPORT_PATH` with a Markdo
 - Unknown tools return `-32601` with `details.error_kind = "unknown_method"`.
 - Missing or invalid arguments return `-32602` with `details.error_kind = "invalid_params"`.
 - A missing or invalid store path returns `-32000` with `details.error_kind = "store_open_failed"`.
+- An encrypted-mode store opened without session unlock returns `-32000` with `details.error_kind = "store_locked"`. Payload encryption/unlock is not implemented yet, so this is currently a safe locked-store foundation rather than usable encrypted recall.
 - `full_scope` without `scope` returns `-32000` with `details.error_kind = "invalid_request"`.
 - Invalid recall modes such as `sideways` are parameter errors, not core runtime failures.
 - `output_path` on `mge_export_markdown` is explicit; otherwise export goes to the store default `exports/memory.md`.

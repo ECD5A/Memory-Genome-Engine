@@ -25,6 +25,9 @@ pub enum MgeError {
     #[error("store is not initialized: {0}")]
     NotInitialized(String),
 
+    #[error("store is locked: {0}")]
+    StoreLocked(String),
+
     #[error("invalid input: {0}")]
     InvalidInput(String),
 }

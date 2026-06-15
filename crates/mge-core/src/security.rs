@@ -1,9 +1,66 @@
 use std::collections::BTreeSet;
+use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::errors::Result;
+use crate::errors::{MgeError, Result};
 use crate::models::{MemoryCell, MemoryStatus, SensitivityLevel};
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecurityMode {
+    Unencrypted,
+    Encrypted,
+}
+
+impl Default for SecurityMode {
+    fn default() -> Self {
+        Self::Unencrypted
+    }
+}
+
+impl SecurityMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unencrypted => "unencrypted",
+            Self::Encrypted => "encrypted",
+        }
+    }
+
+    pub fn is_encrypted(&self) -> bool {
+        *self == Self::Encrypted
+    }
+}
+
+impl fmt::Display for SecurityMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for SecurityMode {
+    type Err = MgeError;
+
+    fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
+        match input.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+            "unencrypted" | "none" | "plaintext" => Ok(Self::Unencrypted),
+            "encrypted" => Ok(Self::Encrypted),
+            other => Err(MgeError::InvalidInput(format!(
+                "unknown security mode: {other}; supported: unencrypted, encrypted"
+            ))),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SecurityConfig {
+    pub mode: SecurityMode,
+    pub payload_encryption: bool,
+    pub session_unlock_required: bool,
+    pub metadata_plaintext: bool,
+    pub implementation_status: String,
+}
 
 pub trait SecurityProvider {
     fn seal_page_bytes(&self, page_bytes: &[u8]) -> Result<Vec<u8>>;

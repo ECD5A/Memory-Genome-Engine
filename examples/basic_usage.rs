@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use mge_core::{
     CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine, MemoryKind,
     MemoryStatus, MemoryValue, PageClustererKind, PageCodecKind, RecallMode, RecallRequest,
-    RememberRequest, SensitivityLevel, TrustLevel,
+    RememberRequest, SecurityMode, SensitivityLevel, TrustLevel,
 };
 
 fn main() -> mge_core::Result<()> {
@@ -21,6 +21,7 @@ fn main() -> mge_core::Result<()> {
             index_kind: IndexKind::ExactMarkerPage,
             page_clusterer: PageClustererKind::ScopeKind,
             durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Unencrypted,
         },
     )?;
 

@@ -35,6 +35,7 @@ from mge_sdk import MemoryGenomeClient
 
 client = MemoryGenomeClient(".memory-genome")
 client.init(profile="fast")
+security = client.security_config()
 client.remember("Agent should use recalled context.", kind="procedure", scope="agent")
 packet = client.recall("agent context", mode="focused", scope="agent")
 client.checkpoint()
@@ -100,6 +101,7 @@ import { MemoryGenomeClient } from "./sdk/typescript/src/mge.ts";
 
 const client = new MemoryGenomeClient(".memory-genome");
 client.init("fast");
+const security = client.securityConfig();
 client.remember("Agent should use recalled context.", {
   kind: "procedure",
   scope: "agent",
@@ -136,6 +138,8 @@ Typed SDK surface:
 Both wrappers cover:
 
 - init/open store
+- opt-in encrypted-mode store marker during init
+- security config readout
 - remember
 - focused/broad/full-scope recall
 - seal
@@ -180,7 +184,8 @@ SDKs target `protocol_version = mge-jsonrpc-1` and `integration_schema_version =
 
 - If the SDK cannot find `mge`, pass `command=["cargo", "run", "-q", "-p", "mge-cli", "--bin", "mge", "--"]` and `cwd=repo_root`.
 - If TypeScript type checking is unavailable, run the runtime smoke with `node examples/typescript_basic_usage.ts`; `tsc` is optional for this repository-local wrapper.
-- If a JSON-RPC call fails, inspect `error.details.error_kind`; invalid parameters use `invalid_params`, missing stores use `store_open_failed`, missing full-scope scope uses `invalid_request`, and malformed JSON uses `parse_error`.
+- If a JSON-RPC call fails, inspect `error.details.error_kind`; invalid parameters use `invalid_params`, missing stores use `store_open_failed`, encrypted-mode stores without session unlock use `store_locked`, missing full-scope scope uses `invalid_request`, and malformed JSON uses `parse_error`.
+- Security foundation note: `mge init --encrypted` can create an encrypted-mode store marker, but payload encryption/session unlock are not implemented yet. SDKs should treat `store_locked` as a typed recoverable state and must not log passphrases or raw key material when future unlock support is added.
 - Do not inspect or modify `.memory-genome` files from the SDKs. The SDKs are process wrappers around the Rust engine.
 
 ## Policy

@@ -70,7 +70,7 @@ Markdown удобен для экспорта и чтения человеком
 
 Storage layer спроектирован так, чтобы добавить page-level encryption, session keys, blind marker indexes и policy-gated access. Security model Мандата 3 описан в [Security model](docs/SECURITY.ru.md).
 
-Текущий статус: stores ещё не encrypted. `NoSecurity` - честная pass-through реализация и не делает вид, что шифрует данные.
+Текущий статус: unencrypted stores остаются default и работают как раньше. `mge init --encrypted` уже может создать encrypted-mode marker в store, но payload encryption и session unlock ещё не реализованы, поэтому payload-команды возвращают понятную locked-store error вместо silent plaintext fallback. `NoSecurity` остаётся честной pass-through реализацией и не делает вид, что шифрует данные.
 
 Будущий pipeline записи страницы:
 
@@ -126,8 +126,10 @@ cargo run -p mge-cli -- config set --index-kind binary_fuse_page
 ```bash
 mge init
 mge init --profile fast
+mge init --encrypted
 mge init --page-codec messagepack --compression zstd
 mge init --index-kind binary_fuse_page
+mge config security
 mge config set --page-clusterer marker_overlap
 mge remember "..." --kind user_preference --scope global --trust user_confirmed
 mge remember --kind user_preference --subject answer_style --json-value '{"style":"concise","max_examples":2}'

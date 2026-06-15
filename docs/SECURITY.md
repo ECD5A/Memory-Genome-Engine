@@ -6,7 +6,11 @@ Mandate 3 adds the security and encryption layer for Memory Genome Engine. This 
 
 Current implementation status:
 
-- Current stores are not encrypted yet.
+- Existing unencrypted stores continue to work unchanged.
+- `mge init --encrypted` can create an encrypted-mode store marker in `manifest.mgm`.
+- Encrypted-mode stores intentionally return a locked-store error for payload operations until session unlock and authenticated encryption are implemented.
+- `mge config security` can read manifest-level security status without opening payloads.
+- Payload bytes are not encrypted yet.
 - `NoSecurity` is an honest pass-through implementation.
 - This project must not claim encryption until authenticated encryption is actually implemented and tested.
 - JSON remains protocol/debug/benchmark output only, not runtime storage.
@@ -176,18 +180,19 @@ Avoid:
 - returning passphrases through MCP/SDK errors;
 - storing passphrases in config, manifest, benchmark output, or debug output.
 
-Expected future CLI shape:
+Current and expected CLI shape:
 
 ```bash
 mge init --encrypted
-mge unlock --store .memory-genome
 mge config security
+# Future, not implemented yet:
+mge unlock --store .memory-genome
 MGE_PASSPHRASE=... mge remember "..."
 ```
 
 MCP/SDK behavior:
 
-- locked encrypted stores return a structured locked-store error;
+- locked encrypted stores return a structured locked-store error (`details.error_kind = "store_locked"` in the JSON-RPC adapter);
 - wrong keys return a structured authentication/unlock error;
 - SDKs pass safe security options through without duplicating crypto;
 - MCP/SDK protocol output must not include passphrases or raw key material.
@@ -228,7 +233,9 @@ Implementation must add tests for:
 
 ## Current Limitations
 
-- Encryption is designed but not yet implemented.
+- Encryption is designed and the manifest-level encrypted/locked foundation is implemented, but authenticated payload encryption is not yet implemented.
+- There is no session unlock command yet.
+- Stores created with `mge init --encrypted` are locked for remember/recall/seal/checkpoint/stats/validate/rebuild/export until unlock/encryption support lands.
 - Metadata and indexes are not blind.
 - Markdown export is plaintext by design unless a future encrypted export mode is added.
 - Runtime process memory can contain plaintext while unlocked.

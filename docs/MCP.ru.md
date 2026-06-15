@@ -159,6 +159,7 @@ examples/mcp_agent_session.jsonl
 - Unknown tools возвращают `-32601` с `details.error_kind = "unknown_method"`.
 - Missing или invalid arguments возвращают `-32602` с `details.error_kind = "invalid_params"`.
 - Missing или invalid store path возвращает `-32000` с `details.error_kind = "store_open_failed"`.
+- Encrypted-mode store без session unlock возвращает `-32000` с `details.error_kind = "store_locked"`. Payload encryption/unlock пока не реализованы, поэтому это безопасный locked-store foundation, а не usable encrypted recall.
 - `full_scope` без `scope` возвращает `-32000` с `details.error_kind = "invalid_request"`.
 - Invalid recall modes вроде `sideways` являются parameter errors, а не core runtime failures.
 - `output_path` у `mge_export_markdown` явный; без него export идёт в default `exports/memory.md` внутри store.

@@ -188,6 +188,11 @@ Done in Mandate 3 foundation:
 - Documented the encryption design direction before implementation.
 - Reconfirmed that current stores are not encrypted yet and `NoSecurity` is pass-through, not fake encryption.
 - Reconfirmed that JSON/JSONL remain protocol/debug/benchmark output only, not runtime storage.
+- Added manifest-level `SecurityMode` and `SecurityConfig`.
+- Added `mge init --encrypted` as an opt-in encrypted-mode store marker.
+- Added `mge config security` for manifest-level security status without opening payloads.
+- Added locked-store errors for encrypted-mode payload operations until session unlock/encryption are implemented.
+- Added MCP `store_locked` structured error classification.
 
 Security design decisions:
 
@@ -208,16 +213,15 @@ Preferred crypto dependency direction:
 
 Current limitations:
 
-- Encryption is designed but not implemented.
-- No `mge init --encrypted` yet.
+- Encryption is designed and encrypted-mode/locked-store foundation is implemented, but authenticated payload encryption is not implemented.
 - No session unlock yet.
-- No locked-store MCP/SDK behavior yet.
+- `mge init --encrypted` does not encrypt payloads yet; it creates a locked encrypted-mode store marker and prevents silent plaintext payload operations.
 - No blind marker indexes or encrypted indexes yet.
 - Markdown export remains plaintext by design.
 
 Next Mandate 3 step:
 
-- Implement a minimal, tested security configuration and locked-store error path first, then add authenticated encryption for hot log/snapshot payloads. Do not encrypt sealed pages until the metadata/catalog boundary is confirmed in code.
+- Add real session unlock and authenticated encryption for hot log/snapshot payloads first. Do not encrypt sealed pages until the metadata/catalog boundary is confirmed in code.
 
 ## Done
 
