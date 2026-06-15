@@ -115,6 +115,9 @@ Active mandate: Agent Integration / MCP / SDK.
 - Добавлены runnable Python и TypeScript basic examples.
 - Добавлены agent workflow examples для CLI, MCP-style JSON-RPC, Python и TypeScript.
 - Добавлены integration docs: `docs/INTEGRATION.md`, `docs/MCP.md`, `docs/SDK.md` и русские mirrors.
+- Добавлена локальная developer packaging metadata для thin SDK wrappers: `sdk/python/pyproject.toml`, `sdk/typescript/package.json` и `sdk/typescript/tsconfig.json`.
+- MCP adapter tests усилены для malformed JSON, unknown tool names, missing required args, invalid recall modes, `full_scope` без scope, invalid store paths и explicit Markdown export paths.
+- Документация обновлена по local SDK install/use, MCP adapter commands, JSON-RPC workflow examples, troubleshooting и schema versioning notes.
 
 Mandate 2 constraints сохранены:
 
@@ -125,7 +128,8 @@ Mandate 2 constraints сохранены:
 
 Следующий шаг Mandate 2:
 
-- Решить, оставляем ли local JSON-RPC adapter первым MCP integration surface или позже добавляем full MCP SDK dependency теперь, когда tool schema versioned и golden-tested.
+- Оставляем текущий versioned JSON-RPC stdin/stdout adapter основной local MCP-ready поверхностью; full external MCP SDK dependency откладывается до конкретной host integration необходимости.
+- Следующий полезный пакет: host integration examples и contract compatibility checks на реальном agent runner без изменения core.
 
 ## Сделано
 

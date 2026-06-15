@@ -123,12 +123,37 @@ Output содержит `ContextPacket` в `result.context_packet`.
 {"jsonrpc":"2.0","id":2,"method":"mge_recall","params":{"store_path":".memory-genome","query":"agent memory","mode":"focused","scope":"agent","max_items":5}}
 ```
 
+## Agent Workflow Smoke
+
+Локальный agent host может проверить полный integration path через один long-lived adapter process:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"mge_recall","params":{"store_path":".memory-genome","query":"current task context","mode":"focused","scope":"agent"}}
+{"jsonrpc":"2.0","id":2,"method":"mge_remember","params":{"store_path":".memory-genome","content":"Agent completed the integration smoke workflow.","kind":"tool_result","scope":"agent","markers":["topic:integration_smoke"],"trust":"tool_observed"}}
+{"jsonrpc":"2.0","id":3,"method":"mge_checkpoint","params":{"store_path":".memory-genome"}}
+{"jsonrpc":"2.0","id":4,"method":"mge_seal","params":{"store_path":".memory-genome"}}
+{"jsonrpc":"2.0","id":5,"method":"mge_recall","params":{"store_path":".memory-genome","query":"integration smoke workflow","mode":"broad","scope":"agent"}}
+{"jsonrpc":"2.0","id":6,"method":"mge_validate","params":{"store_path":".memory-genome","deep":true}}
+{"jsonrpc":"2.0","id":7,"method":"mge_rebuild_indexes","params":{"store_path":".memory-genome"}}
+{"jsonrpc":"2.0","id":8,"method":"mge_export_markdown","params":{"store_path":".memory-genome"}}
+```
+
 ## Safety
 
 - Adapter открывает только explicit `store_path`.
 - Markdown export пишет в default store export path или explicit `output_path`.
 - Он не исполняет files, не скачивает data, не устанавливает dependencies, не читает unrelated directories и не меняет storage layout.
 - `full_scope` recall требует `scope`.
+
+## Troubleshooting
+
+- Malformed JSON возвращает JSON-RPC `-32700` с `details.error_kind = "parse_error"`.
+- Unknown tools возвращают `-32601` с `details.error_kind = "unknown_method"`.
+- Missing или invalid arguments возвращают `-32602` с `details.error_kind = "invalid_params"`.
+- Missing или invalid store path возвращает `-32000` с `details.error_kind = "store_open_failed"`.
+- `full_scope` без `scope` возвращает `-32000` с `details.error_kind = "invalid_request"`.
+- Invalid recall modes вроде `sideways` являются parameter errors, а не core runtime failures.
+- `output_path` у `mge_export_markdown` явный; без него export идёт в default `exports/memory.md` внутри store.
 
 ## Compatibility
 

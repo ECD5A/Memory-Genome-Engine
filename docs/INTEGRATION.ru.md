@@ -56,6 +56,38 @@ MCP/SDK recall responses сохраняют core `ContextPacket` в `context_pac
 
 Rust остаётся core. Python и TypeScript wrappers вызывают Rust CLI и не дублируют memory logic.
 
+## Local Developer Setup
+
+Сначала соберите Rust tools:
+
+```bash
+cargo build
+```
+
+Запуск MCP-ready adapter:
+
+```bash
+cargo run -p mge-cli --bin mge-mcp-server
+```
+
+SDK smoke из корня репозитория:
+
+```bash
+python examples/python_basic_usage.py
+node examples/typescript_basic_usage.ts
+```
+
+Опциональные локальные packaging checks:
+
+```bash
+python -m pip install -e sdk/python
+cd sdk/typescript
+npm run smoke
+npm run check # если tsc доступен
+```
+
+Текущее решение: оставить versioned JSON-RPC stdin/stdout adapter основной local MCP-ready поверхностью. Полная external MCP SDK dependency отложена до момента, когда contract реально потребует host-specific transport features.
+
 ## Versioning
 
 Текущий integration contract использует:
@@ -79,3 +111,11 @@ Rust остаётся core. Python и TypeScript wrappers вызывают Rust 
 - `mge-mcp-server` сейчас MCP-ready local JSON-RPC adapter, а не полная внешняя MCP SDK реализация.
 - SDK пока thin local wrappers вокруг `mge`; package publishing ещё не делался.
 - Encryption, vector DB, UI и remote service hosting не входят в foundation work Мандата 2.
+
+## Troubleshooting
+
+- Если wrapper не находит `mge`, передайте cargo command из репозитория явно.
+- Если MCP request падает, сначала смотрите structured `error.details.error_kind`, а не только human-readable message.
+- Если `full_scope` recall падает, передайте `scope`; это требование защищает от случайной выдачи слишком широкой памяти.
+- Если Markdown export пишет не туда, передайте `output_path` явно или используйте default store `exports/memory.md`.
+- JSON-RPC/CLI JSON - это protocol/debug output. Runtime storage остаётся binary.

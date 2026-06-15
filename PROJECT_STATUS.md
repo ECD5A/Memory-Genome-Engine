@@ -115,6 +115,9 @@ Done in Mandate 2 foundation:
 - Added runnable Python and TypeScript basic examples.
 - Added agent workflow examples for CLI, MCP-style JSON-RPC, Python, and TypeScript.
 - Added integration docs: `docs/INTEGRATION.md`, `docs/MCP.md`, and `docs/SDK.md`, plus Russian mirrors.
+- Added local developer packaging metadata for the thin SDK wrappers: `sdk/python/pyproject.toml`, `sdk/typescript/package.json`, and `sdk/typescript/tsconfig.json`.
+- Hardened MCP adapter tests for malformed JSON, unknown tool names, missing required args, invalid recall modes, `full_scope` without scope, invalid store paths, and explicit Markdown export paths.
+- Documented local SDK installation/use, MCP adapter commands, JSON-RPC workflow examples, troubleshooting, and schema versioning notes.
 
 Mandate 2 constraints preserved:
 
@@ -125,7 +128,8 @@ Mandate 2 constraints preserved:
 
 Next Mandate 2 step:
 
-- Decide whether to keep the local JSON-RPC adapter as the first MCP integration surface or add a full MCP SDK dependency later now that the tool schema is versioned and golden-tested.
+- Keep the current versioned JSON-RPC stdin/stdout adapter as the main local MCP-ready surface; defer any full external MCP SDK dependency until a concrete host integration needs it.
+- Next useful package: host integration examples and contract compatibility checks against a real agent runner, without changing the core.
 
 ## Done
 

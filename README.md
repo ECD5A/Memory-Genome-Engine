@@ -165,6 +165,23 @@ Mandate 2 adds local integration boundaries without changing the core storage ar
 
 The integration layer returns `ContextPacket` from recall and uses JSON only as protocol/debug output, not runtime storage.
 
+Local integration smoke:
+
+```bash
+cargo run -p mge-cli --bin mge-mcp-server
+python examples/python_basic_usage.py
+node examples/typescript_basic_usage.ts
+```
+
+SDKs include repository-local packaging metadata for development:
+
+```bash
+python -m pip install -e sdk/python
+cd sdk/typescript && npm run smoke
+```
+
+The current MCP-ready surface is the versioned JSON-RPC stdin/stdout adapter with `protocol_version = mge-jsonrpc-1` and `integration_schema_version = 1`. A full external MCP SDK dependency is intentionally not added yet.
+
 Use `--marker` on recall for explicit marker search:
 
 ```bash

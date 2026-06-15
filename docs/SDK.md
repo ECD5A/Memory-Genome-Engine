@@ -10,6 +10,7 @@ Location:
 
 ```text
 sdk/python/mge_sdk/__init__.py
+sdk/python/pyproject.toml
 examples/python_basic_usage.py
 ```
 
@@ -17,6 +18,13 @@ Run the example from the repository root:
 
 ```bash
 python examples/python_basic_usage.py
+```
+
+Optional editable install from the repository:
+
+```bash
+python -m pip install -e sdk/python
+python -c "import mge_sdk; print(mge_sdk.MemoryGenomeClient)"
 ```
 
 Basic shape:
@@ -64,6 +72,8 @@ Location:
 
 ```text
 sdk/typescript/src/mge.ts
+sdk/typescript/package.json
+sdk/typescript/tsconfig.json
 examples/typescript_basic_usage.ts
 ```
 
@@ -71,6 +81,14 @@ Run the example with a Node version that supports TypeScript stripping:
 
 ```bash
 node examples/typescript_basic_usage.ts
+```
+
+Optional package smoke from the repository:
+
+```bash
+cd sdk/typescript
+npm run smoke
+npm run check # only if tsc is installed locally
 ```
 
 Basic shape:
@@ -142,6 +160,13 @@ Error fields:
 ## Versioning
 
 SDKs target `protocol_version = mge-jsonrpc-1` and `integration_schema_version = 1`. These are integration contract versions and do not change the binary storage layout or storage version.
+
+## Troubleshooting
+
+- If the SDK cannot find `mge`, pass `command=["cargo", "run", "-q", "-p", "mge-cli", "--bin", "mge", "--"]` and `cwd=repo_root`.
+- If TypeScript type checking is unavailable, run the runtime smoke with `node examples/typescript_basic_usage.ts`; `tsc` is optional for this repository-local wrapper.
+- If a JSON-RPC call fails, inspect `error.details.error_kind`; invalid parameters use `invalid_params`, missing stores use `store_open_failed`, missing full-scope scope uses `invalid_request`, and malformed JSON uses `parse_error`.
+- Do not inspect or modify `.memory-genome` files from the SDKs. The SDKs are process wrappers around the Rust engine.
 
 ## Policy
 

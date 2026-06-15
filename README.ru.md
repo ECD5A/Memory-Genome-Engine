@@ -165,6 +165,23 @@ Benchmark reports объяснены в [Бенчмарках](docs/BENCHMARKS.r
 
 Integration layer возвращает `ContextPacket` из recall и использует JSON только как protocol/debug output, а не runtime storage.
 
+Local integration smoke:
+
+```bash
+cargo run -p mge-cli --bin mge-mcp-server
+python examples/python_basic_usage.py
+node examples/typescript_basic_usage.ts
+```
+
+SDK содержат локальную packaging metadata для разработки:
+
+```bash
+python -m pip install -e sdk/python
+cd sdk/typescript && npm run smoke
+```
+
+Текущая MCP-ready поверхность - versioned JSON-RPC stdin/stdout adapter с `protocol_version = mge-jsonrpc-1` и `integration_schema_version = 1`. Полная external MCP SDK dependency пока намеренно не добавляется.
+
 Для явного marker search используйте `--marker`:
 
 ```bash

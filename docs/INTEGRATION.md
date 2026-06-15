@@ -56,6 +56,38 @@ Use the lowest layer that fits the host:
 
 Rust remains the core. Python and TypeScript wrappers delegate to the Rust CLI and do not duplicate memory logic.
 
+## Local Developer Setup
+
+Build the Rust tools first:
+
+```bash
+cargo build
+```
+
+Run the MCP-ready adapter:
+
+```bash
+cargo run -p mge-cli --bin mge-mcp-server
+```
+
+Run SDK smokes from the repository root:
+
+```bash
+python examples/python_basic_usage.py
+node examples/typescript_basic_usage.ts
+```
+
+Optional local packaging checks:
+
+```bash
+python -m pip install -e sdk/python
+cd sdk/typescript
+npm run smoke
+npm run check # if tsc is available
+```
+
+The current decision is to keep the versioned JSON-RPC stdin/stdout adapter as the main local MCP-ready surface. A full external MCP SDK dependency is intentionally deferred until the contract needs host-specific transport features.
+
 ## Versioning
 
 The current integration contract uses:
@@ -79,3 +111,11 @@ These fields version only the MCP/SDK protocol contract. They do not change the 
 - `mge-mcp-server` is an MCP-ready local JSON-RPC adapter, not a full external MCP SDK implementation.
 - SDKs are thin local wrappers around `mge`; package publishing is not done yet.
 - Encryption, vector DB, UI, and remote service hosting are outside Mandate 2 foundation work.
+
+## Troubleshooting
+
+- If a wrapper cannot find `mge`, pass the repository cargo command explicitly.
+- If an MCP request fails, check the structured `error.details.error_kind` before parsing the human-readable message.
+- If `full_scope` recall fails, provide `scope`; this is required to avoid accidental broad memory exposure.
+- If Markdown export writes somewhere unexpected, pass `output_path` explicitly or use the default store `exports/memory.md`.
+- JSON-RPC/CLI JSON is protocol or debug output only. Runtime storage remains binary.
