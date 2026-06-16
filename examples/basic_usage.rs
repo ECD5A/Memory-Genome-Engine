@@ -33,7 +33,7 @@ fn main() -> mge_core::Result<()> {
         ),
     );
     remember.subject = Some("core flow".to_string());
-    remember.scope = "mandate_1".to_string();
+    remember.scope = "demo_core".to_string();
     remember.status = MemoryStatus::Active;
     remember.trust = TrustLevel::UserConfirmed;
     remember.sensitivity = SensitivityLevel::Public;
@@ -45,7 +45,7 @@ fn main() -> mge_core::Result<()> {
 
     let mut focused = RecallRequest::new("developer ready core sealed pages");
     focused.mode = RecallMode::Focused;
-    focused.scope = Some("mandate_1".to_string());
+    focused.scope = Some("demo_core".to_string());
     focused.max_items = 5;
     let hot_packet = engine.recall(focused.clone())?;
     assert!(!hot_packet.relevant_memory.is_empty());

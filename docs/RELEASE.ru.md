@@ -246,9 +246,9 @@ Safety rules для corpus benchmark:
 - MCP JSON-RPC smoke passes.
 - Python/TypeScript SDK smoke passes, если доступен local toolchain.
 - `mge doctor --deep` проходит для unencrypted и encrypted smoke stores.
-- README, Quickstart, Security, Integration, Release и Project Status links актуальны.
+- README, Quickstart, Security, Integration и Release links актуальны.
 - Secret material не закоммичен.
-- `LICENSE` есть и MIT.
+- `LICENSE` есть и Apache-2.0.
 
 ## Current Publishing Policy
 

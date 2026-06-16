@@ -8,8 +8,8 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 authors = ["ECD5A"]
-license = "MIT"
-repository = ""
+license = "Apache-2.0"
+repository = "https://github.com/ECD5A/Memory-Genome-Engine"
 
 [workspace.dependencies]
 anyhow = "1.0"

@@ -1,3 +1,8 @@
+// Memory Genome Engine
+// Copyright (c) 2026 ECD5A
+// Licensed under the Apache License, Version 2.0.
+// Project: https://github.com/ECD5A/Memory-Genome-Engine
+
 import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";

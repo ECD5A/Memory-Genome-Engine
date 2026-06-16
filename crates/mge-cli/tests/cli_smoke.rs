@@ -565,7 +565,7 @@ fn mcp_server_json_rpc_adapter_supports_agent_workflow() {
                 "store_path": store_path.clone(),
                 "content": "Agent should recall project memory before making changes",
                 "kind": "procedure",
-                "scope": "mandate_2",
+                "scope": "agent_demo",
                 "markers": ["topic:agent_integration"],
                 "trust": "user_confirmed",
                 "sensitivity": "private"
@@ -579,7 +579,7 @@ fn mcp_server_json_rpc_adapter_supports_agent_workflow() {
                 "store_path": store_path.clone(),
                 "query": "agent integration memory",
                 "mode": "focused",
-                "scope": "mandate_2",
+                "scope": "agent_demo",
                 "max_items": 3
             }
         }),

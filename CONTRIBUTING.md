@@ -23,7 +23,6 @@ Keep Markdown consolidated:
 
 - short product entry: `README.md` / `README.ru.md`;
 - quick commands: `QUICKSTART.md` / `QUICKSTART.ru.md`;
-- status: `PROJECT_STATUS.md` / `PROJECT_STATUS.ru.md`;
 - architecture, security, integration, and release details under `docs/`.
 
 Do not recreate removed long-form docs such as `docs/MCP.md`, `docs/SDK.md`, `docs/BENCHMARKS.md`, `docs/ROADMAP.md`, `examples/basic_usage.md`, or `examples/agent_workflow.md`.

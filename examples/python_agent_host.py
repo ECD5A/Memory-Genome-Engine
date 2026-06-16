@@ -32,7 +32,7 @@ def main() -> None:
     focused_packet = client.recall(
         task,
         mode="focused",
-        scope="mandate_2",
+        scope="agent_demo",
         max_items=5,
     )
     assert focused_packet["debug"]["recall_mode"] == "focused"
@@ -42,7 +42,7 @@ def main() -> None:
     cell_id = client.remember(
         work_result,
         kind="tool_result",
-        scope="mandate_2",
+        scope="agent_demo",
         markers=["topic:agent_host", "lang:python"],
         trust="tool_observed",
         sensitivity="private",
@@ -54,7 +54,7 @@ def main() -> None:
     broad_packet = client.recall(
         "agent host integration task",
         mode="broad",
-        scope="mandate_2",
+        scope="agent_demo",
         max_items=10,
     )
     assert any(item["content"] == work_result for item in broad_packet["relevant_memory"])
@@ -65,7 +65,7 @@ def main() -> None:
     sealed_packet = client.recall(
         "agent host integration task",
         mode="focused",
-        scope="mandate_2",
+        scope="agent_demo",
         max_items=5,
     )
     assert any(item["content"] == work_result for item in sealed_packet["relevant_memory"])

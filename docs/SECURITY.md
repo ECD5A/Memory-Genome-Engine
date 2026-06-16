@@ -2,7 +2,7 @@
 
 [Russian version](SECURITY.ru.md)
 
-Mandate 3 adds the security and encryption layer for Memory Genome Engine. The current implemented scope is session unlock plus authenticated encryption for L1 hot storage and sealed page payloads.
+This document describes the security and encryption model for Memory Genome Engine. The current implemented scope is session unlock plus authenticated encryption for L1 hot storage and sealed page payloads.
 
 Current implementation status:
 
@@ -241,7 +241,7 @@ This pass does not protect against:
 
 ## Future Security Work
 
-Mandate 3 closes with payload encryption ready for the current product. Future work is non-blocking and should start only from a separate design:
+Payload encryption is ready for the current product. Future security work is non-blocking and should start only from a separate design:
 
 - optional keyed marker fingerprints / blind marker metadata prototype;
 - encrypted indexes or encrypted marker dictionary, only after benchmark and migration evidence;

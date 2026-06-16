@@ -1,5 +1,12 @@
 /target/
 /.memory-genome/
+.env
+*.key
+*.secret
+logs/
+tmp/
+temp/
+demo-stores/
 __pycache__/
 *.py[cod]
 *.egg-info/

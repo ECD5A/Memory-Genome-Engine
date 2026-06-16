@@ -1,122 +1,94 @@
 # Memory Genome Engine
 
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-release%20ready-blue)](PROJECT_STATUS.ru.md)
-[![Interface](https://img.shields.io/badge/interface-TUI%20%7C%20CLI%20%7C%20Core%20API%20%7C%20MCP-informational)](crates/)
-[![Storage](https://img.shields.io/badge/storage-binary%20cells%20%2B%20pages-6f42c1)](docs/ARCHITECTURE.ru.md)
+[![License: Apache--2.0](https://img.shields.io/badge/License-Apache--2.0-green.svg)](LICENSE)
+[![Interface](https://img.shields.io/badge/interface-CLI%20%7C%20TUI%20%7C%20MCP%20%7C%20SDK-informational)](docs/INTEGRATION.ru.md)
+[![Storage](https://img.shields.io/badge/storage-binary%20local--first-6f42c1)](docs/ARCHITECTURE.ru.md)
 
 [English version](README.md)
 
-Memory Genome Engine - Rust-first движок структурированной памяти для LLM-агентов. Он хранит память как типизированные `MemoryCell`, описывает каждую запись через `MarkerGenome`, переносит холодную память в binary sealed pages и возвращает task-relevant `ContextPacket` через marker-based recall.
+Memory Genome Engine - local-first движок структурированной памяти для AI-агентов. Он хранит типизированные `MemoryCell`, описывает их через `MarkerGenome`, переносит холодную память в sealed binary pages и возвращает task-relevant `ContextPacket` для agent workflows.
 
-```text
-Memory = Cells + Markers + Pages + Filters + Context Packets
-```
+Demo GIF placeholder: `assets/mge-console-demo.gif`
 
-Движок local-first: агент запрашивает релевантную память у MGE, а не читает raw vault files и не владеет всем memory store.
+## Что Он Делает
 
-## Текущие Возможности
-
-- Rust core library: `mge-core`.
-- Human terminal interface: `mge tui`.
-- First-run setup helper: `mge setup`.
-- CLI и local JSON-RPC adapter: `mge`, `mge-mcp-server`.
-- Thin Python и TypeScript SDK wrappers поверх Rust CLI.
-- L1 Hot RAM layer с durable binary hot log.
-- Sealed binary page layer с page catalog и candidate indexes.
-- `ExactMarkerPageIndex` как default candidate index.
-- Optional `BinaryFusePageIndex` на `xorf::BinaryFuse16`.
-- Recall modes: focused, broad, full-scope.
-- Deep validation и safe index/catalog rebuild.
-- Encrypted mode для hot log, checkpoint snapshot и sealed page payloads.
-- Read-only `mge doctor` diagnostics и local release smoke scripts.
+- Запоминает facts, decisions, preferences, notes и agent observations.
+- Держит свежую память в быстром L1 Hot RAM с durable binary persistence.
+- Запечатывает старую память в immutable binary pages с candidate indexes.
+- Поддерживает focused, broad и full-scope recall.
+- Даёт CLI, TUI, JSON-RPC/MCP-ready adapter, Python SDK и TypeScript SDK.
+- Поддерживает opt-in encrypted stores для hot payloads, snapshots и sealed page payloads.
+- Использует binary runtime storage; JSON только protocol/debug/benchmark output.
 
 ## Быстрый Старт
 
 ```bash
 cargo build
 cargo run -p mge-cli -- setup
-cargo run -p mge-cli -- remember "User prefers concise technical explanations" --kind user_preference --scope global --trust user_confirmed
+cargo run -p mge-cli -- remember "User prefers concise technical answers" --kind user_preference --scope global --trust user_confirmed
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
 cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- validate --deep
-cargo run -p mge-cli -- tui
 ```
 
-Полный старт и базовое использование: [Quickstart](QUICKSTART.ru.md).
+Terminal UI:
+
+```bash
+cargo run -p mge-cli -- tui
+cargo run -p mge-cli -- setup --help
+```
+
+## Encrypted Store
+
+```bash
+export MGE_PASSPHRASE="use-a-real-secret"
+cargo run -p mge-cli -- init --encrypted --passphrase-env MGE_PASSPHRASE
+cargo run -p mge-cli -- remember "private memory" --passphrase-env MGE_PASSPHRASE
+cargo run -p mge-cli -- recall "private memory" --passphrase-env MGE_PASSPHRASE
+cargo run -p mge-cli -- seal --passphrase-env MGE_PASSPHRASE
+cargo run -p mge-cli -- validate --deep --passphrase-env MGE_PASSPHRASE
+```
+
+Payload encryption защищает hot records, snapshots и sealed page payloads. Metadata вроде marker dictionary, indexes, catalog summaries, Markdown export и process memory while unlocked остаётся plaintext by design. Подробнее: [Security](docs/SECURITY.ru.md).
+
+## Agent Integration
+
+CLI:
+
+```bash
+cargo run -p mge-cli -- recall "project context" --mode broad --scope my_project
+```
+
+MCP-ready JSON-RPC adapter:
+
+```bash
+cargo run -p mge-cli --bin mge-mcp-server
+```
+
+SDK examples:
+
+```bash
+python examples/python_agent_host.py
+node examples/typescript_agent_host.ts
+```
 
 ## Документация
 
 - [Quickstart](QUICKSTART.ru.md)
 - [Архитектура](docs/ARCHITECTURE.ru.md)
-- [Security](docs/SECURITY.ru.md)
+- [Security model](docs/SECURITY.ru.md)
 - [Интеграция / MCP / SDK](docs/INTEGRATION.ru.md)
-- [Release / Бенчмарки](docs/RELEASE.ru.md)
-- [Статус проекта](PROJECT_STATUS.ru.md)
-- [Security Policy](SECURITY.md)
+- [Release и benchmark checks](docs/RELEASE.ru.md)
+
+## Community
+
+- [License](LICENSE)
+- [Notice](NOTICE)
+- [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-
-## Runtime Storage Policy
-
-Runtime storage бинарный:
-
-```text
-.memory-genome/
-  manifest.mgm
-  dictionary/markers.mgd
-  hot/hot.mgl
-  hot/snapshot.mgs
-  pages/*.mgp
-  indexes/*.mgi
-  exports/memory.md
-```
-
-JSON используется только как protocol/debug/benchmark output. Это не runtime storage.
-
-## Security Summary
-
-Encrypted stores включаются явно:
-
-```bash
-export MGE_PASSPHRASE="use-a-real-secret"
-mge init --encrypted --passphrase-env MGE_PASSPHRASE
-```
-
-Encrypted mode защищает:
-
-- `hot/hot.mgl` hot record payloads;
-- `hot/snapshot.mgs` checkpoint payloads;
-- `pages/*.mgp` sealed page payloads.
-
-Metadata остаётся plaintext by design: marker dictionary, index files, page catalog summaries, safe manifest metadata, Markdown export и process memory while unlocked. Missing unlock возвращает `store_locked`; wrong key возвращает `auth_failed` / authentication failure. Подробнее: [Security](docs/SECURITY.ru.md).
-
-## Примеры
-
-- [Rust API example](examples/basic_usage.rs)
-- [Rust CLI host example](examples/agent_host_cli.rs)
-- [Python SDK example](examples/python_basic_usage.py)
-- [Python agent host example](examples/python_agent_host.py)
-- [TypeScript SDK example](examples/typescript_basic_usage.ts)
-- [TypeScript agent host example](examples/typescript_agent_host.ts)
-- [MCP JSON-RPC session](examples/mcp_agent_session.jsonl)
-
-## Текущие Ограничения
-
-- Web/desktop GUI нет; human interface terminal-first через `mge tui`.
-- Vector database нет.
-- Encrypted indexes и blind marker metadata пока нет.
-- Encrypted Markdown export пока нет.
-- External MCP SDK dependency нет; текущий adapter - local JSON-RPC stdin/stdout.
-
-## Donate
-
-If Memory Genome Engine is useful to your work, you can support the project here:
-
-- Bitcoin (BTC): `1ECDSA1b4d5TcZHtqNpcxmY8pBH1GgHntN`
-- USDT (TRC20): `TUF4vPdB6QkjCvZq18rBL4Qj4dK5ihCN75`
+- [Code of conduct](CODE_OF_CONDUCT.md)
 
 ## Лицензия
 
-MIT License. Copyright (c) 2026 ECD5A.
+Apache License, Version 2.0. Copyright (c) 2026 ECD5A.

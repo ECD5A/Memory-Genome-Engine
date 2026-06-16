@@ -22,7 +22,7 @@ client.init("fast");
 const task = "prepare local agent host integration smoke";
 const focusedPacket = client.recall(task, {
   mode: "focused",
-  scope: "mandate_2",
+  scope: "agent_demo",
   maxItems: 5,
 });
 if (focusedPacket.debug.recall_mode !== "focused") {
@@ -33,7 +33,7 @@ if (focusedPacket.debug.recall_mode !== "focused") {
 const workResult = "TypeScript agent host completed a fake integration task using ContextPacket memory.";
 const cellId = client.remember(workResult, {
   kind: "tool_result",
-  scope: "mandate_2",
+  scope: "agent_demo",
   markers: ["topic:agent_host", "lang:typescript"],
   trust: "tool_observed",
   sensitivity: "private",
@@ -46,7 +46,7 @@ if (checkpoint.hot_cells !== 1) {
 
 const broadPacket = client.recall("agent host integration task", {
   mode: "broad",
-  scope: "mandate_2",
+  scope: "agent_demo",
   maxItems: 10,
 });
 if (!broadPacket.relevant_memory.some((item) => item.content === workResult)) {
@@ -60,7 +60,7 @@ if (seal.hot_cells_sealed !== 1) {
 
 const sealedPacket = client.recall("agent host integration task", {
   mode: "focused",
-  scope: "mandate_2",
+  scope: "agent_demo",
   maxItems: 5,
 });
 if (!sealedPacket.relevant_memory.some((item) => item.content === workResult)) {

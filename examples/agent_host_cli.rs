@@ -21,7 +21,7 @@ fn main() {
             "--mode",
             "focused",
             "--scope",
-            "mandate_2",
+            "agent_demo",
             "--json",
         ],
     );
@@ -38,7 +38,7 @@ fn main() {
             "--kind",
             "tool_result",
             "--scope",
-            "mandate_2",
+            "agent_demo",
             "--trust",
             "tool_observed",
             "--marker",
@@ -58,7 +58,7 @@ fn main() {
             "--mode",
             "broad",
             "--scope",
-            "mandate_2",
+            "agent_demo",
             "--json",
         ],
     );

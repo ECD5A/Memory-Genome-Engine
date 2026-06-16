@@ -246,9 +246,9 @@ Do not start custom page codec work just because MessagePack is present. A custo
 - MCP JSON-RPC smoke passes.
 - Python/TypeScript SDK smoke passes when the local toolchain is available.
 - `mge doctor --deep` passes for unencrypted and encrypted smoke stores.
-- README, Quickstart, Security, Integration, Release, and Project Status links are current.
+- README, Quickstart, Security, Integration, and Release links are current.
 - No secret material is committed.
-- `LICENSE` is present and MIT.
+- `LICENSE` is present and Apache-2.0.
 
 ## Current Publishing Policy
 

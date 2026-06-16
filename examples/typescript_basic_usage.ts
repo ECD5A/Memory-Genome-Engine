@@ -22,7 +22,7 @@ const cellId = client.remember(
   "Agent should recall ContextPacket memory before editing the project.",
   {
     kind: "procedure",
-    scope: "mandate_2",
+    scope: "agent_demo",
     markers: ["topic:agent_integration"],
     trust: "user_confirmed",
     sensitivity: "private",
@@ -31,7 +31,7 @@ const cellId = client.remember(
 
 const hotPacket = client.recall("agent integration context packet", {
   mode: "focused",
-  scope: "mandate_2",
+  scope: "agent_demo",
   maxItems: 3,
 });
 if (hotPacket.relevant_memory.length === 0) {
@@ -50,7 +50,7 @@ if (seal.hot_cells_sealed !== 1) {
 
 const sealedPacket = client.recall("agent integration context packet", {
   mode: "broad",
-  scope: "mandate_2",
+  scope: "agent_demo",
   maxItems: 5,
 });
 if (sealedPacket.relevant_memory.length === 0) {

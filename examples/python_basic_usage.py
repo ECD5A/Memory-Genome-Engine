@@ -30,7 +30,7 @@ def main() -> None:
     cell_id = client.remember(
         "Agent should recall ContextPacket memory before editing the project.",
         kind="procedure",
-        scope="mandate_2",
+        scope="agent_demo",
         markers=["topic:agent_integration"],
         trust="user_confirmed",
         sensitivity="private",
@@ -39,7 +39,7 @@ def main() -> None:
     hot_packet = client.recall(
         "agent integration context packet",
         mode="focused",
-        scope="mandate_2",
+        scope="agent_demo",
         max_items=3,
     )
     assert hot_packet["relevant_memory"]
@@ -53,7 +53,7 @@ def main() -> None:
     sealed_packet = client.recall(
         "agent integration context packet",
         mode="broad",
-        scope="mandate_2",
+        scope="agent_demo",
         max_items=5,
     )
     assert sealed_packet["relevant_memory"]
