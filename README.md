@@ -9,7 +9,9 @@
 
 Memory Genome Engine is a local-first structured memory engine for AI agents. It stores typed `MemoryCell` records, describes them with `MarkerGenome`, moves cold memory into sealed binary pages, and returns task-relevant `ContextPacket` output for agent workflows.
 
-Demo GIF placeholder: `assets/mge-console-demo.gif`
+<p align="center">
+  <img src="assets/mge-console-demo-en.gif" alt="Memory Genome Engine terminal dashboard" width="100%">
+</p>
 
 ## What It Does
 
