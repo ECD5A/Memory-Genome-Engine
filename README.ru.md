@@ -1,27 +1,17 @@
 <h1 align="center">Memory Genome Engine</h1>
 
 <p align="center">
+  <a href="https://www.rust-lang.org/"><img alt="Rust 1.95+" src="https://img.shields.io/badge/Rust-1.95%2B-b45309?style=flat-square&logo=rust&logoColor=white"></a>
+  <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-15803d?style=flat-square"></a>
+  <a href="docs/ARCHITECTURE.ru.md"><img alt="Local-first memory" src="https://img.shields.io/badge/local--first-memory-0e7490?style=flat-square"></a>
+  <a href="docs/ARCHITECTURE.ru.md"><img alt="Binary storage" src="https://img.shields.io/badge/binary-storage-6d28d9?style=flat-square"></a>
+  <a href="docs/INTEGRATION.ru.md"><img alt="CLI TUI MCP" src="https://img.shields.io/badge/CLI%20.%20TUI%20.%20MCP-ready-0369a1?style=flat-square"></a>
+  <a href="docs/SECURITY.ru.md"><img alt="Encrypted stores" src="https://img.shields.io/badge/encrypted-stores-15803d?style=flat-square"></a>
+  <a href="docs/INTEGRATION.ru.md"><img alt="Python TypeScript SDK" src="https://img.shields.io/badge/Python%20.%20TypeScript-SDK-2563eb?style=flat-square"></a>
+</p>
+
+<p align="center">
   <a href="README.md">English version</a>
-</p>
-
-<p align="center">
-  <a href="https://www.rust-lang.org/"><img alt="Rust 1.95+" src="https://img.shields.io/badge/Rust-1.95%2B-f97316?style=flat-square&logo=rust&logoColor=white#gh-dark-mode-only"></a>
-  <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-22c55e?style=flat-square#gh-dark-mode-only"></a>
-  <a href="docs/ARCHITECTURE.ru.md"><img alt="Local-first memory" src="https://img.shields.io/badge/local--first-memory-06b6d4?style=flat-square#gh-dark-mode-only"></a>
-  <a href="docs/ARCHITECTURE.ru.md"><img alt="Binary storage" src="https://img.shields.io/badge/binary-storage-8b5cf6?style=flat-square#gh-dark-mode-only"></a>
-  <a href="docs/INTEGRATION.ru.md"><img alt="CLI TUI MCP" src="https://img.shields.io/badge/CLI%20%7C%20TUI%20%7C%20MCP-ready-38bdf8?style=flat-square#gh-dark-mode-only"></a>
-  <a href="docs/SECURITY.ru.md"><img alt="Encrypted stores" src="https://img.shields.io/badge/encrypted-stores-16a34a?style=flat-square#gh-dark-mode-only"></a>
-  <a href="docs/INTEGRATION.ru.md"><img alt="Python TypeScript SDK" src="https://img.shields.io/badge/Python%20%7C%20TypeScript-SDK-60a5fa?style=flat-square#gh-dark-mode-only"></a>
-</p>
-
-<p align="center">
-  <a href="https://www.rust-lang.org/"><img alt="Rust 1.95+" src="https://img.shields.io/badge/Rust-1.95%2B-b45309?style=flat-square&logo=rust&logoColor=white#gh-light-mode-only"></a>
-  <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-15803d?style=flat-square#gh-light-mode-only"></a>
-  <a href="docs/ARCHITECTURE.ru.md"><img alt="Local-first memory" src="https://img.shields.io/badge/local--first-memory-0e7490?style=flat-square#gh-light-mode-only"></a>
-  <a href="docs/ARCHITECTURE.ru.md"><img alt="Binary storage" src="https://img.shields.io/badge/binary-storage-6d28d9?style=flat-square#gh-light-mode-only"></a>
-  <a href="docs/INTEGRATION.ru.md"><img alt="CLI TUI MCP" src="https://img.shields.io/badge/CLI%20%7C%20TUI%20%7C%20MCP-ready-0369a1?style=flat-square#gh-light-mode-only"></a>
-  <a href="docs/SECURITY.ru.md"><img alt="Encrypted stores" src="https://img.shields.io/badge/encrypted-stores-15803d?style=flat-square#gh-light-mode-only"></a>
-  <a href="docs/INTEGRATION.ru.md"><img alt="Python TypeScript SDK" src="https://img.shields.io/badge/Python%20%7C%20TypeScript-SDK-2563eb?style=flat-square#gh-light-mode-only"></a>
 </p>
 
 Memory Genome Engine - local-first движок структурированной памяти для AI-агентов. Он хранит типизированные `MemoryCell`, описывает их через `MarkerGenome`, переносит холодную память в sealed binary pages и возвращает task-relevant `ContextPacket` для agent workflows.

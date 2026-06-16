@@ -37,7 +37,7 @@ fn subtitle_spans(language: Language, banner_width: usize) -> Vec<Span<'static>>
         .strip_suffix(" by ECD5A")
         .unwrap_or(raw)
         .to_ascii_uppercase();
-    let separator = "  |  ";
+    let separator = "  ::  ";
     let brand = "BY ECD5A";
     let subtitle_width = main.chars().count() + separator.chars().count() + brand.chars().count();
     let subtitle_offset =
@@ -136,7 +136,7 @@ mod tests {
         assert!(spans
             .iter()
             .any(|span| span.content.contains("LOCAL-FIRST MEMORY ENGINE")));
-        assert!(spans.iter().any(|span| span.content == "  |  "));
+        assert!(spans.iter().any(|span| span.content == "  ::  "));
         let brand = spans
             .iter()
             .find(|span| span.content.contains("ECD5A"))
