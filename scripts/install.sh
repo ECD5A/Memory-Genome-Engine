@@ -6,13 +6,15 @@ cd "$repo_root"
 
 install_dir="${HOME}/.local/bin"
 no_build=0
+include_dev_tools=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install.sh [--install-dir DIR] [--no-build]
+Usage: scripts/install.sh [--install-dir DIR] [--no-build] [--include-dev-tools]
 
 Builds local release binaries and copies them to a user-writable bin directory.
 No packages are published and root privileges are not required.
+By default this installs product binaries only: mge and mge-mcp-server.
 EOF
 }
 
@@ -24,6 +26,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-build)
       no_build=1
+      shift
+      ;;
+    --include-dev-tools)
+      include_dev_tools=1
       shift
       ;;
     -h|--help)
@@ -46,9 +52,11 @@ require_command() {
   fi
 }
 
-required_bins=(
+product_bins=(
   mge
   mge-mcp-server
+)
+dev_tool_bins=(
   mge-synthetic-bench
   mge-corpus-bench
 )
@@ -76,11 +84,20 @@ find_bin() {
 
 mkdir -p "$install_dir"
 
-for name in "${required_bins[@]}"; do
+for name in "${product_bins[@]}"; do
   src="$(find_bin "$name")"
   cp -f "$src" "$install_dir/$(basename "$src")"
   chmod 755 "$install_dir/$(basename "$src")"
 done
+
+if [[ "$include_dev_tools" == "1" ]]; then
+  for name in "${dev_tool_bins[@]}"; do
+    src="$(find_bin "$name")"
+    cp -f "$src" "$install_dir/$(basename "$src")"
+    chmod 755 "$install_dir/$(basename "$src")"
+  done
+  echo "Installed development benchmark tools."
+fi
 
 "$install_dir/$(basename "$(find_bin mge)")" --version
 

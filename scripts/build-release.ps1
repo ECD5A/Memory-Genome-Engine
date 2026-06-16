@@ -3,9 +3,11 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
-$RequiredBins = @(
+$ProductBins = @(
     "mge",
-    "mge-mcp-server",
+    "mge-mcp-server"
+)
+$DevToolBins = @(
     "mge-synthetic-bench",
     "mge-corpus-bench"
 )
@@ -40,7 +42,10 @@ function Find-Binary {
 }
 
 $Mge = Find-Binary "mge"
-foreach ($Name in $RequiredBins) {
+foreach ($Name in $ProductBins) {
+    [void](Find-Binary $Name)
+}
+foreach ($Name in $DevToolBins) {
     [void](Find-Binary $Name)
 }
 
@@ -55,12 +60,25 @@ $Arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToSt
 $LayoutDir = Join-Path $TargetRoot (Join-Path "mge-release" "$Os-$Arch")
 $LayoutBinDir = Join-Path $LayoutDir "bin"
 $LayoutDocsDir = Join-Path $LayoutDir "docs"
+$LayoutDevToolsDir = Join-Path $LayoutDir "dev-tools"
 
+if (Test-Path $LayoutDir) {
+    Remove-Item -Recurse -Force $LayoutDir
+}
 New-Item -ItemType Directory -Force -Path $LayoutBinDir, $LayoutDocsDir | Out-Null
 
-foreach ($Name in $RequiredBins) {
+foreach ($Name in $ProductBins) {
     $Source = Find-Binary $Name
     Copy-Item -Force -Path $Source -Destination (Join-Path $LayoutBinDir (Split-Path -Leaf $Source))
+}
+
+if ($env:MGE_INCLUDE_DEV_TOOLS -eq "1") {
+    New-Item -ItemType Directory -Force -Path $LayoutDevToolsDir | Out-Null
+    foreach ($Name in $DevToolBins) {
+        $Source = Find-Binary $Name
+        Copy-Item -Force -Path $Source -Destination (Join-Path $LayoutDevToolsDir (Split-Path -Leaf $Source))
+    }
+    Write-Host "Development benchmark tools copied to: $LayoutDevToolsDir"
 }
 
 foreach ($Path in @("LICENSE", "README.md", "README.ru.md", "QUICKSTART.md", "QUICKSTART.ru.md", "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md")) {

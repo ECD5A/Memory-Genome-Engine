@@ -12,9 +12,11 @@ require_command() {
   fi
 }
 
-required_bins=(
+product_bins=(
   mge
   mge-mcp-server
+)
+dev_tool_bins=(
   mge-synthetic-bench
   mge-corpus-bench
 )
@@ -41,7 +43,10 @@ find_bin() {
 }
 
 mge_bin="$(find_bin mge)"
-for name in "${required_bins[@]}"; do
+for name in "${product_bins[@]}"; do
+  find_bin "$name" >/dev/null
+done
+for name in "${dev_tool_bins[@]}"; do
   find_bin "$name" >/dev/null
 done
 
@@ -49,12 +54,23 @@ platform="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | tr '[:upper:]' '
 layout_dir="$target_root/mge-release/$platform"
 layout_bin_dir="$layout_dir/bin"
 layout_docs_dir="$layout_dir/docs"
+layout_dev_tools_dir="$layout_dir/dev-tools"
+rm -rf "$layout_dir"
 mkdir -p "$layout_bin_dir" "$layout_docs_dir"
 
-for name in "${required_bins[@]}"; do
+for name in "${product_bins[@]}"; do
   src="$(find_bin "$name")"
   cp -f "$src" "$layout_bin_dir/$(basename "$src")"
 done
+
+if [[ "${MGE_INCLUDE_DEV_TOOLS:-0}" == "1" ]]; then
+  mkdir -p "$layout_dev_tools_dir"
+  for name in "${dev_tool_bins[@]}"; do
+    src="$(find_bin "$name")"
+    cp -f "$src" "$layout_dev_tools_dir/$(basename "$src")"
+  done
+  echo "Development benchmark tools copied to: $layout_dev_tools_dir"
+fi
 
 for path in LICENSE README.md README.ru.md QUICKSTART.md QUICKSTART.ru.md SECURITY.md CONTRIBUTING.md CODE_OF_CONDUCT.md; do
   if [[ -f "$path" ]]; then

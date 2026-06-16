@@ -1,6 +1,7 @@
 param(
     [string]$InstallDir = (Join-Path $HOME ".local\bin"),
-    [switch]$NoBuild
+    [switch]$NoBuild,
+    [switch]$IncludeDevTools
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,9 +9,11 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
-$RequiredBins = @(
+$ProductBins = @(
     "mge",
-    "mge-mcp-server",
+    "mge-mcp-server"
+)
+$DevToolBins = @(
     "mge-synthetic-bench",
     "mge-corpus-bench"
 )
@@ -48,9 +51,17 @@ function Find-Binary {
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-foreach ($Name in $RequiredBins) {
+foreach ($Name in $ProductBins) {
     $Source = Find-Binary $Name
     Copy-Item -Force -Path $Source -Destination (Join-Path $InstallDir (Split-Path -Leaf $Source))
+}
+
+if ($IncludeDevTools) {
+    foreach ($Name in $DevToolBins) {
+        $Source = Find-Binary $Name
+        Copy-Item -Force -Path $Source -Destination (Join-Path $InstallDir (Split-Path -Leaf $Source))
+    }
+    Write-Host "Installed development benchmark tools."
 }
 
 $Mge = Join-Path $InstallDir (Split-Path -Leaf (Find-Binary "mge"))

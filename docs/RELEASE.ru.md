@@ -10,16 +10,14 @@
 cargo build --release -p mge-cli --bins
 ```
 
-Release binaries:
+Product release binaries:
 
 ```text
 target/release/mge
 target/release/mge-mcp-server
-target/release/mge-synthetic-bench
-target/release/mge-corpus-bench
 ```
 
-На Windows файлы имеют `.exe` suffix.
+На Windows файлы имеют `.exe` suffix. Development-only benchmark binaries всё ещё собираются из workspace, но не входят в default product install или release layout.
 
 Repo-local build helpers:
 
@@ -28,7 +26,7 @@ Repo-local build helpers:
 powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 ```
 
-Scripts собирают local release binaries, проверяют наличие expected executables и готовят local release layout:
+Scripts собирают все local release binaries, проверяют product executables и development benchmark tools, затем готовят product release layout:
 
 ```text
 target/mge-release/<platform>/
@@ -37,6 +35,17 @@ target/mge-release/<platform>/
 ```
 
 Они учитывают `CARGO_TARGET_DIR`, если он задан. Они не публикуют packages, не создают tracked `dist/` и не коммитят artifacts.
+
+Development benchmark tools можно скопировать в отдельную папку `dev-tools/` только явно:
+
+```bash
+MGE_INCLUDE_DEV_TOOLS=1 ./scripts/build-release.sh
+```
+
+```powershell
+$env:MGE_INCLUDE_DEV_TOOLS = "1"
+powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
+```
 
 ## Platform Verification
 
@@ -53,14 +62,19 @@ target/mge-release/<platform>/
 powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -InstallDir "$env:USERPROFILE\.local\bin"
 ```
 
-Install scripts собирают release binaries, если не передан `--no-build` / `-NoBuild`, затем копируют:
+Install scripts собирают release binaries, если не передан `--no-build` / `-NoBuild`, затем копируют только product binaries:
 
 - `mge`
 - `mge-mcp-server`
-- `mge-synthetic-bench`
-- `mge-corpus-bench`
 
 Они не публикуют packages, не требуют admin/root privileges и не меняют shell profile files. Добавьте install directory в `PATH` вручную, если нужно.
+
+Development benchmark tools устанавливаются только при явном opt-in:
+
+```bash
+./scripts/install.sh --include-dev-tools
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -IncludeDevTools
+```
 
 ## Test
 
@@ -101,7 +115,8 @@ Smoke scripts сначала выполняют `cargo build -p mge-cli --bins -
 
 Они проверяют:
 
-- expected release binaries существуют;
+- product release binaries существуют;
+- development benchmark tools всё ещё собираются и discoverable;
 - `mge --version`;
 - `mge tui --help`;
 - `mge setup --help`;
@@ -152,6 +167,10 @@ npm run check
 ```
 
 `npm run check` требует local TypeScript toolchain.
+
+## Development-Only Benchmark Tools
+
+`mge-synthetic-bench` и `mge-corpus-bench` - внутренние development tools для измерения core changes. Они остаются в репозитории для regression checks и будущей performance work, но не входят в default user-facing product surface, install path или release layout.
 
 ## Benchmark Smoke
 

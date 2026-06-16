@@ -88,7 +88,7 @@ node examples/typescript_agent_host.ts
 - [Архитектура](docs/ARCHITECTURE.ru.md)
 - [Security model](docs/SECURITY.ru.md)
 - [Интеграция / MCP / SDK](docs/INTEGRATION.ru.md)
-- [Release и benchmark checks](docs/RELEASE.ru.md)
+- [Release checks](docs/RELEASE.ru.md)
 
 ## Community
 

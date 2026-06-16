@@ -39,6 +39,7 @@ mge_bin="$(find_bin mge)"
 mcp_bin="$(find_bin mge-mcp-server)"
 find_bin mge-synthetic-bench >/dev/null
 find_bin mge-corpus-bench >/dev/null
+echo "Development benchmark tools are build-checked but not installed by default."
 
 "$mge_bin" --version >/dev/null
 "$mge_bin" tui --help >/dev/null

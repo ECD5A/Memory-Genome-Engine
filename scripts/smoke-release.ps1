@@ -52,6 +52,7 @@ $Mge = Find-Binary "mge"
 $Mcp = Find-Binary "mge-mcp-server"
 [void](Find-Binary "mge-synthetic-bench")
 [void](Find-Binary "mge-corpus-bench")
+Write-Host "Development benchmark tools are build-checked but not installed by default."
 
 Invoke-Required $Mge --version
 Invoke-Required $Mge tui --help
