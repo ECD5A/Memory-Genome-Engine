@@ -234,7 +234,7 @@ fn draw(frame: &mut Frame<'_>, app: &TuiApp) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),
+            Constraint::Length(banner::BANNER_RENDER_HEIGHT),
             Constraint::Min(10),
             Constraint::Length(1),
             Constraint::Length(1),

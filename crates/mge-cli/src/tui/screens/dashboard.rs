@@ -12,11 +12,11 @@ use crate::tui::theme;
 pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     let body = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
+        .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
         .split(area);
 
-    render_summary(frame, app, body[0]);
-    render_menu(frame, app, body[1]);
+    render_menu(frame, app, body[0]);
+    render_summary(frame, app, body[1]);
 }
 
 fn render_summary(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
