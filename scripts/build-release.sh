@@ -57,8 +57,11 @@ layout_dir="$target_root/mge-release/$platform"
 layout_bin_dir="$layout_dir/bin"
 layout_docs_dir="$layout_dir/docs"
 layout_dev_tools_dir="$layout_dir/dev-tools"
+archive_dir="$target_root/mge-release/archives"
+archive_name="mge-$platform.tar.gz"
+archive_path="$archive_dir/$archive_name"
 rm -rf "$layout_dir"
-mkdir -p "$layout_bin_dir" "$layout_docs_dir"
+mkdir -p "$layout_bin_dir" "$layout_docs_dir" "$archive_dir"
 
 for name in "${product_bins[@]}"; do
   src="$(find_bin "$name")"
@@ -88,5 +91,18 @@ done
 
 "$mge_bin" --version
 
+rm -f "$archive_path"
+tar -czf "$archive_path" -C "$(dirname "$layout_dir")" "$(basename "$layout_dir")"
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$archive_dir" && sha256sum "$archive_name" > SHA256SUMS)
+elif command -v shasum >/dev/null 2>&1; then
+  (cd "$archive_dir" && shasum -a 256 "$archive_name" > SHA256SUMS)
+else
+  echo "missing sha256sum or shasum" >&2
+  exit 127
+fi
+
 echo "Release build ok: $bin_dir"
 echo "Release layout ok: $layout_dir"
+echo "Release archive ok: $archive_path"
+echo "Release checksums ok: $archive_dir/SHA256SUMS"

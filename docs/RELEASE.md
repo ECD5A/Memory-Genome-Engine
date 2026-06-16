@@ -32,6 +32,9 @@ The scripts build product release binaries, verify the product executables exist
 target/mge-release/<platform>/
   bin/
   docs/
+target/mge-release/archives/
+  mge-<platform>.zip or mge-<platform>.tar.gz
+  SHA256SUMS
 ```
 
 They honor `CARGO_TARGET_DIR` when it is set. They do not publish packages, create a tracked `dist/` directory, or commit artifacts.
@@ -202,7 +205,7 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 - `cargo test` passes.
 - `cargo check -p mge-cli --bins` passes.
 - `cargo build -p mge-cli --bin mge --bin mge-mcp-server --release` passes.
-- `scripts/build-release.sh` or `scripts/build-release.ps1` passes.
+- `scripts/build-release.sh` or `scripts/build-release.ps1` passes and creates a local archive plus `SHA256SUMS`.
 - `scripts/smoke-release.sh` or `scripts/smoke-release.ps1` passes.
 - `scripts/install.sh` or `scripts/install.ps1` installs into a user-writable directory.
 - CLI smoke passes on a temporary store.
@@ -224,3 +227,4 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 - No external MCP SDK dependency is bundled.
 - Python and TypeScript packages are repository-local developer wrappers.
 - Release artifacts should be generated from the Rust workspace, not from copied binaries.
+- Local archives under `target/mge-release/archives/` are generated artifacts and must not be committed.

@@ -63,11 +63,15 @@ $LayoutDir = Join-Path $TargetRoot (Join-Path "mge-release" "$Os-$Arch")
 $LayoutBinDir = Join-Path $LayoutDir "bin"
 $LayoutDocsDir = Join-Path $LayoutDir "docs"
 $LayoutDevToolsDir = Join-Path $LayoutDir "dev-tools"
+$ArchiveDir = Join-Path $TargetRoot (Join-Path "mge-release" "archives")
+$ArchivePath = Join-Path $ArchiveDir "mge-$Os-$Arch.zip"
+$ChecksumPath = Join-Path $ArchiveDir "SHA256SUMS"
 
 if (Test-Path $LayoutDir) {
     Remove-Item -Recurse -Force $LayoutDir
 }
 New-Item -ItemType Directory -Force -Path $LayoutBinDir, $LayoutDocsDir | Out-Null
+New-Item -ItemType Directory -Force -Path $ArchiveDir | Out-Null
 
 foreach ($Name in $ProductBins) {
     $Source = Find-Binary $Name
@@ -97,5 +101,14 @@ foreach ($Path in @("docs\RELEASE.md", "docs\RELEASE.ru.md", "docs\SECURITY.md",
 
 & $Mge --version
 
+if (Test-Path $ArchivePath) {
+    Remove-Item -Force $ArchivePath
+}
+Compress-Archive -Force -Path $LayoutDir -DestinationPath $ArchivePath
+$ArchiveHash = (Get-FileHash -Algorithm SHA256 -Path $ArchivePath).Hash.ToLowerInvariant()
+"$ArchiveHash  $(Split-Path -Leaf $ArchivePath)" | Set-Content -Encoding ascii -Path $ChecksumPath
+
 Write-Host "Release build ok: $BinDir"
 Write-Host "Release layout ok: $LayoutDir"
+Write-Host "Release archive ok: $ArchivePath"
+Write-Host "Release checksums ok: $ChecksumPath"

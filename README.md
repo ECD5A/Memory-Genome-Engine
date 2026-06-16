@@ -8,10 +8,8 @@
   <a href="docs/INTEGRATION.md"><img alt="CLI TUI MCP" src="https://img.shields.io/badge/CLI%20.%20TUI%20.%20MCP-ready-0369a1?style=flat-square"></a>
   <a href="docs/SECURITY.md"><img alt="Encrypted stores" src="https://img.shields.io/badge/encrypted-stores-15803d?style=flat-square"></a>
   <a href="docs/INTEGRATION.md"><img alt="Python TypeScript SDK" src="https://img.shields.io/badge/Python%20.%20TypeScript-SDK-2563eb?style=flat-square"></a>
-</p>
-
-<p align="center">
-  <a href="README.ru.md">Russian version</a>
+  <br>
+  <sub><a href="https://github.com/ECD5A/Memory-Genome-Engine/blob/main/README.ru.md">Русская версия</a></sub>
 </p>
 
 Memory Genome Engine is a local-first structured memory engine for AI agents. It stores typed `MemoryCell` records, describes them with `MarkerGenome`, moves cold memory into sealed binary pages, and returns task-relevant `ContextPacket` output for agent workflows.
@@ -105,7 +103,17 @@ If Memory Genome Engine is useful to your work, you can support the project here
 - Bitcoin (BTC): `1ECDSA1b4d5TcZHtqNpcxmY8pBH1GgHntN`
 - USDT (TRC20): `TUF4vPdB6QkjCvZq18rBL4Qj4dK5ihCN75`
 
-Commercial integration, support, and partnership discussions are welcome.
+## Contact
+
+For commercial integration, support, collaboration, and partnership inquiries:
+
+<p>
+  <a href="mailto:stelmak159@gmail.com" aria-label="Email"><img alt="Email" height="24" src="https://cdn.simpleicons.org/gmail/EA4335"></a>
+  &nbsp;
+  <a href="https://t.me/ECDS4" aria-label="Telegram"><img alt="Telegram" height="24" src="https://cdn.simpleicons.org/telegram/26A5E4"></a>
+  &nbsp;
+  <a href="https://github.com/ECD5A/Memory-Genome-Engine" aria-label="GitHub repository"><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/github/FFFFFF"><img alt="GitHub repository" height="24" src="https://cdn.simpleicons.org/github/181717"></picture></a>
+</p>
 
 ## License
 

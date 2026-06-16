@@ -32,6 +32,9 @@ Scripts собирают product release binaries, проверяют product ex
 target/mge-release/<platform>/
   bin/
   docs/
+target/mge-release/archives/
+  mge-<platform>.zip or mge-<platform>.tar.gz
+  SHA256SUMS
 ```
 
 Они учитывают `CARGO_TARGET_DIR`, если он задан. Они не публикуют packages, не создают tracked `dist/` и не коммитят artifacts.
@@ -202,7 +205,7 @@ Benchmark JSON - только report/debug output, не runtime storage.
 - `cargo test` passes.
 - `cargo check -p mge-cli --bins` passes.
 - `cargo build -p mge-cli --bin mge --bin mge-mcp-server --release` passes.
-- `scripts/build-release.sh` или `scripts/build-release.ps1` passes.
+- `scripts/build-release.sh` или `scripts/build-release.ps1` passes и создаёт local archive плюс `SHA256SUMS`.
 - `scripts/smoke-release.sh` или `scripts/smoke-release.ps1` passes.
 - `scripts/install.sh` или `scripts/install.ps1` устанавливает binaries в user-writable directory.
 - CLI smoke passes во временном store.
@@ -224,3 +227,4 @@ Benchmark JSON - только report/debug output, не runtime storage.
 - External MCP SDK dependency не bundled.
 - Python и TypeScript packages - repository-local developer wrappers.
 - Release artifacts должны собираться из Rust workspace, а не из copied binaries.
+- Local archives в `target/mge-release/archives/` являются generated artifacts и не должны коммититься.
