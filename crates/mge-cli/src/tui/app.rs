@@ -78,6 +78,7 @@ pub struct TuiApp {
     pub language: Language,
     pub screen: Screen,
     pub previous_screen: Screen,
+    navigation_stack: Vec<Screen>,
     pub dashboard: DashboardSummary,
     pub dashboard_selected: usize,
     pub form_selected: usize,
@@ -111,6 +112,7 @@ impl TuiApp {
             language: Language::En,
             screen: initial_screen,
             previous_screen: Screen::Dashboard,
+            navigation_stack: Vec::new(),
             dashboard,
             dashboard_selected: 0,
             form_selected: 0,
@@ -146,6 +148,12 @@ impl TuiApp {
     }
 
     pub fn open_screen(&mut self, screen: Screen) {
+        if self.screen != screen {
+            self.navigation_stack.push(self.screen);
+            if self.navigation_stack.len() > 16 {
+                self.navigation_stack.remove(0);
+            }
+        }
         self.previous_screen = self.screen;
         self.screen = screen;
         self.form_selected = 0;
@@ -153,10 +161,14 @@ impl TuiApp {
     }
 
     fn go_back(&mut self) {
-        if self.screen == Screen::Help {
-            self.screen = self.previous_screen;
-        } else {
+        if let Some(previous) = self.navigation_stack.pop() {
+            self.previous_screen = self.screen;
+            self.screen = previous;
+        } else if self.screen != Screen::Dashboard {
+            self.previous_screen = self.screen;
             self.screen = Screen::Dashboard;
+        } else {
+            return;
         }
         self.form_selected = 0;
         self.seal_confirm = false;
@@ -736,5 +748,76 @@ mod tests {
 
         assert_eq!(app.form_selected, selected);
         assert_eq!(app.language, language);
+    }
+
+    #[test]
+    fn escape_walks_back_through_tui_navigation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join(".memory-genome");
+        AppService::new(&store, None).setup_fast(false).unwrap();
+        let mut app = TuiApp::new(TuiOptions {
+            store,
+            passphrase_env: None,
+        });
+
+        handle_key(
+            &mut app,
+            KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            },
+        )
+        .unwrap();
+        assert_eq!(app.screen, Screen::Recall);
+
+        handle_key(
+            &mut app,
+            KeyEvent {
+                code: KeyCode::F(2),
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            },
+        )
+        .unwrap();
+        assert_eq!(app.screen, Screen::Help);
+
+        handle_key(
+            &mut app,
+            KeyEvent {
+                code: KeyCode::Esc,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            },
+        )
+        .unwrap();
+        assert_eq!(app.screen, Screen::Recall);
+
+        handle_key(
+            &mut app,
+            KeyEvent {
+                code: KeyCode::Esc,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            },
+        )
+        .unwrap();
+        assert_eq!(app.screen, Screen::Dashboard);
+
+        assert!(handle_key(
+            &mut app,
+            KeyEvent {
+                code: KeyCode::Esc,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            },
+        )
+        .unwrap());
+        assert_eq!(app.screen, Screen::Dashboard);
     }
 }
