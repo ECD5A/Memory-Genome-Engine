@@ -63,8 +63,13 @@ dev_tool_bins=(
 
 if [[ "$no_build" != "1" ]]; then
   require_command cargo
-  echo "Building release binaries..."
-  cargo build -p mge-cli --bins --release
+  if [[ "$include_dev_tools" == "1" ]]; then
+    echo "Building product and development tool release binaries..."
+    cargo build -p mge-cli --bins --release
+  else
+    echo "Building product release binaries..."
+    cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
+  fi
 fi
 
 target_root="${CARGO_TARGET_DIR:-$repo_root/target}"

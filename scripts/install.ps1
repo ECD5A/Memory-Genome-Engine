@@ -19,8 +19,13 @@ $DevToolBins = @(
 )
 
 if (-not $NoBuild) {
-    Write-Host "Building release binaries..."
-    cargo build -p mge-cli --bins --release
+    if ($IncludeDevTools) {
+        Write-Host "Building product and development tool release binaries..."
+        cargo build -p mge-cli --bins --release
+    } else {
+        Write-Host "Building product release binaries..."
+        cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
+    }
 }
 
 $TargetRoot = if ($env:CARGO_TARGET_DIR) {

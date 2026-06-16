@@ -12,8 +12,13 @@ $DevToolBins = @(
     "mge-corpus-bench"
 )
 
-Write-Host "Building release binaries..."
-cargo build -p mge-cli --bins --release
+if ($env:MGE_INCLUDE_DEV_TOOLS -eq "1") {
+    Write-Host "Building product and development tool release binaries..."
+    cargo build -p mge-cli --bins --release
+} else {
+    Write-Host "Building product release binaries..."
+    cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
+}
 
 $TargetRoot = if ($env:CARGO_TARGET_DIR) {
     if ([System.IO.Path]::IsPathRooted($env:CARGO_TARGET_DIR)) {
@@ -43,9 +48,6 @@ function Find-Binary {
 
 $Mge = Find-Binary "mge"
 foreach ($Name in $ProductBins) {
-    [void](Find-Binary $Name)
-}
-foreach ($Name in $DevToolBins) {
     [void](Find-Binary $Name)
 }
 

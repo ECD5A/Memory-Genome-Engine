@@ -17,8 +17,13 @@ require_command grep
 require_command mktemp
 require_command tee
 
-echo "Building release binaries for smoke..."
-cargo build -p mge-cli --bins --release
+if [[ "${MGE_CHECK_DEV_TOOLS:-0}" == "1" ]]; then
+  echo "Building product and development tool release binaries for smoke..."
+  cargo build -p mge-cli --bins --release
+else
+  echo "Building product release binaries for smoke..."
+  cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
+fi
 
 target_root="${CARGO_TARGET_DIR:-$repo_root/target}"
 bin_dir="$target_root/release"
@@ -37,9 +42,11 @@ find_bin() {
 
 mge_bin="$(find_bin mge)"
 mcp_bin="$(find_bin mge-mcp-server)"
-find_bin mge-synthetic-bench >/dev/null
-find_bin mge-corpus-bench >/dev/null
-echo "Development benchmark tools are build-checked but not installed by default."
+if [[ "${MGE_CHECK_DEV_TOOLS:-0}" == "1" ]]; then
+  find_bin mge-synthetic-bench >/dev/null
+  find_bin mge-corpus-bench >/dev/null
+  echo "Development benchmark tools are build-checked by explicit opt-in."
+fi
 
 "$mge_bin" --version >/dev/null
 "$mge_bin" tui --help >/dev/null

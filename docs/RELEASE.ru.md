@@ -7,7 +7,7 @@
 ## Build
 
 ```bash
-cargo build --release -p mge-cli --bins
+cargo build --release -p mge-cli --bin mge --bin mge-mcp-server
 ```
 
 Product release binaries:
@@ -17,7 +17,7 @@ target/release/mge
 target/release/mge-mcp-server
 ```
 
-На Windows файлы имеют `.exe` suffix. Development-only benchmark binaries всё ещё собираются из workspace, но не входят в default product install или release layout.
+На Windows файлы имеют `.exe` suffix. Development-only benchmark binaries остаются buildable из workspace, но не входят в default product build, install, smoke или release layout.
 
 Repo-local build helpers:
 
@@ -26,7 +26,7 @@ Repo-local build helpers:
 powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 ```
 
-Scripts собирают все local release binaries, проверяют product executables и development benchmark tools, затем готовят product release layout:
+Scripts собирают product release binaries, проверяют product executables и готовят product release layout:
 
 ```text
 target/mge-release/<platform>/
@@ -36,7 +36,7 @@ target/mge-release/<platform>/
 
 Они учитывают `CARGO_TARGET_DIR`, если он задан. Они не публикуют packages, не создают tracked `dist/` и не коммитят artifacts.
 
-Development benchmark tools можно скопировать в отдельную папку `dev-tools/` только явно:
+Development benchmark tools можно собрать и скопировать в отдельную папку `dev-tools/` только явно:
 
 ```bash
 MGE_INCLUDE_DEV_TOOLS=1 ./scripts/build-release.sh
@@ -62,7 +62,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -InstallDir "$env:USERPROFILE\.local\bin"
 ```
 
-Install scripts собирают release binaries, если не передан `--no-build` / `-NoBuild`, затем копируют только product binaries:
+Install scripts собирают product release binaries, если не передан `--no-build` / `-NoBuild`, затем копируют только product binaries:
 
 - `mge`
 - `mge-mcp-server`
@@ -111,12 +111,11 @@ Repo-local smoke helpers:
 powershell -ExecutionPolicy Bypass -File scripts/smoke-release.ps1
 ```
 
-Smoke scripts сначала выполняют `cargo build -p mge-cli --bins --release`, затем запускают release binaries из `target/release` или `$CARGO_TARGET_DIR/release`.
+Smoke scripts собирают product binaries, затем запускают release binaries из `target/release` или `$CARGO_TARGET_DIR/release`.
 
 Они проверяют:
 
 - product release binaries существуют;
-- development benchmark tools всё ещё собираются и discoverable;
 - `mge --version`;
 - `mge tui --help`;
 - `mge setup --help`;
@@ -128,6 +127,17 @@ Smoke scripts сначала выполняют `cargo build -p mge-cli --bins -
 - Rust agent host example, если доступен `rustc`.
 
 Optional Python/Node/rustc checks пропускаются с сообщением, если toolchain недоступен. Scripts пишут stores только во временную папку и удаляют её, если `KEEP_MGE_SMOKE=1` не задан.
+
+Development benchmark tools проверяются release smoke только при явном opt-in:
+
+```bash
+MGE_CHECK_DEV_TOOLS=1 ./scripts/smoke-release.sh
+```
+
+```powershell
+$env:MGE_CHECK_DEV_TOOLS = "1"
+powershell -ExecutionPolicy Bypass -File scripts/smoke-release.ps1
+```
 
 ## Encrypted Smoke
 
@@ -183,70 +193,7 @@ cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile small --sto
 
 Benchmark JSON - только report/debug output, не runtime storage.
 
-## Benchmark Workflows
-
-`mge-synthetic-bench` нужен для повторяемой проверки exact-vs-BinaryFuse на generated memory cells:
-
-```bash
-cargo run -p mge-cli --bin mge-synthetic-bench -- \
-  --cells 1200 \
-  --pages 120 \
-  --scopes 16 \
-  --markers-per-cell 5 \
-  --marker-groups 12 \
-  --targeted-queries 6 \
-  --noise-queries 3 \
-  --repeats 5 \
-  --seed 1
-```
-
-`mge-corpus-bench` нужен для local real-workload measurement:
-
-```bash
-cargo run -p mge-cli --bin mge-corpus-bench -- \
-  --corpus <LOCAL_CORPUS_DIR> \
-  --store-root <SAFE_TEMP_STORE_ROOT> \
-  --profile medium \
-  --max-files 300 \
-  --max-bytes 52428800 \
-  --chunk-lines 40 \
-  --repeats 3 \
-  --seed 1
-```
-
-Generated corpus profiles:
-
-```bash
-cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile small --store-root ../mge-bench-small --seed 1
-cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile medium --store-root ../mge-bench-medium --seed 1
-cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile code-heavy --store-root ../mge-bench-code --seed 1
-cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile docs-heavy --store-root ../mge-bench-docs --seed 1
-cargo run -p mge-cli --bin mge-corpus-bench -- --generated --profile mixed --store-root ../mge-bench-mixed --seed 1
-```
-
-Safety rules для corpus benchmark:
-
-- читать только local text/code files;
-- пропускать unsupported binary extensions;
-- пропускать symlinks;
-- не исполнять corpus files;
-- не устанавливать dependencies;
-- не менять corpus files;
-- писать generated stores только в `--store-root`.
-
-Как читать report:
-
-- `hot`: recall до seal из L1 Hot RAM.
-- `sealed cold`: открывает store для каждого query; включает open/recovery, page read/decode, filtering, ranking и `ContextPacket` build.
-- `sealed repeated`: использует один engine instance; показывает decoded page cache и runtime scoring cache locality.
-- `locality benefit`: насколько repeated sealed recall быстрее cold sealed recall.
-- `page decode share`: доля repeated focused recall, уходящая на decode loaded sealed pages.
-- `scoring/filtering share`: inclusive bottleneck signal для cell filtering и scoring.
-- `ContextPacket share`: стоимость построения returned memory items и debug details.
-
-`ExactMarkerPageIndex` - default baseline. `BinaryFusePageIndex` - optional probabilistic backend: extra candidate pages допустимы, но exact candidates не должны теряться при корректно построенных filters.
-
-Не начинать custom page codec только потому, что в stack есть MessagePack. Custom codec оправдан только если большой real corpus показывает, что page decode стабильно доминирует в repeated sealed recall, а более простые cache/policy changes проблему не решают.
+Для более глубоких development-only options используйте `--help` у benchmark binary. Corpus benchmark должен читать только local text/code files, пропускать binary files и unsafe symlinks, не исполнять corpus files, не устанавливать dependencies, не менять corpus files и писать generated stores только в явно заданный safe `--store-root`.
 
 ## Release Checklist
 
@@ -254,7 +201,7 @@ Safety rules для corpus benchmark:
 - `cargo fmt --check` passes.
 - `cargo test` passes.
 - `cargo check -p mge-cli --bins` passes.
-- `cargo build -p mge-cli --bins --release` passes.
+- `cargo build -p mge-cli --bin mge --bin mge-mcp-server --release` passes.
 - `scripts/build-release.sh` или `scripts/build-release.ps1` passes.
 - `scripts/smoke-release.sh` или `scripts/smoke-release.ps1` passes.
 - `scripts/install.sh` или `scripts/install.ps1` устанавливает binaries в user-writable directory.

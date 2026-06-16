@@ -3,8 +3,13 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
-Write-Host "Building release binaries for smoke..."
-cargo build -p mge-cli --bins --release
+if ($env:MGE_CHECK_DEV_TOOLS -eq "1") {
+    Write-Host "Building product and development tool release binaries for smoke..."
+    cargo build -p mge-cli --bins --release
+} else {
+    Write-Host "Building product release binaries for smoke..."
+    cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
+}
 
 $TargetRoot = if ($env:CARGO_TARGET_DIR) {
     if ([System.IO.Path]::IsPathRooted($env:CARGO_TARGET_DIR)) {
@@ -50,9 +55,11 @@ function Test-CommandAvailable {
 
 $Mge = Find-Binary "mge"
 $Mcp = Find-Binary "mge-mcp-server"
-[void](Find-Binary "mge-synthetic-bench")
-[void](Find-Binary "mge-corpus-bench")
-Write-Host "Development benchmark tools are build-checked but not installed by default."
+if ($env:MGE_CHECK_DEV_TOOLS -eq "1") {
+    [void](Find-Binary "mge-synthetic-bench")
+    [void](Find-Binary "mge-corpus-bench")
+    Write-Host "Development benchmark tools are build-checked by explicit opt-in."
+}
 
 Invoke-Required $Mge --version
 Invoke-Required $Mge tui --help

@@ -24,8 +24,13 @@ dev_tool_bins=(
 require_command cargo
 require_command uname
 
-echo "Building release binaries..."
-cargo build -p mge-cli --bins --release
+if [[ "${MGE_INCLUDE_DEV_TOOLS:-0}" == "1" ]]; then
+  echo "Building product and development tool release binaries..."
+  cargo build -p mge-cli --bins --release
+else
+  echo "Building product release binaries..."
+  cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
+fi
 
 target_root="${CARGO_TARGET_DIR:-$repo_root/target}"
 bin_dir="$target_root/release"
@@ -44,9 +49,6 @@ find_bin() {
 
 mge_bin="$(find_bin mge)"
 for name in "${product_bins[@]}"; do
-  find_bin "$name" >/dev/null
-done
-for name in "${dev_tool_bins[@]}"; do
   find_bin "$name" >/dev/null
 done
 
