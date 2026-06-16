@@ -24,6 +24,8 @@ impl Language {
 pub enum TKey {
     Subtitle,
     Dashboard,
+    Menu,
+    Store,
     RecallMemory,
     AddMemoryCell,
     SealHotMemory,
@@ -126,6 +128,8 @@ pub enum TKey {
 pub const ALL_KEYS: &[TKey] = &[
     TKey::Subtitle,
     TKey::Dashboard,
+    TKey::Menu,
+    TKey::Store,
     TKey::RecallMemory,
     TKey::AddMemoryCell,
     TKey::SealHotMemory,
@@ -229,6 +233,8 @@ pub fn tr(language: Language, key: TKey) -> &'static str {
         Language::En => match key {
             TKey::Subtitle => "Local-first memory engine for AI agents by ECD5A",
             TKey::Dashboard => "Dashboard",
+            TKey::Menu => "Menu",
+            TKey::Store => "Store",
             TKey::RecallMemory => "Recall memory",
             TKey::AddMemoryCell => "Add memory cell",
             TKey::SealHotMemory => "Seal hot memory",
@@ -347,6 +353,8 @@ pub fn tr(language: Language, key: TKey) -> &'static str {
         Language::Ru => match key {
             TKey::Subtitle => "Local-first memory engine for AI agents by ECD5A",
             TKey::Dashboard => "Панель",
+            TKey::Menu => "Меню",
+            TKey::Store => "Хранилище",
             TKey::RecallMemory => "Вспомнить память",
             TKey::AddMemoryCell => "Добавить запись",
             TKey::SealHotMemory => "Запечатать hot memory",

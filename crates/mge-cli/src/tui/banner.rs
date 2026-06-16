@@ -1,8 +1,7 @@
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::tui::i18n::{tr, Language, TKey};
-use crate::tui::theme;
 
 const BANNER_LEFT_PAD: &str = "    ";
 pub const BANNER_RENDER_HEIGHT: u16 = 9;
@@ -27,15 +26,39 @@ pub fn banner_lines(language: Language) -> Vec<Line<'static>> {
         .map(|line| Line::from(rainbow_banner_spans(line, banner_width)))
         .collect::<Vec<_>>();
     lines.push(Line::from(""));
-    let subtitle = tr(language, TKey::Subtitle);
-    let subtitle_offset =
-        BANNER_LEFT_PAD.chars().count() + banner_width.saturating_sub(subtitle.chars().count()) / 2;
-    lines.push(Line::from(Span::styled(
-        format!("{}{}", " ".repeat(subtitle_offset), subtitle),
-        theme::title(),
-    )));
+    lines.push(Line::from(subtitle_spans(language, banner_width)));
     lines.push(Line::from(""));
     lines
+}
+
+fn subtitle_spans(language: Language, banner_width: usize) -> Vec<Span<'static>> {
+    let raw = tr(language, TKey::Subtitle);
+    let main = raw
+        .strip_suffix(" by ECD5A")
+        .unwrap_or(raw)
+        .to_ascii_uppercase();
+    let separator = "  ::  ";
+    let brand = "BY ECD5A";
+    let subtitle_width = main.chars().count() + separator.chars().count() + brand.chars().count();
+    let subtitle_offset =
+        BANNER_LEFT_PAD.chars().count() + banner_width.saturating_sub(subtitle_width) / 2;
+
+    vec![
+        Span::raw(" ".repeat(subtitle_offset)),
+        Span::styled(
+            main,
+            Style::default()
+                .fg(Color::Rgb(112, 241, 255))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(separator, Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            brand,
+            Style::default()
+                .fg(Color::Rgb(255, 216, 92))
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]
 }
 
 fn rainbow_banner_spans(line: &str, banner_width: usize) -> Vec<Span<'static>> {
@@ -98,8 +121,21 @@ mod tests {
         assert!(lines
             .iter()
             .flat_map(|line| line.spans.iter())
-            .any(|span| span.content.contains("by ECD5A")));
+            .any(|span| span.content.contains("BY ECD5A")));
         assert_eq!(lines.len(), BANNER_RENDER_HEIGHT as usize);
+    }
+
+    #[test]
+    fn subtitle_uses_product_tagline_styling() {
+        let spans = subtitle_spans(Language::En, 142);
+        assert!(spans
+            .iter()
+            .any(|span| span.content.contains("LOCAL-FIRST MEMORY ENGINE")));
+        let brand = spans
+            .iter()
+            .find(|span| span.content.contains("ECD5A"))
+            .unwrap();
+        assert!(matches!(brand.style.fg, Some(Color::Rgb(255, 216, 92))));
     }
 
     #[test]

@@ -97,7 +97,7 @@ fn render_summary(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     }
 
     frame.render_widget(
-        screens::paragraph(lines, tr(app.language, TKey::Dashboard)),
+        screens::paragraph(lines, tr(app.language, TKey::Store)),
         area,
     );
 }
@@ -132,6 +132,6 @@ fn render_menu(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
         })
         .collect::<Vec<_>>();
 
-    let menu = List::new(items).block(screens::block(tr(app.language, TKey::Dashboard)));
+    let menu = List::new(items).block(screens::block(tr(app.language, TKey::Menu)));
     frame.render_widget(menu, area);
 }

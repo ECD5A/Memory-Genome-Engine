@@ -75,7 +75,7 @@ fn render_result(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
         vec![Line::from(tr(app.language, TKey::NoData))]
     };
     frame.render_widget(
-        screens::paragraph(lines, tr(app.language, TKey::SealResult)),
+        screens::section(lines, tr(app.language, TKey::SealResult)),
         area,
     );
 }

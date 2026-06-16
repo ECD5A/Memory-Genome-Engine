@@ -109,3 +109,12 @@ pub fn paragraph(lines: Vec<Line<'static>>, title: impl Into<String>) -> Paragra
         .block(block(title))
         .wrap(Wrap { trim: false })
 }
+
+pub fn section(lines: Vec<Line<'static>>, title: impl Into<String>) -> Paragraph<'static> {
+    let mut body = vec![Line::from(Span::styled(title.into(), theme::title()))];
+    if !lines.is_empty() {
+        body.push(Line::from(""));
+        body.extend(lines);
+    }
+    Paragraph::new(body).wrap(Wrap { trim: false })
+}

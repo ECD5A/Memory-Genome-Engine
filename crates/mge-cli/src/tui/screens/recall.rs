@@ -100,7 +100,7 @@ fn render_results(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
         )));
     }
     frame.render_widget(
-        screens::paragraph(lines, tr(app.language, TKey::Results)),
+        screens::section(lines, tr(app.language, TKey::Results)),
         area,
     );
 }
@@ -108,7 +108,7 @@ fn render_results(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
 fn render_diagnostics(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     let Some(packet) = &app.recall_result else {
         frame.render_widget(
-            screens::paragraph(
+            screens::section(
                 vec![Line::from(tr(app.language, TKey::NoData))],
                 tr(app.language, TKey::Diagnostics),
             ),
@@ -140,7 +140,7 @@ fn render_diagnostics(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
         ),
     ];
     frame.render_widget(
-        screens::paragraph(lines, tr(app.language, TKey::Diagnostics)),
+        screens::section(lines, tr(app.language, TKey::Diagnostics)),
         area,
     );
 }

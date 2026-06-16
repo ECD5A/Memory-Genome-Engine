@@ -73,7 +73,7 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     }
 
     frame.render_widget(
-        screens::paragraph(lines, tr(app.language, TKey::BenchmarkResult)),
+        screens::section(lines, tr(app.language, TKey::BenchmarkResult)),
         layout[1],
     );
 }

@@ -81,8 +81,5 @@ fn render_guidance(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
             theme::warning(),
         )),
     ];
-    frame.render_widget(
-        screens::paragraph(lines, tr(app.language, TKey::Help)),
-        area,
-    );
+    frame.render_widget(screens::section(lines, tr(app.language, TKey::Help)), area);
 }

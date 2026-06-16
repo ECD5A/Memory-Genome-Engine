@@ -114,7 +114,7 @@ fn render_report(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     }
 
     frame.render_widget(
-        screens::paragraph(lines, tr(app.language, TKey::Diagnostics)),
+        screens::section(lines, tr(app.language, TKey::Diagnostics)),
         area,
     );
 }
