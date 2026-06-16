@@ -89,6 +89,13 @@ node examples/typescript_agent_host.ts
 - [Contributing](CONTRIBUTING.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)
 
+## Donate
+
+Если Memory Genome Engine полезен для вашей работы, проект можно поддержать здесь:
+
+- Bitcoin (BTC): `1ECDSA1b4d5TcZHtqNpcxmY8pBH1GgHntN`
+- USDT (TRC20): `TUF4vPdB6QkjCvZq18rBL4Qj4dK5ihCN75`
+
 ## Лицензия
 
 Apache License, Version 2.0. Copyright (c) 2026 ECD5A.
