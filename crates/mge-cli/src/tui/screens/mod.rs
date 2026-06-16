@@ -1,5 +1,4 @@
 pub mod add_memory;
-pub mod benchmark;
 pub mod dashboard;
 pub mod export_import;
 pub mod help;

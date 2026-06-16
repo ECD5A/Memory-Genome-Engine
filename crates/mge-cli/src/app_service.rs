@@ -2,7 +2,6 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
 use mge_core::binary::{self, FileKind};
@@ -195,10 +194,6 @@ impl AppService {
             .map_err(Into::into)
     }
 
-    pub fn run_small_index_benchmark(&self) -> Result<IndexBenchmarkReport> {
-        run_small_index_benchmark()
-    }
-
     fn open_engine(&self) -> Result<MemoryEngine> {
         let passphrase = passphrase_from_env(self.passphrase_env.as_deref())?;
         MemoryEngine::open_at_with_passphrase(&self.store, passphrase.as_deref())
@@ -315,22 +310,6 @@ impl Default for RememberInput {
             sensitivity: "private".to_string(),
         }
     }
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct IndexBenchmarkReport {
-    pub exact_recall_micros: u64,
-    pub binary_fuse_recall_micros: u64,
-    pub exact_candidate_pages: usize,
-    pub binary_fuse_candidate_pages: usize,
-    pub exact_loaded_pages: usize,
-    pub binary_fuse_loaded_pages: usize,
-    pub exact_cells_scanned: usize,
-    pub binary_fuse_cells_scanned: usize,
-    pub exact_result_count: usize,
-    pub binary_fuse_result_count: usize,
-    pub false_positive_pages: usize,
-    pub exact_subset_binary_fuse: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -625,89 +604,6 @@ pub fn passphrase_from_env(passphrase_env: Option<&str>) -> Result<Option<String
         bail!("passphrase env var {name} is empty");
     }
     Ok(Some(value))
-}
-
-fn run_small_index_benchmark() -> Result<IndexBenchmarkReport> {
-    let run_id = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or(0);
-    let root = env::temp_dir().join(format!("mge-tui-index-bench-{run_id}"));
-    let exact_root = root.join("exact");
-    let binary_root = root.join("binary_fuse");
-    let exact = run_index_benchmark_mode(&exact_root, IndexKind::ExactMarkerPage)?;
-    let binary = run_index_benchmark_mode(&binary_root, IndexKind::BinaryFusePage)?;
-    let _ = fs::remove_dir_all(&root);
-    Ok(IndexBenchmarkReport {
-        exact_recall_micros: exact.recall_micros,
-        binary_fuse_recall_micros: binary.recall_micros,
-        exact_candidate_pages: exact.candidate_pages,
-        binary_fuse_candidate_pages: binary.candidate_pages,
-        exact_loaded_pages: exact.loaded_pages,
-        binary_fuse_loaded_pages: binary.loaded_pages,
-        exact_cells_scanned: exact.cells_scanned,
-        binary_fuse_cells_scanned: binary.cells_scanned,
-        exact_result_count: exact.result_count,
-        binary_fuse_result_count: binary.result_count,
-        false_positive_pages: binary.false_positive_pages,
-        exact_subset_binary_fuse: exact.candidate_pages <= binary.candidate_pages,
-    })
-}
-
-#[derive(Clone, Debug)]
-struct BenchModeResult {
-    recall_micros: u64,
-    candidate_pages: usize,
-    loaded_pages: usize,
-    cells_scanned: usize,
-    result_count: usize,
-    false_positive_pages: usize,
-}
-
-fn run_index_benchmark_mode(root: &Path, index_kind: IndexKind) -> Result<BenchModeResult> {
-    let mut engine = MemoryEngine::init_with_options(
-        root,
-        InitOptions {
-            page_codec: PageCodecKind::MessagePack,
-            compression: CompressionKind::Zstd,
-            index_kind,
-            page_clusterer: PageClustererKind::ScopeKind,
-            durability: Default::default(),
-            security_mode: SecurityMode::Unencrypted,
-        },
-    )?;
-    for page in 0..12 {
-        for cell in 0..8 {
-            let group = page % 4;
-            let mut request = RememberRequest::new(
-                MemoryKind::ProjectFact,
-                MemoryValue::Text(format!(
-                    "benchmark group {group} page {page} cell {cell} candidate memory"
-                )),
-            );
-            request.scope = format!("bench_scope_{group}");
-            request.trust = TrustLevel::ToolObserved;
-            request.sensitivity = SensitivityLevel::Private;
-            request.markers = vec![format!("bench_group:{group}"), format!("bench_page:{page}")];
-            engine.remember(request)?;
-        }
-    }
-    engine.seal()?;
-    let mut recall = RecallRequest::new("benchmark group 1 candidate memory");
-    recall.mode = RecallMode::Focused;
-    recall.max_items = 8;
-    recall.markers = vec!["bench_group:1".to_string()];
-    let start = Instant::now();
-    let packet = engine.recall(recall)?;
-    let recall_micros = start.elapsed().as_micros().min(u128::from(u64::MAX)) as u64;
-    Ok(BenchModeResult {
-        recall_micros,
-        candidate_pages: packet.debug.candidate_pages_returned,
-        loaded_pages: packet.debug.loaded_pages,
-        cells_scanned: packet.debug.cells_scanned,
-        result_count: packet.relevant_memory.len(),
-        false_positive_pages: packet.debug.false_positive_candidate_pages,
-    })
 }
 
 fn doctor_file_statuses(root: &Path) -> Vec<DoctorFileStatus> {

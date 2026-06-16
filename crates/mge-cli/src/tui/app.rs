@@ -14,9 +14,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 
-use crate::app_service::{
-    AppService, DashboardSummary, DoctorReport, IndexBenchmarkReport, RecallInput, RememberInput,
-};
+use crate::app_service::{AppService, DashboardSummary, DoctorReport, RecallInput, RememberInput};
 use crate::tui::banner;
 use crate::tui::i18n::{tr, Language, TKey};
 use crate::tui::input;
@@ -38,7 +36,6 @@ pub enum Screen {
     AddMemory,
     Seal,
     Status,
-    Benchmark,
     ExportImport,
     Settings,
     Help,
@@ -90,7 +87,6 @@ pub struct TuiApp {
     pub remember_input: RememberInput,
     pub seal_confirm: bool,
     pub seal_result: Option<SealReport>,
-    pub benchmark_report: Option<IndexBenchmarkReport>,
     pub export_path: Option<PathBuf>,
     pub settings: TuiSettings,
     pub status_message: Option<StatusMessage>,
@@ -124,7 +120,6 @@ impl TuiApp {
             remember_input: RememberInput::default(),
             seal_confirm: false,
             seal_result: None,
-            benchmark_report: None,
             export_path: None,
             settings,
             status_message: None,
@@ -256,7 +251,6 @@ fn draw_screen_content(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
         Screen::AddMemory => screens::add_memory::render(frame, app, area),
         Screen::Seal => screens::seal::render(frame, app, area),
         Screen::Status => screens::status::render(frame, app, area),
-        Screen::Benchmark => screens::benchmark::render(frame, app, area),
         Screen::ExportImport => screens::export_import::render(frame, app, area),
         Screen::Settings => screens::settings::render(frame, app, area),
         Screen::Help => screens::help::render(frame, app, area),
@@ -299,7 +293,6 @@ fn handle_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
         Screen::AddMemory => handle_add_memory_key(app, key),
         Screen::Seal => handle_seal_key(app, key),
         Screen::Status => handle_status_key(app, key),
-        Screen::Benchmark => handle_benchmark_key(app, key),
         Screen::ExportImport => handle_export_key(app, key),
         Screen::Settings => handle_settings_key(app, key),
         Screen::Help => handle_help_key(app, key),
@@ -344,7 +337,7 @@ fn run_setup(app: &mut TuiApp, encrypted: bool) {
 }
 
 fn handle_dashboard_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
-    const MENU_LEN: usize = 9;
+    const MENU_LEN: usize = 8;
     match key.code {
         KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(false),
         KeyCode::Up => input::move_up(&mut app.dashboard_selected, MENU_LEN),
@@ -354,11 +347,10 @@ fn handle_dashboard_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
             1 => app.open_screen(Screen::AddMemory),
             2 => app.open_screen(Screen::Seal),
             3 => app.open_screen(Screen::Status),
-            4 => app.open_screen(Screen::Benchmark),
-            5 => app.open_screen(Screen::ExportImport),
-            6 => app.open_screen(Screen::Settings),
-            7 => app.open_screen(Screen::Help),
-            8 => return Ok(false),
+            4 => app.open_screen(Screen::ExportImport),
+            5 => app.open_screen(Screen::Settings),
+            6 => app.open_screen(Screen::Help),
+            7 => return Ok(false),
             _ => {}
         },
         _ => {}
@@ -574,20 +566,6 @@ fn run_rebuild_indexes(app: &mut TuiApp) {
         ),
         Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
     }
-}
-
-fn handle_benchmark_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
-    match key.code {
-        KeyCode::Enter | KeyCode::Char(' ') => match app.service.run_small_index_benchmark() {
-            Ok(report) => {
-                app.benchmark_report = Some(report);
-                app.set_status(BadgeKind::Ok, tr(app.language, TKey::BenchmarkResult));
-            }
-            Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
-        },
-        _ => {}
-    }
-    Ok(true)
 }
 
 fn handle_export_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {

@@ -30,10 +30,9 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
             tr(app.language, TKey::AddMemoryCell),
         )),
         Line::from(format!(
-            "- {} / {} / {} / {}",
+            "- {} / {} / {}",
             tr(app.language, TKey::SealHotMemory),
             tr(app.language, TKey::StoreStatus),
-            tr(app.language, TKey::BenchmarkIndexes),
             tr(app.language, TKey::ExportImportMarkdown)
         )),
     ];

@@ -108,7 +108,6 @@ fn render_menu(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
         TKey::AddMemoryCell,
         TKey::SealHotMemory,
         TKey::StoreStatus,
-        TKey::BenchmarkIndexes,
         TKey::ExportImportMarkdown,
         TKey::Settings,
         TKey::Help,
