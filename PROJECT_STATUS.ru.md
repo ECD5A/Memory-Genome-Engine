@@ -136,6 +136,7 @@ Product UI / Packaging в работе.
 - Repo-local release smoke scripts:
   - `scripts/smoke-release.sh`
   - `scripts/smoke-release.ps1`
+- Release scripts выполняют `cargo build -p mge-cli --bins --release`, проверяют release binaries и запускают CLI/encrypted/MCP/SDK smoke checks без публикации packages и без коммита artifacts.
 - Local encrypted demo workflow scripts:
   - `scripts/demo-local-memory.sh`
   - `scripts/demo-local-memory.ps1`
@@ -161,20 +162,23 @@ Product UI / Packaging в работе.
 
 ## Последняя Verification Baseline
 
-Последняя Mandate 4 TUI/package проверка:
+Последняя Mandate 4 TUI/package/release проверка:
 
 - `cargo fmt --check`: passed.
-- `cargo test`: passed, 147 tests.
-- `cargo build -p mge-cli --bins`: passed.
-- CLI quickstart smoke: passed на временном store.
-- TUI help smoke: `cargo run -p mge-cli -- tui --help` passed.
-- Setup help smoke: `cargo run -p mge-cli -- setup --help` passed.
-
-Предыдущая packaging/dev UX baseline из release-script pass остаётся актуальной:
-
+- `cargo test`: passed, 157 tests.
+- `cargo check -p mge-cli --bins`: passed.
 - `cargo build -p mge-cli --bins --release`: passed.
+- Release binary TUI help smoke: `mge tui --help` passed.
+- Release binary setup help smoke: `mge setup --help` passed.
+- CLI quickstart smoke: passed во временном store через release script.
+- Encrypted smoke: passed через `MGE_RELEASE_SMOKE_PASSPHRASE`.
+- MCP JSON-RPC smoke: passed для `mge_schema` и `mge_stats`.
+- Python SDK smoke: passed при запуске из `scripts/smoke-release.ps1`.
+- TypeScript SDK smoke: passed при запуске из `scripts/smoke-release.ps1`.
+- Rust agent host example smoke: passed при запуске из `scripts/smoke-release.ps1`.
 - `scripts/build-release.ps1`: passed.
 - `scripts/smoke-release.ps1`: passed.
+- POSIX `.sh` release scripts обновлены для Linux/macOS; на этом Windows host они не запускались, потому что WSL не имеет установленного distribution.
 - `scripts/demo-local-memory.ps1`: passed.
 
 Mandate 4 добавляет terminal UI, packaging/dev UX и read-only diagnostics. Storage/codec/filter/recall/security formats не менялись.

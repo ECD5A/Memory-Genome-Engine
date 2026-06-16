@@ -3,10 +3,19 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
-Write-Host "Building debug binaries for smoke..."
-cargo build -p mge-cli --bins
+Write-Host "Building release binaries for smoke..."
+cargo build -p mge-cli --bins --release
 
-$BinDir = Join-Path $RepoRoot "target\debug"
+$TargetRoot = if ($env:CARGO_TARGET_DIR) {
+    if ([System.IO.Path]::IsPathRooted($env:CARGO_TARGET_DIR)) {
+        $env:CARGO_TARGET_DIR
+    } else {
+        Join-Path $RepoRoot $env:CARGO_TARGET_DIR
+    }
+} else {
+    Join-Path $RepoRoot "target"
+}
+$BinDir = Join-Path $TargetRoot "release"
 
 function Find-Binary {
     param([Parameter(Mandatory=$true)][string]$Name)
@@ -20,7 +29,7 @@ function Find-Binary {
             return $Candidate
         }
     }
-    throw "missing debug binary: $Name"
+    throw "missing release binary: $Name"
 }
 
 function Invoke-Required {
@@ -41,6 +50,12 @@ function Test-CommandAvailable {
 
 $Mge = Find-Binary "mge"
 $Mcp = Find-Binary "mge-mcp-server"
+[void](Find-Binary "mge-synthetic-bench")
+[void](Find-Binary "mge-corpus-bench")
+
+Invoke-Required $Mge --version
+Invoke-Required $Mge tui --help
+Invoke-Required $Mge setup --help
 
 $TmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("mge-release-smoke-" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $TmpRoot | Out-Null
@@ -71,17 +86,24 @@ try {
     Invoke-Required $Mge --store $EncryptedStore validate --deep --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE
 
     Write-Host "MCP smoke..."
-    $Request = @{
+    $SchemaRequest = @{
         jsonrpc = "2.0"
         id = 1
+        method = "mge_schema"
+        params = @{}
+    } | ConvertTo-Json -Compress
+    $StatsRequest = @{
+        jsonrpc = "2.0"
+        id = 2
         method = "mge_stats"
         params = @{
             store_path = $PlainStore
         }
     } | ConvertTo-Json -Compress
-    $Response = $Request | & $Mcp
-    if ($LASTEXITCODE -ne 0 -or ($Response -notmatch '"protocol_version":"mge-jsonrpc-1"')) {
-        throw "MCP smoke failed: $Response"
+    $Response = @($SchemaRequest, $StatsRequest) | & $Mcp
+    $ResponseText = $Response -join "`n"
+    if ($LASTEXITCODE -ne 0 -or ($ResponseText -notmatch '"protocol_version":"mge-jsonrpc-1"') -or ($ResponseText -notmatch '"tool":"mge_stats"')) {
+        throw "MCP smoke failed: $ResponseText"
     }
 
     if (Test-CommandAvailable "python") {

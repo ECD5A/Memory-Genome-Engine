@@ -6,7 +6,16 @@ Set-Location $RepoRoot
 Write-Host "Building release binaries..."
 cargo build -p mge-cli --bins --release
 
-$BinDir = Join-Path $RepoRoot "target\release"
+$TargetRoot = if ($env:CARGO_TARGET_DIR) {
+    if ([System.IO.Path]::IsPathRooted($env:CARGO_TARGET_DIR)) {
+        $env:CARGO_TARGET_DIR
+    } else {
+        Join-Path $RepoRoot $env:CARGO_TARGET_DIR
+    }
+} else {
+    Join-Path $RepoRoot "target"
+}
+$BinDir = Join-Path $TargetRoot "release"
 
 function Find-Binary {
     param([Parameter(Mandatory=$true)][string]$Name)

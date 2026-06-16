@@ -28,7 +28,7 @@ Repo-local build helpers:
 powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 ```
 
-Scripts собирают local binaries и проверяют наличие expected executables. Они не публикуют packages и не коммитят artifacts.
+Scripts собирают local release binaries и проверяют наличие expected executables. Они учитывают `CARGO_TARGET_DIR`, если он задан. Они не публикуют packages, не создают `dist/` и не коммитят artifacts.
 
 ## Test
 
@@ -65,7 +65,22 @@ Repo-local smoke helpers:
 powershell -ExecutionPolicy Bypass -File scripts/smoke-release.ps1
 ```
 
-Smoke scripts запускают local CLI, encrypted store, MCP, SDK и Rust example checks там, где доступен нужный local toolchain. Optional Python/Node/rustc checks пропускаются с сообщением, если toolchain недоступен.
+Smoke scripts сначала выполняют `cargo build -p mge-cli --bins --release`, затем запускают release binaries из `target/release` или `$CARGO_TARGET_DIR/release`.
+
+Они проверяют:
+
+- expected release binaries существуют;
+- `mge --version`;
+- `mge tui --help`;
+- `mge setup --help`;
+- unencrypted CLI workflow во временном store;
+- encrypted workflow через `MGE_RELEASE_SMOKE_PASSPHRASE`;
+- MCP JSON-RPC schema и `mge_stats`;
+- Python SDK example, если доступен `python`;
+- TypeScript SDK example, если `node` может его выполнить;
+- Rust agent host example, если доступен `rustc`.
+
+Optional Python/Node/rustc checks пропускаются с сообщением, если toolchain недоступен. Scripts пишут stores только во временную папку и удаляют её, если `KEEP_MGE_SMOKE=1` не задан.
 
 ## Encrypted Smoke
 
@@ -187,11 +202,16 @@ Safety rules для corpus benchmark:
 - Git working tree clean.
 - `cargo fmt --check` passes.
 - `cargo test` passes.
-- CLI smoke passes.
+- `cargo check -p mge-cli --bins` passes.
+- `cargo build -p mge-cli --bins --release` passes.
+- `scripts/build-release.sh` или `scripts/build-release.ps1` passes.
+- `scripts/smoke-release.sh` или `scripts/smoke-release.ps1` passes.
+- CLI smoke passes во временном store.
 - TUI help smoke (`mge tui --help`) passes.
 - Setup help smoke (`mge setup --help`) passes.
-- Encrypted smoke passes, если менялись security docs или encrypted storage.
-- MCP/SDK smoke passes, если менялись integration docs или wrappers.
+- Encrypted smoke passes через passphrase environment variable.
+- MCP JSON-RPC smoke passes.
+- Python/TypeScript SDK smoke passes, если доступен local toolchain.
 - `mge doctor --deep` проходит для unencrypted и encrypted smoke stores.
 - README, Quickstart, Security, Integration, Release и Project Status links актуальны.
 - Secret material не закоммичен.

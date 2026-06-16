@@ -136,6 +136,7 @@ Current package:
 - Repo-local release smoke scripts:
   - `scripts/smoke-release.sh`
   - `scripts/smoke-release.ps1`
+- Release scripts build `cargo build -p mge-cli --bins --release`, verify release binaries, and run CLI/encrypted/MCP/SDK smoke checks without publishing packages or committing artifacts.
 - Local encrypted demo workflow scripts:
   - `scripts/demo-local-memory.sh`
   - `scripts/demo-local-memory.ps1`
@@ -160,20 +161,23 @@ Still intentionally not implemented:
 
 ## Latest Verification Baseline
 
-Latest Mandate 4 TUI/package verification:
+Latest Mandate 4 TUI/package/release verification:
 
 - `cargo fmt --check`: passed.
-- `cargo test`: passed, 147 tests.
-- `cargo build -p mge-cli --bins`: passed.
-- CLI quickstart smoke: passed on a temporary store.
-- TUI help smoke: `cargo run -p mge-cli -- tui --help` passed.
-- Setup help smoke: `cargo run -p mge-cli -- setup --help` passed.
-
-Previous packaging/dev UX baseline from the release-script pass remains relevant:
-
+- `cargo test`: passed, 157 tests.
+- `cargo check -p mge-cli --bins`: passed.
 - `cargo build -p mge-cli --bins --release`: passed.
+- Release binary TUI help smoke: `mge tui --help` passed.
+- Release binary setup help smoke: `mge setup --help` passed.
+- CLI quickstart smoke: passed on a temporary store through release script.
+- Encrypted smoke: passed through `MGE_RELEASE_SMOKE_PASSPHRASE`.
+- MCP JSON-RPC smoke: passed for `mge_schema` and `mge_stats`.
+- Python SDK smoke: passed when run from `scripts/smoke-release.ps1`.
+- TypeScript SDK smoke: passed when run from `scripts/smoke-release.ps1`.
+- Rust agent host example smoke: passed when run from `scripts/smoke-release.ps1`.
 - `scripts/build-release.ps1`: passed.
 - `scripts/smoke-release.ps1`: passed.
+- POSIX `.sh` release scripts are updated for Linux/macOS; they were not executed on this Windows host because WSL has no installed distribution.
 - `scripts/demo-local-memory.ps1`: passed.
 
 Mandate 4 adds terminal UI, packaging/dev UX, and read-only diagnostics. Storage/codec/filter/recall/security formats remain unchanged.

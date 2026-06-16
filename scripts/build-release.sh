@@ -7,7 +7,8 @@ cd "$repo_root"
 echo "Building release binaries..."
 cargo build -p mge-cli --bins --release
 
-bin_dir="$repo_root/target/release"
+target_root="${CARGO_TARGET_DIR:-$repo_root/target}"
+bin_dir="$target_root/release"
 
 find_bin() {
   local name="$1"

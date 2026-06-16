@@ -199,3 +199,17 @@ node examples/typescript_basic_usage.ts
 More integration details:
 
 - [Integration / MCP / SDK](docs/INTEGRATION.md)
+
+## Release Smoke
+
+For local release readiness without publishing packages or committing binaries:
+
+```bash
+./scripts/build-release.sh
+./scripts/smoke-release.sh
+# or on Windows:
+powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
+powershell -ExecutionPolicy Bypass -File scripts/smoke-release.ps1
+```
+
+Details: [Release](docs/RELEASE.md).

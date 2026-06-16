@@ -199,3 +199,17 @@ node examples/typescript_basic_usage.ts
 Подробнее:
 
 - [Интеграция / MCP / SDK](docs/INTEGRATION.ru.md)
+
+## Release Smoke
+
+Локальная release-проверка без публикации packages и без коммита binaries:
+
+```bash
+./scripts/build-release.sh
+./scripts/smoke-release.sh
+# или на Windows:
+powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
+powershell -ExecutionPolicy Bypass -File scripts/smoke-release.ps1
+```
+
+Подробности: [Release](docs/RELEASE.ru.md).

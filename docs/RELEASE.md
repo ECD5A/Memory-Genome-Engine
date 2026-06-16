@@ -28,7 +28,7 @@ Repo-local build helpers:
 powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 ```
 
-The scripts build local binaries and verify that expected executables exist. They do not publish packages or commit artifacts.
+The scripts build local release binaries and verify that expected executables exist. They honor `CARGO_TARGET_DIR` when it is set. They do not publish packages, create a `dist/` directory, or commit artifacts.
 
 ## Test
 
@@ -65,7 +65,22 @@ Repo-local smoke helpers:
 powershell -ExecutionPolicy Bypass -File scripts/smoke-release.ps1
 ```
 
-The smoke scripts run local CLI, encrypted store, MCP, SDK, and Rust example checks where the required local toolchain is available. Optional Python/Node/rustc checks are skipped with a message when unavailable.
+The smoke scripts build `cargo build -p mge-cli --bins --release`, then run release binaries from `target/release` or `$CARGO_TARGET_DIR/release`.
+
+They check:
+
+- expected release binaries exist;
+- `mge --version`;
+- `mge tui --help`;
+- `mge setup --help`;
+- unencrypted CLI workflow on a temporary store;
+- encrypted workflow through `MGE_RELEASE_SMOKE_PASSPHRASE`;
+- MCP JSON-RPC schema and `mge_stats`;
+- Python SDK example when `python` is available;
+- TypeScript SDK example when `node` can run it;
+- Rust agent host example when `rustc` is available.
+
+Optional Python/Node/rustc checks are skipped with a message when unavailable. The scripts write stores only under a temporary directory and remove it unless `KEEP_MGE_SMOKE=1` is set.
 
 ## Encrypted Smoke
 
@@ -187,11 +202,16 @@ Do not start custom page codec work just because MessagePack is present. A custo
 - Git working tree is clean.
 - `cargo fmt --check` passes.
 - `cargo test` passes.
-- CLI smoke passes.
+- `cargo check -p mge-cli --bins` passes.
+- `cargo build -p mge-cli --bins --release` passes.
+- `scripts/build-release.sh` or `scripts/build-release.ps1` passes.
+- `scripts/smoke-release.sh` or `scripts/smoke-release.ps1` passes.
+- CLI smoke passes on a temporary store.
 - TUI help smoke (`mge tui --help`) passes.
 - Setup help smoke (`mge setup --help`) passes.
-- Encrypted smoke passes if security docs or encrypted storage changed.
-- MCP/SDK smoke passes if integration docs or wrappers changed.
+- Encrypted smoke passes through a passphrase environment variable.
+- MCP JSON-RPC smoke passes.
+- Python/TypeScript SDK smoke passes when the local toolchain is available.
 - `mge doctor --deep` passes for unencrypted and encrypted smoke stores.
 - README, Quickstart, Security, Integration, Release, and Project Status links are current.
 - No secret material is committed.
