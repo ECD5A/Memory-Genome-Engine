@@ -107,6 +107,86 @@ fn cli_milestone_flow_outputs_context_stats_and_validation_json() {
 }
 
 #[test]
+fn cli_import_markdown_and_mark_memory() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    let docs = dir.path().join("docs");
+    fs::create_dir_all(&docs).unwrap();
+    let markdown = docs.join("memory.md");
+    fs::write(
+        &markdown,
+        "# Alpha memory\n\nAgent should keep alpha context.\n\n## Beta memory\n\nBeta context stays separate.\n",
+    )
+    .unwrap();
+
+    run_mge(&store, &["init"]);
+    let markdown_path = markdown.to_str().unwrap();
+    let imported = run_mge_json(
+        &store,
+        &[
+            "import",
+            "markdown",
+            markdown_path,
+            "--scope",
+            "docs",
+            "--marker",
+            "tag:imported_docs",
+            "--json",
+        ],
+    );
+    assert_eq!(imported["files_imported"], 1);
+    assert_eq!(imported["cells_imported"], 2);
+    assert_eq!(imported["runtime_storage"], "binary");
+
+    let recalled = run_mge_json(
+        &store,
+        &[
+            "recall",
+            "alpha context",
+            "--scope",
+            "docs",
+            "--marker",
+            "tag:imported_docs",
+            "--json",
+        ],
+    );
+    assert_eq!(recalled["relevant_memory"].as_array().unwrap().len(), 1);
+    assert_eq!(recalled["relevant_memory"][0]["status"], "active");
+
+    let marked = run_mge_json(&store, &["mark", "1", "--status", "rejected", "--json"]);
+    assert_eq!(marked["cell_id"], 1);
+    assert_eq!(marked["effective_status"], "rejected");
+    assert_eq!(marked["pages_rewritten"], false);
+
+    let hidden = run_mge_json(
+        &store,
+        &["recall", "alpha context", "--scope", "docs", "--json"],
+    );
+    assert_eq!(hidden["relevant_memory"].as_array().unwrap().len(), 0);
+
+    let included = run_mge_json(
+        &store,
+        &[
+            "recall",
+            "alpha context",
+            "--scope",
+            "docs",
+            "--include-deprecated",
+            "--json",
+        ],
+    );
+    assert_eq!(included["relevant_memory"].as_array().unwrap().len(), 1);
+    assert_eq!(included["relevant_memory"][0]["status"], "rejected");
+
+    run_mge(&store, &["mark", "1", "--status", "active"]);
+    let restored = run_mge_json(
+        &store,
+        &["recall", "alpha context", "--scope", "docs", "--json"],
+    );
+    assert_eq!(restored["relevant_memory"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn cli_recall_modes_support_broad_and_full_scope() {
     let dir = tempdir().unwrap();
     let store = dir.path().join(".memory-genome");

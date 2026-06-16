@@ -1383,6 +1383,85 @@ fn markdown_export_writes_human_readable_memory_file() {
 }
 
 #[test]
+fn status_override_hides_sealed_memory_without_rewriting_pages() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let cell = remember_text_cell(
+        &mut engine,
+        "maintenance",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "override maintenance memory",
+        &["tag:maintenance".to_string()],
+    );
+    engine.seal().unwrap();
+
+    let report = engine
+        .set_status_override(cell.id, MemoryStatus::Rejected)
+        .unwrap();
+    assert_eq!(report.original_status, MemoryStatus::Active);
+    assert_eq!(report.effective_status, MemoryStatus::Rejected);
+    assert!(!report.pages_rewritten);
+
+    let hidden = engine
+        .recall(RecallRequest::new("override maintenance"))
+        .unwrap();
+    assert!(hidden.relevant_memory.is_empty());
+
+    let mut included = RecallRequest::new("override maintenance");
+    included.include_deprecated = true;
+    let included = engine.recall(included).unwrap();
+    assert_eq!(included.relevant_memory.len(), 1);
+    assert_eq!(included.relevant_memory[0].status, MemoryStatus::Rejected);
+    assert!(engine.validate_deep().unwrap().ok);
+
+    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    let hidden_after_reopen = reopened
+        .recall(RecallRequest::new("override maintenance"))
+        .unwrap();
+    assert!(hidden_after_reopen.relevant_memory.is_empty());
+
+    engine
+        .set_status_override(cell.id, MemoryStatus::Active)
+        .unwrap();
+    let restored = engine
+        .recall(RecallRequest::new("override maintenance"))
+        .unwrap();
+    assert_eq!(restored.relevant_memory.len(), 1);
+    assert_eq!(restored.relevant_memory[0].status, MemoryStatus::Active);
+}
+
+#[test]
+fn status_override_hides_hot_memory_immediately() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let cell = remember_text_cell(
+        &mut engine,
+        "maintenance",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "hot maintenance memory",
+        &["tag:maintenance".to_string()],
+    );
+
+    engine
+        .set_status_override(cell.id, MemoryStatus::Deprecated)
+        .unwrap();
+    let hidden = engine
+        .recall(RecallRequest::new("hot maintenance"))
+        .unwrap();
+    assert!(hidden.relevant_memory.is_empty());
+
+    engine
+        .set_status_override(cell.id, MemoryStatus::Active)
+        .unwrap();
+    let restored = engine
+        .recall(RecallRequest::new("hot maintenance"))
+        .unwrap();
+    assert_eq!(restored.relevant_memory.len(), 1);
+}
+
+#[test]
 fn recall_from_sealed_pages() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();

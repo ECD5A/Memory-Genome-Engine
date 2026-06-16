@@ -86,6 +86,14 @@ cargo run -p mge-cli -- remember "Decision recorded" \
   --link 1
 ```
 
+Разовый Markdown import для переноса существующих заметок:
+
+```bash
+cargo run -p mge-cli -- import markdown ./notes --scope my_project --marker source:notes
+```
+
+Markdown import записывает обычные бинарные `MemoryCell`. Markdown не становится runtime storage.
+
 ## Recall
 
 ```bash
@@ -119,6 +127,13 @@ cargo run -p mge-cli -- export
 ```
 
 Markdown export human-readable и plaintext by design.
+
+Мягкое обслуживание памяти без переписывания sealed pages:
+
+```bash
+cargo run -p mge-cli -- mark 1 --status rejected
+cargo run -p mge-cli -- mark 1 --status active
+```
 
 `mge doctor` по умолчанию read-only. Используйте `--deep` только когда явно нужна validation work:
 

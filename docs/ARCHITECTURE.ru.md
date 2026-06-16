@@ -144,6 +144,8 @@ Manifest хранит default codec/compression для новых sealed pages. 
 
 `mge config set` обновляет manifest defaults и легкие derived indexes. Он не переписывает существующие page files и не мутирует существующие page catalog entries. При смене `--index-kind` пересобирается только candidate index по существующим sealed pages.
 
+`mge mark` записывает мягкие status overrides в `manifest.mgm` для обслуживания памяти. Команда может скрывать или отклонять hot и sealed cells во время recall без переписывания sealed page payloads; `--status active` очищает override.
+
 `mge validate` - read-only storage consistency check. Он проверяет согласованность manifest/catalog/index kind, читаемость page files, binary headers, payload checksums, page metadata, marker summaries, page checksums, marker dictionary consistency и references, cell links, candidate-index coverage и orphan storage files. Он сообщает wrong magic, wrong file kind, unsupported version, truncated payload и corrupted payload errors. Он не чинит и не переписывает store data.
 
 ## Page Clustering

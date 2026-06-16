@@ -86,6 +86,14 @@ cargo run -p mge-cli -- remember "Decision recorded" \
   --link 1
 ```
 
+One-time Markdown import for migrating existing notes:
+
+```bash
+cargo run -p mge-cli -- import markdown ./notes --scope my_project --marker source:notes
+```
+
+Markdown import writes normal binary `MemoryCell` records. Markdown is not runtime storage.
+
 ## Recall
 
 ```bash
@@ -119,6 +127,13 @@ cargo run -p mge-cli -- export
 ```
 
 Markdown export is human-readable and plaintext by design.
+
+Soft memory maintenance without rewriting sealed pages:
+
+```bash
+cargo run -p mge-cli -- mark 1 --status rejected
+cargo run -p mge-cli -- mark 1 --status active
+```
 
 `mge doctor` is read-only by default. Use `--deep` only when you explicitly want validation work:
 

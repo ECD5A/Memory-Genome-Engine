@@ -24,6 +24,7 @@ Memory Genome Engine is a local-first structured memory engine for AI agents. It
 - Keeps recent memory in fast L1 Hot RAM with durable binary persistence.
 - Seals older memory into immutable binary pages with candidate indexes.
 - Supports focused, broad, and full-scope recall.
+- Imports existing Markdown notes as one-time migration input and supports soft memory status maintenance.
 - Provides CLI, TUI, JSON-RPC/MCP-ready adapter, Python SDK, and TypeScript SDK.
 - Supports opt-in encrypted stores for hot payloads, snapshots, and sealed page payloads.
 - Uses binary runtime storage; JSON is protocol/debug report output only.

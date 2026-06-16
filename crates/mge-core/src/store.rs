@@ -155,6 +155,8 @@ pub struct Manifest {
     pub security_mode: SecurityMode,
     #[serde(default)]
     pub security: SecurityMetadata,
+    #[serde(default)]
+    pub status_overrides: BTreeMap<CellId, MemoryStatus>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -191,6 +193,16 @@ pub struct StorageConfigUpdateReport {
     pub current: StorageConfig,
     pub changed: bool,
     pub existing_pages_unchanged: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StatusOverrideReport {
+    pub cell_id: CellId,
+    pub original_status: MemoryStatus,
+    pub previous_override: Option<MemoryStatus>,
+    pub effective_status: MemoryStatus,
+    pub override_cleared: bool,
+    pub pages_rewritten: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -655,6 +667,7 @@ impl MemoryEngine {
                 durability: options.durability,
                 security_mode: options.security_mode,
                 security,
+                status_overrides: BTreeMap::new(),
             };
             binary::write_messagepack_file(&manifest_path, FileKind::Manifest, &manifest)?;
         }
@@ -933,6 +946,59 @@ impl MemoryEngine {
         Ok(cell)
     }
 
+    pub fn set_status_override(
+        &mut self,
+        cell_id: CellId,
+        status: MemoryStatus,
+    ) -> Result<StatusOverrideReport> {
+        self.ensure_payload_unlocked()?;
+        let original_status = self.find_cell_status(cell_id)?;
+        let previous_override = self.manifest.status_overrides.get(&cell_id).copied();
+
+        if status == MemoryStatus::Active {
+            let removed = self.manifest.status_overrides.remove(&cell_id).is_some();
+            if removed {
+                self.manifest.updated_at = current_timestamp();
+                self.save_manifest()?;
+            }
+            return Ok(StatusOverrideReport {
+                cell_id,
+                original_status,
+                previous_override,
+                effective_status: self
+                    .manifest
+                    .status_overrides
+                    .get(&cell_id)
+                    .copied()
+                    .unwrap_or(original_status),
+                override_cleared: true,
+                pages_rewritten: false,
+            });
+        }
+
+        if !matches!(
+            status,
+            MemoryStatus::Deprecated | MemoryStatus::Rejected | MemoryStatus::Superseded
+        ) {
+            return Err(MgeError::InvalidInput(format!(
+                "status override supports deprecated, rejected, superseded, or active to clear; got {status}"
+            )));
+        }
+
+        self.manifest.status_overrides.insert(cell_id, status);
+        self.manifest.updated_at = current_timestamp();
+        self.save_manifest()?;
+
+        Ok(StatusOverrideReport {
+            cell_id,
+            original_status,
+            previous_override,
+            effective_status: status,
+            override_cleared: false,
+            pages_rewritten: false,
+        })
+    }
+
     pub fn recall(&self, request: RecallRequest) -> Result<ContextPacket> {
         self.ensure_payload_unlocked()?;
 
@@ -983,6 +1049,7 @@ impl MemoryEngine {
             .as_ref()
             .and_then(|marker| self.dictionary.lookup(marker));
         let query_tokens = tokenize_keywords(&request.query);
+        let effective_policy = request.effective_policy();
         let filter_context = RecallFilterContext::new_with_marker_filters(
             &request,
             scope_marker_id,
@@ -999,7 +1066,7 @@ impl MemoryEngine {
             &query_marker_ids,
             &explicit_marker_ids,
             &required_page_marker_ids,
-            &request.effective_policy(),
+            &effective_policy,
         );
         let query_marker_extraction_micros = elapsed_micros(query_marker_started);
 
@@ -1008,7 +1075,7 @@ impl MemoryEngine {
             RecallMode::Focused => QueryMode::PreferIntersection,
             RecallMode::Broad | RecallMode::FullScope => QueryMode::Union,
         };
-        let allowed_hot_statuses = allowed_statuses_for_policy(&request.effective_policy());
+        let allowed_hot_statuses = allowed_statuses_for_policy(&effective_policy);
         let hot_candidate_ids = self.hot.candidate_ids(HotCandidateQuery {
             marker_ids: &query_marker_ids,
             marker_mode: hot_query_mode,
@@ -1027,6 +1094,10 @@ impl MemoryEngine {
             let Some(cell) = self.hot.cell(cell_id) else {
                 continue;
             };
+            if !self.effective_policy_permits_cell(cell, &effective_policy) {
+                cells_evaluated += 1;
+                continue;
+            }
             if let Some(score_detail) = match request.mode {
                 RecallMode::FullScope => full_scope_cell_debug_with_filter(cell, &filter_context),
                 RecallMode::Focused | RecallMode::Broad => {
@@ -1125,6 +1196,11 @@ impl MemoryEngine {
             let before_page_candidates = ranked.len();
             let filtering_started = Instant::now();
             for (cell_index, cell) in page.cells.iter().enumerate() {
+                if !self.effective_policy_permits_cell(cell, &effective_policy) {
+                    sealed_cells_skipped_before_token_scoring += 1;
+                    cells_evaluated += 1;
+                    continue;
+                }
                 if let Some(score_detail) = match request.mode {
                     RecallMode::FullScope => {
                         full_scope_cell_debug_with_filter(cell, &filter_context)
@@ -1287,7 +1363,7 @@ impl MemoryEngine {
                     kind: cell.kind,
                     content: cell.value.to_plain_text(),
                     trust: cell.trust,
-                    status: cell.status,
+                    status: self.effective_status(cell),
                     scope: cell.scope.clone(),
                     sensitivity: cell.sensitivity,
                     markers,
@@ -1573,7 +1649,12 @@ impl MemoryEngine {
             output.push_str("_No hot cells._\n\n");
         } else {
             for cell in &hot_cells {
-                append_cell_markdown(&mut output, cell, &self.dictionary);
+                append_cell_markdown(
+                    &mut output,
+                    cell,
+                    &self.dictionary,
+                    self.effective_status(cell),
+                );
             }
         }
 
@@ -1589,7 +1670,12 @@ impl MemoryEngine {
                     page.marker_summary.len()
                 ));
                 for cell in &page.cells {
-                    append_cell_markdown(&mut output, cell, &self.dictionary);
+                    append_cell_markdown(
+                        &mut output,
+                        cell,
+                        &self.dictionary,
+                        self.effective_status(cell),
+                    );
                 }
             }
         }
@@ -1625,6 +1711,55 @@ impl MemoryEngine {
             ));
         }
         Ok(())
+    }
+
+    fn find_cell_status(&self, cell_id: CellId) -> Result<MemoryStatus> {
+        if let Some(cell) = self.hot.cell(cell_id) {
+            return Ok(cell.status);
+        }
+
+        let catalog = self.load_page_catalog()?;
+        for entry in &catalog.pages {
+            let page = self.read_page(entry)?;
+            if let Some(cell) = page.cells.iter().find(|cell| cell.id == cell_id) {
+                return Ok(cell.status);
+            }
+        }
+
+        Err(MgeError::InvalidInput(format!(
+            "cell {cell_id} does not exist in hot or sealed memory"
+        )))
+    }
+
+    fn effective_status(&self, cell: &MemoryCell) -> MemoryStatus {
+        self.manifest
+            .status_overrides
+            .get(&cell.id)
+            .copied()
+            .unwrap_or(cell.status)
+    }
+
+    fn effective_policy_permits_cell(
+        &self,
+        cell: &MemoryCell,
+        policy: &crate::security::RecallPolicy,
+    ) -> bool {
+        if !policy.include_deprecated
+            && matches!(
+                self.effective_status(cell),
+                MemoryStatus::Deprecated | MemoryStatus::Superseded
+            )
+        {
+            return false;
+        }
+        if !policy.include_rejected && self.effective_status(cell) == MemoryStatus::Rejected {
+            return false;
+        }
+        if !policy.allow_secret_references && cell.sensitivity == SensitivityLevel::SecretReference
+        {
+            return false;
+        }
+        true
     }
 
     fn validate_with_options(&self, deep: bool) -> Result<ValidationReport> {
@@ -1785,6 +1920,13 @@ impl MemoryEngine {
             self.validate_candidate_index(&catalog, index, &mut report)?;
         }
         validate_cell_links(&cell_ids, &cell_links, &mut report);
+        for cell_id in self.manifest.status_overrides.keys() {
+            if !cell_ids.contains(cell_id) {
+                report.error(format!(
+                    "manifest status override references unknown cell {cell_id}"
+                ));
+            }
+        }
 
         if catalog.pages.is_empty() && hot_cells.is_empty() {
             report.warning("store contains no hot or sealed cells");
@@ -2484,11 +2626,16 @@ impl Drop for MemoryEngine {
     }
 }
 
-fn append_cell_markdown(output: &mut String, cell: &MemoryCell, dictionary: &MarkerDictionary) {
+fn append_cell_markdown(
+    output: &mut String,
+    cell: &MemoryCell,
+    dictionary: &MarkerDictionary,
+    status: MemoryStatus,
+) {
     output.push_str(&format!("#### Cell {}\n\n", cell.id));
     output.push_str(&format!("- kind: {}\n", cell.kind));
     output.push_str(&format!("- scope: {}\n", cell.scope));
-    output.push_str(&format!("- status: {}\n", cell.status));
+    output.push_str(&format!("- status: {}\n", status));
     output.push_str(&format!("- trust: {}\n", cell.trust));
     output.push_str(&format!("- sensitivity: {}\n", cell.sensitivity));
     if let Some(subject) = &cell.subject {

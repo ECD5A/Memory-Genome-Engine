@@ -55,6 +55,7 @@ pub use security::{
 };
 pub use store::{
     DurabilityPolicy, HotCheckpointReport, InitOptions, InspectReport, MemoryEngine,
-    RebuildIndexesReport, RememberRequest, SealReport, StorageConfig, StorageConfigUpdate,
-    StorageConfigUpdateReport, Store, StoreStats, ValidationReport, DEFAULT_STORE_DIR,
+    RebuildIndexesReport, RememberRequest, SealReport, StatusOverrideReport, StorageConfig,
+    StorageConfigUpdate, StorageConfigUpdateReport, Store, StoreStats, ValidationReport,
+    DEFAULT_STORE_DIR,
 };

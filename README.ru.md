@@ -24,6 +24,7 @@ Memory Genome Engine - local-first движок структурированно
 - Держит свежую память в быстром L1 Hot RAM с durable binary persistence.
 - Запечатывает старую память в immutable binary pages с candidate indexes.
 - Поддерживает focused, broad и full-scope recall.
+- Импортирует существующие Markdown-заметки как разовый migration input и поддерживает мягкое обслуживание статусов памяти.
 - Даёт CLI, TUI, JSON-RPC/MCP-ready adapter, Python SDK и TypeScript SDK.
 - Поддерживает opt-in encrypted stores для hot payloads, snapshots и sealed page payloads.
 - Использует binary runtime storage; JSON только protocol/debug report output.
