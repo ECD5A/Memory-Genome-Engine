@@ -37,9 +37,13 @@ fn subtitle_spans(language: Language, banner_width: usize) -> Vec<Span<'static>>
         .strip_suffix(" by ECD5A")
         .unwrap_or(raw)
         .to_ascii_uppercase();
-    let separator = "  ::  ";
-    let brand = "BY ECD5A";
-    let subtitle_width = main.chars().count() + separator.chars().count() + brand.chars().count();
+    let separator = " — ";
+    let by = "by ";
+    let brand = "ECD5A";
+    let subtitle_width = main.chars().count()
+        + separator.chars().count()
+        + by.chars().count()
+        + brand.chars().count();
     let subtitle_offset =
         BANNER_LEFT_PAD.chars().count() + banner_width.saturating_sub(subtitle_width) / 2;
 
@@ -52,10 +56,11 @@ fn subtitle_spans(language: Language, banner_width: usize) -> Vec<Span<'static>>
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(separator, Style::default().fg(Color::DarkGray)),
+        Span::styled(by, Style::default().fg(Color::Rgb(132, 169, 201))),
         Span::styled(
             brand,
             Style::default()
-                .fg(Color::Rgb(255, 216, 92))
+                .fg(Color::Rgb(255, 78, 240))
                 .add_modifier(Modifier::BOLD),
         ),
     ]
@@ -121,7 +126,7 @@ mod tests {
         assert!(lines
             .iter()
             .flat_map(|line| line.spans.iter())
-            .any(|span| span.content.contains("BY ECD5A")));
+            .any(|span| span.content.contains("ECD5A")));
         assert_eq!(lines.len(), BANNER_RENDER_HEIGHT as usize);
     }
 
@@ -131,11 +136,12 @@ mod tests {
         assert!(spans
             .iter()
             .any(|span| span.content.contains("LOCAL-FIRST MEMORY ENGINE")));
+        assert!(spans.iter().any(|span| span.content == "by "));
         let brand = spans
             .iter()
             .find(|span| span.content.contains("ECD5A"))
             .unwrap();
-        assert!(matches!(brand.style.fg, Some(Color::Rgb(255, 216, 92))));
+        assert!(matches!(brand.style.fg, Some(Color::Rgb(255, 78, 240))));
     }
 
     #[test]
