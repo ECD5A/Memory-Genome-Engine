@@ -18,7 +18,7 @@ Current implementation status:
 - Encrypted-mode payload operations do not silently fall back to plaintext; they fail locked/authenticated instead.
 - `mge config security` reads safe manifest-level security status without opening payloads.
 - Indexes, marker dictionary, page catalog summaries, Markdown export, and selected manifest metadata are not encrypted in this pass.
-- JSON remains protocol/debug/benchmark output only, not runtime storage.
+- JSON remains protocol/debug report output only, not runtime storage.
 
 ## Core Flow
 

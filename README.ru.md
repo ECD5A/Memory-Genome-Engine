@@ -28,7 +28,7 @@ Memory Genome Engine - local-first движок структурированно
 - Поддерживает focused, broad и full-scope recall.
 - Даёт CLI, TUI, JSON-RPC/MCP-ready adapter, Python SDK и TypeScript SDK.
 - Поддерживает opt-in encrypted stores для hot payloads, snapshots и sealed page payloads.
-- Использует binary runtime storage; JSON только protocol/debug/benchmark output.
+- Использует binary runtime storage; JSON только protocol/debug report output.
 
 ## Быстрый Старт
 

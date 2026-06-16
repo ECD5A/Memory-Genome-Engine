@@ -18,7 +18,7 @@
 - Encrypted-mode payload operations не делают silent fallback в plaintext; они падают как locked/authenticated failure.
 - `mge config security` читает безопасный manifest-level security status без открытия payload.
 - Indexes, marker dictionary, page catalog summaries, Markdown export и часть manifest metadata в этом проходе не шифруются.
-- JSON остаётся только protocol/debug/benchmark output, а не runtime storage.
+- JSON остаётся только protocol/debug report output, а не runtime storage.
 
 ## Core Flow
 
