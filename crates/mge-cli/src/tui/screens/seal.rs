@@ -10,12 +10,7 @@ use crate::tui::theme;
 pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(10),
-            Constraint::Min(7),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
+        .constraints([Constraint::Length(10), Constraint::Min(7)])
         .split(area);
 
     let stats = app.dashboard.stats.as_ref();
@@ -54,8 +49,6 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     );
 
     render_result(frame, app, layout[1]);
-    screens::render_status(frame, app, layout[2]);
-    screens::render_footer(frame, app, layout[3], TKey::FooterScreen);
 }
 
 fn render_result(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {

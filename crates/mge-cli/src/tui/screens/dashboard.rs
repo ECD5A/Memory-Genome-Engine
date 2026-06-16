@@ -1,38 +1,22 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{List, ListItem};
 use ratatui::Frame;
 
 use crate::tui::app::TuiApp;
-use crate::tui::banner;
 use crate::tui::i18n::{tr, TKey};
 use crate::tui::screens::{self, key_value};
 use crate::tui::theme;
 
 pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(8),
-            Constraint::Min(10),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
-        .split(area);
-
-    let header = Paragraph::new(banner::banner_lines(app.language)).wrap(Wrap { trim: false });
-    frame.render_widget(header, layout[0]);
-
     let body = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
-        .split(layout[1]);
+        .split(area);
 
     render_summary(frame, app, body[0]);
     render_menu(frame, app, body[1]);
-    screens::render_status(frame, app, layout[2]);
-    screens::render_footer(frame, app, layout[3], TKey::FooterDashboard);
 }
 
 fn render_summary(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {

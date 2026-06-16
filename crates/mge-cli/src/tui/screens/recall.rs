@@ -14,16 +14,12 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
             Constraint::Length(10),
             Constraint::Min(9),
             Constraint::Length(7),
-            Constraint::Length(1),
-            Constraint::Length(1),
         ])
         .split(area);
 
     render_form(frame, app, layout[0]);
     render_results(frame, app, layout[1]);
     render_diagnostics(frame, app, layout[2]);
-    screens::render_status(frame, app, layout[3]);
-    screens::render_footer(frame, app, layout[4], TKey::FooterScreen);
 }
 
 fn render_form(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {

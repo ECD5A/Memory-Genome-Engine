@@ -10,12 +10,14 @@ use crossterm::terminal::{
 };
 use mge_core::{ContextPacket, IndexKind, RecallMode, SealReport};
 use ratatui::backend::CrosstermBackend;
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 
 use crate::app_service::{
     AppService, DashboardSummary, DoctorReport, IndexBenchmarkReport, RecallInput, RememberInput,
 };
+use crate::tui::banner;
 use crate::tui::i18n::{tr, Language, TKey};
 use crate::tui::input;
 use crate::tui::screens;
@@ -224,6 +226,29 @@ fn draw(frame: &mut Frame<'_>, app: &TuiApp) {
         return;
     }
 
+    if app.screen == Screen::Help {
+        screens::help::render(frame, app, area);
+        return;
+    }
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(8),
+            Constraint::Min(10),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+
+    let header = Paragraph::new(banner::banner_lines(app.language)).wrap(Wrap { trim: false });
+    frame.render_widget(header, layout[0]);
+    draw_screen_content(frame, app, layout[1]);
+    screens::render_status(frame, app, layout[2]);
+    screens::render_footer(frame, app, layout[3], footer_key(app.screen));
+}
+
+fn draw_screen_content(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     match app.screen {
         Screen::Setup => screens::setup::render(frame, app, area),
         Screen::Dashboard => screens::dashboard::render(frame, app, area),
@@ -235,6 +260,14 @@ fn draw(frame: &mut Frame<'_>, app: &TuiApp) {
         Screen::ExportImport => screens::export_import::render(frame, app, area),
         Screen::Settings => screens::settings::render(frame, app, area),
         Screen::Help => screens::help::render(frame, app, area),
+    }
+}
+
+fn footer_key(screen: Screen) -> TKey {
+    match screen {
+        Screen::Dashboard => TKey::FooterDashboard,
+        Screen::Settings => TKey::FooterSettings,
+        _ => TKey::FooterScreen,
     }
 }
 

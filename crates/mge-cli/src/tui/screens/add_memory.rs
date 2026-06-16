@@ -1,4 +1,4 @@
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::Frame;
 
 use crate::tui::app::TuiApp;
@@ -6,14 +6,6 @@ use crate::tui::i18n::{tr, TKey};
 use crate::tui::screens::{self, action_line, field_line};
 
 pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(16),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
-        .split(area);
     let input = &app.remember_input;
     let lines = vec![
         field_line(
@@ -60,8 +52,6 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     ];
     frame.render_widget(
         screens::paragraph(lines, tr(app.language, TKey::AddMemoryCell)),
-        layout[0],
+        area,
     );
-    screens::render_status(frame, app, layout[1]);
-    screens::render_footer(frame, app, layout[2], TKey::FooterScreen);
 }

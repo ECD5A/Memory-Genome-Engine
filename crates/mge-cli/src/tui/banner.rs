@@ -16,23 +16,10 @@ pub const BANNER_LINES: &[&str] = &[
 ];
 
 pub fn banner_lines(language: Language) -> Vec<Line<'static>> {
-    let colors = [
-        Color::LightCyan,
-        Color::LightCyan,
-        Color::Blue,
-        Color::Blue,
-        Color::LightMagenta,
-        Color::LightMagenta,
-    ];
     let mut lines = BANNER_LINES
         .iter()
         .enumerate()
-        .map(|(index, line)| {
-            Line::from(Span::styled(
-                format!("{BANNER_LEFT_PAD}{line}"),
-                Style::default().fg(colors[index % colors.len()]),
-            ))
-        })
+        .map(|(row, line)| Line::from(rainbow_banner_spans(row, line)))
         .collect::<Vec<_>>();
     lines.push(Line::from(""));
     let banner_width = BANNER_LINES
@@ -48,6 +35,47 @@ pub fn banner_lines(language: Language) -> Vec<Line<'static>> {
         theme::title(),
     )));
     lines
+}
+
+fn rainbow_banner_spans(row: usize, line: &str) -> Vec<Span<'static>> {
+    let width = line.chars().count().max(1);
+    let mut spans = vec![Span::raw(BANNER_LEFT_PAD.to_string())];
+    spans.extend(line.chars().enumerate().map(|(column, ch)| {
+        Span::styled(
+            ch.to_string(),
+            Style::default().fg(rainbow_color(column + row * 11, width + 55)),
+        )
+    }));
+    spans
+}
+
+fn rainbow_color(position: usize, width: usize) -> Color {
+    const STOPS: &[(u8, u8, u8)] = &[
+        (69, 243, 255),
+        (48, 127, 255),
+        (118, 70, 255),
+        (219, 42, 255),
+        (255, 66, 158),
+        (255, 151, 63),
+        (95, 255, 152),
+    ];
+
+    let width = width.max(2);
+    let scaled = position as f32 / (width - 1) as f32 * (STOPS.len() - 1) as f32;
+    let left = scaled.floor() as usize;
+    let right = (left + 1).min(STOPS.len() - 1);
+    let t = scaled - left as f32;
+    let (lr, lg, lb) = STOPS[left];
+    let (rr, rg, rb) = STOPS[right];
+    Color::Rgb(
+        lerp_channel(lr, rr, t),
+        lerp_channel(lg, rg, t),
+        lerp_channel(lb, rb, t),
+    )
+}
+
+fn lerp_channel(left: u8, right: u8, t: f32) -> u8 {
+    (left as f32 + (right as f32 - left as f32) * t).round() as u8
 }
 
 #[cfg(test)]
@@ -67,5 +95,16 @@ mod tests {
         let lines = banner_lines(Language::En);
         assert!(lines[0].spans[0].content.starts_with(BANNER_LEFT_PAD));
         assert!(lines.last().unwrap().spans[0].content.contains("by ECD5A"));
+    }
+
+    #[test]
+    fn banner_uses_rgb_gradient_colors() {
+        let lines = banner_lines(Language::En);
+        let first_colored = lines[0]
+            .spans
+            .iter()
+            .find(|span| !span.content.trim().is_empty())
+            .unwrap();
+        assert!(matches!(first_colored.style.fg, Some(Color::Rgb(_, _, _))));
     }
 }

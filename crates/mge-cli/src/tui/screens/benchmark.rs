@@ -9,12 +9,7 @@ use crate::tui::screens::{self, action_line, key_value};
 pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5),
-            Constraint::Min(10),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
+        .constraints([Constraint::Length(5), Constraint::Min(10)])
         .split(area);
 
     frame.render_widget(
@@ -81,6 +76,4 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
         screens::paragraph(lines, tr(app.language, TKey::BenchmarkResult)),
         layout[1],
     );
-    screens::render_status(frame, app, layout[2]);
-    screens::render_footer(frame, app, layout[3], TKey::FooterScreen);
 }

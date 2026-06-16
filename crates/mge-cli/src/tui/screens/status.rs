@@ -11,12 +11,7 @@ use crate::tui::theme;
 pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(9),
-            Constraint::Min(9),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
+        .constraints([Constraint::Length(9), Constraint::Min(9)])
         .split(area);
 
     let actions = vec![
@@ -34,8 +29,6 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     );
 
     render_report(frame, app, layout[1]);
-    screens::render_status(frame, app, layout[2]);
-    screens::render_footer(frame, app, layout[3], TKey::FooterScreen);
 }
 
 fn render_report(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {

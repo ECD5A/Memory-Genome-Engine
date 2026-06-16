@@ -1,19 +1,16 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
 use crate::tui::app::TuiApp;
 use crate::tui::i18n::{tr, Language, TKey};
 use crate::tui::screens::{self, action_line, field_line, selected_line};
+use crate::tui::theme;
 
 pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(14),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
+        .constraints([Constraint::Min(14)])
         .split(area);
 
     let settings = &app.settings;
@@ -83,13 +80,13 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
             tr(app.language, TKey::StorePath),
             app.service.store_path().display()
         )),
+        Line::from(""),
+        Line::from(Span::styled(settings_note(app.language), theme::muted())),
     ];
     frame.render_widget(
         screens::paragraph(lines, tr(app.language, TKey::Settings)),
         layout[0],
     );
-    screens::render_status(frame, app, layout[1]);
-    screens::render_footer(frame, app, layout[2], TKey::FooterSettings);
 }
 
 fn toggle_text(language: Language, enabled: bool, label: &str) -> String {
@@ -102,6 +99,17 @@ fn toggle_text(language: Language, enabled: bool, label: &str) -> String {
     format!("[{symbol}] {state:<5} {label}")
 }
 
+fn settings_note(language: Language) -> &'static str {
+    match language {
+        Language::En => {
+            "Index kind is written to the store; language/default mode/view toggles are TUI session options."
+        }
+        Language::Ru => {
+            "Тип индекса записывается в store; язык, default mode и переключатели вида работают в текущей TUI-сессии."
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,5 +120,7 @@ mod tests {
         assert!(toggle_text(Language::Ru, false, "Timing").contains("ВЫКЛ"));
         assert!(toggle_text(Language::En, true, "Timing").contains("●"));
         assert!(toggle_text(Language::En, false, "Timing").contains("○"));
+        assert!(settings_note(Language::En).contains("store"));
+        assert!(settings_note(Language::Ru).contains("store"));
     }
 }
