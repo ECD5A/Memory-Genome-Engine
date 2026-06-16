@@ -13,11 +13,12 @@ Memory Genome Engine - Rust-first локальный memory engine для аге
 - Mandate 1: Developer-ready Core.
 - Mandate 2: Agent Integration / MCP / SDK.
 - Mandate 3: Security / Encryption.
+- Mandate 4: Product UI / Packaging.
 
 Текущий этап:
 
-- Mandate 4: Product UI / Packaging в работе.
-- Текущий фокус: terminal product UI, packaging/dev UX, release scripts и read-only local diagnostics.
+- Mandate 4 закрыт.
+- Рекомендуемый следующий мандат: Product Distribution / Installers / Release Targets.
 
 ## Карта Документации
 
@@ -117,15 +118,16 @@ Future security work не блокирует текущий продукт:
 - Optional interactive unlock / host key-management integration.
 - Explicit migration tool from unencrypted stores to encrypted stores.
 
-## Mandate 4 Status
+## Mandate 4 Closure Status
 
-Product UI / Packaging в работе.
+Product UI / Packaging закрыт.
 
-Текущий package:
+Готово:
 
 - Human-first terminal interface через `mge tui` на `ratatui` + `crossterm`.
-- First-run setup helper через `mge setup` и first-launch TUI setup screen.
-- TUI screens: dashboard, recall, add memory, seal/checkpoint, status/diagnostics, index benchmark, Markdown export/import status, settings и help.
+- First-run setup helper через `mge setup`.
+- TUI setup wizard для первого запуска.
+- TUI screens: dashboard, recall, add memory, seal/checkpoint, status/diagnostics/doctor, index benchmark, Markdown export/import status, settings и help.
 - Runtime EN/RU language switching через F1, L/l и Д/д.
 - Safe encrypted setup guidance через `--passphrase-env`; passphrase читается из environment, а не вводится в TUI.
 - Thin `mge-cli` app service layer для TUI и CLI-oriented diagnostics.
@@ -137,6 +139,9 @@ Product UI / Packaging в работе.
   - `scripts/smoke-release.sh`
   - `scripts/smoke-release.ps1`
 - Release scripts выполняют `cargo build -p mge-cli --bins --release`, проверяют release binaries и запускают CLI/encrypted/MCP/SDK smoke checks без публикации packages и без коммита artifacts.
+- Windows PowerShell build/smoke scripts проверены на этой машине.
+- Linux/macOS `.sh` build/smoke scripts присутствуют и синхронизированы с PowerShell behavior, но локально не запускались, потому что WSL/Linux не установлен.
+- CLI, MCP JSON-RPC, Python SDK, TypeScript SDK и Rust example smokes проходят через release smoke script.
 - Local encrypted demo workflow scripts:
   - `scripts/demo-local-memory.sh`
   - `scripts/demo-local-memory.ps1`
@@ -148,14 +153,19 @@ Product UI / Packaging в работе.
 - Heavy UI framework.
 - Web/desktop GUI.
 - Storage, codec, filter, recall или encryption format changes.
+- Markdown import остаётся disabled; Markdown export поддержан и является plaintext by design.
+- Full interactive TUI real-TTY end-to-end automation не реализован; TUI behavior покрыт unit tests, help smokes и manual terminal checks.
 
 ## Текущие Ограничения
 
 - Human UI сейчас terminal-first через `mge tui`; web/desktop GUI нет.
+- Full interactive real-TTY TUI e2e automation пока нет.
 - Vector database нет.
 - Encrypted indexes и blind marker metadata пока нет.
 - Encrypted Markdown export пока нет.
 - Package publishing пока нет.
+- Linux/macOS `.sh` release scripts присутствуют, но не проверены локально на этой Windows-машине.
+- Markdown import disabled.
 - External MCP SDK dependency не добавлена.
 - Automatic migration from unencrypted stores to encrypted stores пока нет.
 - Большой user-provided corpus всё ещё полезен перед новой performance work.
@@ -181,8 +191,8 @@ Product UI / Packaging в работе.
 - POSIX `.sh` release scripts обновлены для Linux/macOS; на этом Windows host они не запускались, потому что WSL не имеет установленного distribution.
 - `scripts/demo-local-memory.ps1`: passed.
 
-Mandate 4 добавляет terminal UI, packaging/dev UX и read-only diagnostics. Storage/codec/filter/recall/security formats не менялись.
+Mandate 4 закрыл terminal UI, packaging/dev UX, release-script и read-only diagnostics слой. Storage/codec/filter/recall/security formats не менялись.
 
 ## Следующий Рекомендуемый Шаг
 
-Завершить первый Mandate 4 TUI package, затем перейти к packaging target selection и product distribution design.
+Начать Mandate 5: Product Distribution / Installers / Release Targets.

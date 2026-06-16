@@ -13,11 +13,12 @@ Closed:
 - Mandate 1: Developer-ready Core.
 - Mandate 2: Agent Integration / MCP / SDK.
 - Mandate 3: Security / Encryption.
+- Mandate 4: Product UI / Packaging.
 
 Current stage:
 
-- Mandate 4: Product UI / Packaging is in progress.
-- Current focus: terminal product UI, packaging/dev UX, release scripts, and read-only local diagnostics.
+- Mandate 4 is closed.
+- Recommended next mandate: Product Distribution / Installers / Release Targets.
 
 ## Documentation Map
 
@@ -117,16 +118,17 @@ Future security work is non-blocking:
 - Optional interactive unlock / host key-management integration.
 - Explicit migration tool from unencrypted stores to encrypted stores.
 
-## Mandate 4 Status
+## Mandate 4 Closure Status
 
-Product UI / Packaging is in progress.
+Product UI / Packaging is closed.
 
-Current package:
+Ready:
 
 - Human-first terminal interface through `mge tui` using `ratatui` + `crossterm`.
-- First-run setup helper through `mge setup` and a first-launch TUI setup screen.
-- TUI screens for dashboard, recall, add memory, seal/checkpoint, status/diagnostics, index benchmark, Markdown export/import status, settings, and help.
-- Runtime EN/RU language switching with F1, L/l, and Д/д.
+- First-run setup helper through `mge setup`.
+- TUI setup wizard for first launch.
+- TUI screens for dashboard, recall, add memory, seal/checkpoint, status/diagnostics/doctor, index benchmark, Markdown export/import status, settings, and help.
+- Runtime EN/RU language switching with F1, L/l, and D/d.
 - Safe encrypted setup guidance through `--passphrase-env`; passphrases are read from the environment, not typed into the TUI.
 - Thin `mge-cli` app service layer shared by the TUI and CLI-oriented diagnostics.
 - Read-only `mge doctor` diagnostics for store structure, manifest/security state, required files, optional unlock, and explicit deep validation.
@@ -137,6 +139,9 @@ Current package:
   - `scripts/smoke-release.sh`
   - `scripts/smoke-release.ps1`
 - Release scripts build `cargo build -p mge-cli --bins --release`, verify release binaries, and run CLI/encrypted/MCP/SDK smoke checks without publishing packages or committing artifacts.
+- Windows PowerShell build/smoke scripts are verified on this host.
+- Linux/macOS `.sh` build/smoke scripts are present and aligned with PowerShell behavior, but were not locally executed because WSL/Linux is not installed.
+- CLI, MCP JSON-RPC, Python SDK, TypeScript SDK, and Rust example smokes pass through the release smoke script.
 - Local encrypted demo workflow scripts:
   - `scripts/demo-local-memory.sh`
   - `scripts/demo-local-memory.ps1`
@@ -147,14 +152,19 @@ Still intentionally not implemented:
 - External MCP SDK dependency.
 - Heavy UI framework.
 - Storage, codec, filter, recall, or encryption format changes.
+- Markdown import remains disabled; Markdown export is supported and plaintext by design.
+- Full interactive TUI real-TTY end-to-end automation is not implemented; TUI behavior is covered by unit tests, help smokes, and manual terminal checks.
 
 ## Current Known Limitations
 
 - No web/desktop GUI; Mandate 4 UI is terminal-first through `mge tui`.
+- No full interactive real-TTY TUI e2e automation yet.
 - No vector database.
 - No encrypted indexes or blind marker metadata yet.
 - No encrypted Markdown export yet.
 - No package publishing yet.
+- Linux/macOS `.sh` release scripts are present but not locally verified on this Windows machine.
+- Markdown import is disabled.
 - No external MCP SDK dependency.
 - No automatic migration from unencrypted stores to encrypted stores.
 - Larger user-provided corpus testing is still useful before any new performance work.
@@ -180,8 +190,8 @@ Latest Mandate 4 TUI/package/release verification:
 - POSIX `.sh` release scripts are updated for Linux/macOS; they were not executed on this Windows host because WSL has no installed distribution.
 - `scripts/demo-local-memory.ps1`: passed.
 
-Mandate 4 adds terminal UI, packaging/dev UX, and read-only diagnostics. Storage/codec/filter/recall/security formats remain unchanged.
+Mandate 4 closed the terminal UI, packaging/dev UX, release-script, and read-only diagnostics layer. Storage/codec/filter/recall/security formats remain unchanged.
 
 ## Next Recommended Step
 
-Continue Mandate 4 with packaging target selection and product distribution design.
+Start Mandate 5: Product Distribution / Installers / Release Targets.
