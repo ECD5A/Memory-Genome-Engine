@@ -38,6 +38,12 @@ target/mge-release/<platform>/
 
 They honor `CARGO_TARGET_DIR` when it is set. They do not publish packages, create a tracked `dist/` directory, or commit artifacts.
 
+## Platform Verification
+
+- Windows PowerShell scripts are locally verified on the current Windows host.
+- Linux shell scripts are locally verified through WSL Ubuntu.
+- macOS shell scripts follow the same POSIX path, but macOS is not locally verified from this Windows machine.
+
 ## Install From Source
 
 Install local release binaries into a user-writable directory:
@@ -248,6 +254,7 @@ Do not start custom page codec work just because MessagePack is present. A custo
 
 - No package publishing is automated yet.
 - Install scripts only copy locally built binaries into a user-writable directory.
+- Windows and WSL Ubuntu release paths are locally verified; macOS still needs a macOS host before claiming full macOS release support.
 - No external MCP SDK dependency is bundled.
 - Python and TypeScript packages are repository-local developer wrappers.
 - Release artifacts should be generated from the Rust workspace, not from copied binaries.

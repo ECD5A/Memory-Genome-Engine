@@ -14,11 +14,12 @@ Closed:
 - Mandate 2: Agent Integration / MCP / SDK.
 - Mandate 3: Security / Encryption.
 - Mandate 4: Product UI / Packaging.
+- Mandate 5: Product Distribution / Installers / Release Targets.
 
 Current stage:
 
-- Mandate 5: Product Distribution / Installers / Release Targets is active.
-- Goal: prepare clean local release/install artifacts and GitHub repository polish without new core features.
+- Mandate 5 is closed.
+- Current release readiness: Windows and WSL Ubuntu are verified; macOS is not locally verified on this Windows host.
 
 ## Documentation Map
 
@@ -197,11 +198,11 @@ Latest Mandate 5 distribution verification:
 
 Mandate 5 has local Windows and WSL Ubuntu release/build/smoke/install coverage. macOS shell execution still needs a macOS host. Storage/codec/filter/recall/security formats remain unchanged.
 
-## Mandate 5 Distribution Status
+## Mandate 5 Closure Status
 
-Mandate 5 is active.
+Product distribution / installers / release targets is closed for the current local release candidate.
 
-Added in this distribution pass:
+Ready:
 
 - Local release layout generation under `target/mge-release/<platform>/`.
 - User-local install scripts:
@@ -213,14 +214,23 @@ Added in this distribution pass:
   - `CODE_OF_CONDUCT.md`
 - Release docs for build, smoke, install, and local layout behavior.
 
-Mandate 5 rules:
+Verified:
 
-- No package publishing yet.
-- No committed binaries or generated stores.
-- No core/storage/codec/filter/recall/security behavior changes.
-- Install scripts copy locally built binaries only and do not require admin/root privileges.
+- Windows PowerShell build, smoke, and install paths.
+- WSL Ubuntu POSIX build, smoke, and install help paths.
+- Release binaries: `mge`, `mge-mcp-server`, `mge-synthetic-bench`, `mge-corpus-bench`.
+- CLI smoke, encrypted smoke, MCP smoke, Python SDK smoke, TypeScript SDK smoke, and Rust example smoke through Windows release smoke.
+- CLI smoke, encrypted smoke, MCP smoke, and Rust example smoke through WSL Ubuntu release smoke.
 
-Current platform note:
+Still intentionally not implemented:
+
+- Package publishing.
+- Signed installers or notarized macOS artifacts.
+- Admin/root installer flows.
+- Core/storage/codec/filter/recall/security behavior changes.
+- New runtime dependencies for optional SDK smokes in WSL.
+
+Platform note:
 
 - Windows PowerShell release scripts are locally verified on this host.
 - WSL Ubuntu release scripts are locally verified after installing the minimal Linux build toolchain and Rust stable.
@@ -229,4 +239,4 @@ Current platform note:
 
 ## Next Recommended Step
 
-Finish Mandate 5 release verification, then prepare a GitHub release candidate.
+Prepare a GitHub release candidate from the current release-ready state.

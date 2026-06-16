@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-Mandate%205%20distribution-blue)](PROJECT_STATUS.ru.md)
+[![Status](https://img.shields.io/badge/status-release%20ready-blue)](PROJECT_STATUS.ru.md)
 [![Interface](https://img.shields.io/badge/interface-TUI%20%7C%20CLI%20%7C%20Core%20API%20%7C%20MCP-informational)](crates/)
 [![Storage](https://img.shields.io/badge/storage-binary%20cells%20%2B%20pages-6f42c1)](docs/ARCHITECTURE.ru.md)
 

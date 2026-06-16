@@ -14,11 +14,12 @@ Memory Genome Engine - Rust-first локальный memory engine для аге
 - Mandate 2: Agent Integration / MCP / SDK.
 - Mandate 3: Security / Encryption.
 - Mandate 4: Product UI / Packaging.
+- Mandate 5: Product Distribution / Installers / Release Targets.
 
 Текущий этап:
 
-- Mandate 5: Product Distribution / Installers / Release Targets активен.
-- Цель: подготовить чистые local release/install artifacts и GitHub repository polish без новых core features.
+- Mandate 5 закрыт.
+- Текущая release readiness: Windows и WSL Ubuntu проверены; macOS локально не проверялся на этой Windows-машине.
 
 ## Карта Документации
 
@@ -198,11 +199,11 @@ Product UI / Packaging закрыт.
 
 Mandate 5 имеет local Windows и WSL Ubuntu release/build/smoke/install coverage. macOS shell execution всё ещё требует macOS host. Storage/codec/filter/recall/security formats не менялись.
 
-## Mandate 5 Distribution Status
+## Mandate 5 Closure Status
 
-Mandate 5 активен.
+Product Distribution / Installers / Release Targets закрыт для текущего local release candidate.
 
-Добавлено в этом distribution pass:
+Готово:
 
 - Local release layout generation в `target/mge-release/<platform>/`.
 - User-local install scripts:
@@ -214,14 +215,23 @@ Mandate 5 активен.
   - `CODE_OF_CONDUCT.md`
 - Release docs для build, smoke, install и local layout behavior.
 
-Правила Mandate 5:
+Проверено:
 
-- Package publishing пока нет.
-- Binaries и generated stores не коммитятся.
-- Core/storage/codec/filter/recall/security behavior не менялись.
-- Install scripts только копируют локально собранные binaries и не требуют admin/root privileges.
+- Windows PowerShell build, smoke и install paths.
+- WSL Ubuntu POSIX build, smoke и install help paths.
+- Release binaries: `mge`, `mge-mcp-server`, `mge-synthetic-bench`, `mge-corpus-bench`.
+- CLI smoke, encrypted smoke, MCP smoke, Python SDK smoke, TypeScript SDK smoke и Rust example smoke через Windows release smoke.
+- CLI smoke, encrypted smoke, MCP smoke и Rust example smoke через WSL Ubuntu release smoke.
 
-Текущее замечание по платформам:
+Намеренно не реализовано:
+
+- Package publishing.
+- Signed installers или notarized macOS artifacts.
+- Admin/root installer flows.
+- Core/storage/codec/filter/recall/security behavior changes.
+- New runtime dependencies для optional SDK smokes в WSL.
+
+Платформенное замечание:
 
 - Windows PowerShell release scripts локально проверены на этой машине.
 - WSL Ubuntu release scripts локально проверены после установки минимального Linux build toolchain и Rust stable.
@@ -230,4 +240,4 @@ Mandate 5 активен.
 
 ## Следующий Рекомендуемый Шаг
 
-Завершить Mandate 5 release verification, затем готовить GitHub release candidate.
+Готовить GitHub release candidate из текущего release-ready состояния.

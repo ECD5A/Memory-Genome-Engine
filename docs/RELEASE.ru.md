@@ -38,6 +38,12 @@ target/mge-release/<platform>/
 
 Они учитывают `CARGO_TARGET_DIR`, если он задан. Они не публикуют packages, не создают tracked `dist/` и не коммитят artifacts.
 
+## Platform Verification
+
+- Windows PowerShell scripts локально проверены на текущей Windows-машине.
+- Linux shell scripts локально проверены через WSL Ubuntu.
+- macOS shell scripts идут по тому же POSIX path, но macOS локально не проверялся с этой Windows-машины.
+
 ## Install From Source
 
 Установить local release binaries в user-writable directory:
@@ -248,6 +254,7 @@ Safety rules для corpus benchmark:
 
 - Package publishing пока не автоматизирован.
 - Install scripts только копируют локально собранные binaries в user-writable directory.
+- Windows и WSL Ubuntu release paths локально проверены; macOS всё ещё требует macOS host перед claim full macOS release support.
 - External MCP SDK dependency не bundled.
 - Python и TypeScript packages - repository-local developer wrappers.
 - Release artifacts должны собираться из Rust workspace, а не из copied binaries.
