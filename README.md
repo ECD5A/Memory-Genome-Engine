@@ -96,6 +96,8 @@ If Memory Genome Engine is useful to your work, you can support the project here
 - Bitcoin (BTC): `1ECDSA1b4d5TcZHtqNpcxmY8pBH1GgHntN`
 - USDT (TRC20): `TUF4vPdB6QkjCvZq18rBL4Qj4dK5ihCN75`
 
+Commercial integration, support, and partnership discussions are welcome.
+
 ## License
 
 Apache License, Version 2.0. Copyright (c) 2026 ECD5A.

@@ -96,6 +96,8 @@ node examples/typescript_agent_host.ts
 - Bitcoin (BTC): `1ECDSA1b4d5TcZHtqNpcxmY8pBH1GgHntN`
 - USDT (TRC20): `TUF4vPdB6QkjCvZq18rBL4Qj4dK5ihCN75`
 
+Открыт к обсуждению коммерческой интеграции, поддержки и партнёрства.
+
 ## Лицензия
 
 Apache License, Version 2.0. Copyright (c) 2026 ECD5A.
