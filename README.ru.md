@@ -1,11 +1,33 @@
-# Memory Genome Engine
+<h1 align="center">Memory Genome Engine</h1>
 
-[![Rust](https://img.shields.io/badge/Rust-1.95%2B-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![License: Apache--2.0](https://img.shields.io/badge/License-Apache--2.0-green.svg)](LICENSE)
-[![Interface](https://img.shields.io/badge/interface-CLI%20%7C%20TUI%20%7C%20MCP%20%7C%20SDK-informational)](docs/INTEGRATION.ru.md)
-[![Storage](https://img.shields.io/badge/storage-binary%20local--first-6f42c1)](docs/ARCHITECTURE.ru.md)
+<p align="center">
+  <strong>Local-first структурированная память для AI-агентов.</strong><br>
+  Rust-ядро, binary storage, terminal UX, MCP-ready JSON-RPC, тонкие SDK и optional encrypted stores.
+</p>
 
-[English version](README.md)
+<p align="center">
+  <a href="README.md">English version</a>
+  ·
+  <a href="QUICKSTART.ru.md">Быстрый старт</a>
+  ·
+  <a href="docs/ARCHITECTURE.ru.md">Архитектура</a>
+  ·
+  <a href="docs/SECURITY.ru.md">Безопасность</a>
+  ·
+  <a href="docs/INTEGRATION.ru.md">Интеграция</a>
+</p>
+
+<p align="center">
+  <a href="https://www.rust-lang.org/"><img alt="Rust 1.95+" src="https://img.shields.io/badge/Rust-1.95%2B-f74c00?style=for-the-badge&logo=rust&logoColor=white"></a>
+  <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/License-Apache--2.0-2ea043?style=for-the-badge"></a>
+  <a href="docs/ARCHITECTURE.ru.md"><img alt="Local-first" src="https://img.shields.io/badge/Local--first-memory-00acc1?style=for-the-badge"></a>
+  <a href="docs/ARCHITECTURE.ru.md"><img alt="Binary storage" src="https://img.shields.io/badge/Binary-storage-5b5bd6?style=for-the-badge"></a>
+  <a href="docs/INTEGRATION.ru.md"><img alt="CLI and TUI" src="https://img.shields.io/badge/CLI%20%2F%20TUI-product-111827?style=for-the-badge"></a>
+  <a href="docs/INTEGRATION.ru.md"><img alt="MCP ready" src="https://img.shields.io/badge/MCP--ready-JSON--RPC-7c3aed?style=for-the-badge"></a>
+  <a href="docs/SECURITY.ru.md"><img alt="Encrypted stores" src="https://img.shields.io/badge/Encrypted-stores-16a34a?style=for-the-badge"></a>
+  <a href="sdk/python/README.md"><img alt="Python SDK" src="https://img.shields.io/badge/Python-SDK-3776ab?style=for-the-badge&logo=python&logoColor=white"></a>
+  <a href="sdk/typescript/README.md"><img alt="TypeScript SDK" src="https://img.shields.io/badge/TypeScript-SDK-3178c6?style=for-the-badge&logo=typescript&logoColor=white"></a>
+</p>
 
 Memory Genome Engine - local-first движок структурированной памяти для AI-агентов. Он хранит типизированные `MemoryCell`, описывает их через `MarkerGenome`, переносит холодную память в sealed binary pages и возвращает task-relevant `ContextPacket` для agent workflows.
 
