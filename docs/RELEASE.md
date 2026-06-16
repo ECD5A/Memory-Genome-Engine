@@ -28,7 +28,33 @@ Repo-local build helpers:
 powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 ```
 
-The scripts build local release binaries and verify that expected executables exist. They honor `CARGO_TARGET_DIR` when it is set. They do not publish packages, create a `dist/` directory, or commit artifacts.
+The scripts build local release binaries, verify that expected executables exist, and prepare a local release layout under:
+
+```text
+target/mge-release/<platform>/
+  bin/
+  docs/
+```
+
+They honor `CARGO_TARGET_DIR` when it is set. They do not publish packages, create a tracked `dist/` directory, or commit artifacts.
+
+## Install From Source
+
+Install local release binaries into a user-writable directory:
+
+```bash
+./scripts/install.sh --install-dir "$HOME/.local/bin"
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -InstallDir "$env:USERPROFILE\.local\bin"
+```
+
+The install scripts build release binaries unless `--no-build` / `-NoBuild` is passed, then copy:
+
+- `mge`
+- `mge-mcp-server`
+- `mge-synthetic-bench`
+- `mge-corpus-bench`
+
+They do not publish packages, require admin/root privileges, or modify shell profile files. Add the install directory to `PATH` manually when needed.
 
 ## Test
 
@@ -206,6 +232,7 @@ Do not start custom page codec work just because MessagePack is present. A custo
 - `cargo build -p mge-cli --bins --release` passes.
 - `scripts/build-release.sh` or `scripts/build-release.ps1` passes.
 - `scripts/smoke-release.sh` or `scripts/smoke-release.ps1` passes.
+- `scripts/install.sh` or `scripts/install.ps1` installs into a user-writable directory.
 - CLI smoke passes on a temporary store.
 - TUI help smoke (`mge tui --help`) passes.
 - Setup help smoke (`mge setup --help`) passes.
@@ -220,6 +247,7 @@ Do not start custom page codec work just because MessagePack is present. A custo
 ## Current Publishing Policy
 
 - No package publishing is automated yet.
+- Install scripts only copy locally built binaries into a user-writable directory.
 - No external MCP SDK dependency is bundled.
 - Python and TypeScript packages are repository-local developer wrappers.
 - Release artifacts should be generated from the Rust workspace, not from copied binaries.

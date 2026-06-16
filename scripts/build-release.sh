@@ -4,6 +4,24 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+require_command() {
+  local name="$1"
+  if ! command -v "$name" >/dev/null 2>&1; then
+    echo "missing required command: $name" >&2
+    return 127
+  fi
+}
+
+required_bins=(
+  mge
+  mge-mcp-server
+  mge-synthetic-bench
+  mge-corpus-bench
+)
+
+require_command cargo
+require_command uname
+
 echo "Building release binaries..."
 cargo build -p mge-cli --bins --release
 
@@ -23,10 +41,34 @@ find_bin() {
 }
 
 mge_bin="$(find_bin mge)"
-find_bin mge-mcp-server >/dev/null
-find_bin mge-synthetic-bench >/dev/null
-find_bin mge-corpus-bench >/dev/null
+for name in "${required_bins[@]}"; do
+  find_bin "$name" >/dev/null
+done
+
+platform="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | tr '[:upper:]' '[:lower:]')"
+layout_dir="$target_root/mge-release/$platform"
+layout_bin_dir="$layout_dir/bin"
+layout_docs_dir="$layout_dir/docs"
+mkdir -p "$layout_bin_dir" "$layout_docs_dir"
+
+for name in "${required_bins[@]}"; do
+  src="$(find_bin "$name")"
+  cp -f "$src" "$layout_bin_dir/$(basename "$src")"
+done
+
+for path in LICENSE README.md README.ru.md QUICKSTART.md QUICKSTART.ru.md SECURITY.md CONTRIBUTING.md CODE_OF_CONDUCT.md; do
+  if [[ -f "$path" ]]; then
+    cp -f "$path" "$layout_dir/$(basename "$path")"
+  fi
+done
+
+for path in docs/RELEASE.md docs/RELEASE.ru.md docs/SECURITY.md docs/SECURITY.ru.md docs/INTEGRATION.md docs/INTEGRATION.ru.md; do
+  if [[ -f "$path" ]]; then
+    cp -f "$path" "$layout_docs_dir/$(basename "$path")"
+  fi
+done
 
 "$mge_bin" --version
 
 echo "Release build ok: $bin_dir"
+echo "Release layout ok: $layout_dir"

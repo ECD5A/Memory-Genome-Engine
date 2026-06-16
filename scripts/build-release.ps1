@@ -3,6 +3,13 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
+$RequiredBins = @(
+    "mge",
+    "mge-mcp-server",
+    "mge-synthetic-bench",
+    "mge-corpus-bench"
+)
+
 Write-Host "Building release binaries..."
 cargo build -p mge-cli --bins --release
 
@@ -33,10 +40,42 @@ function Find-Binary {
 }
 
 $Mge = Find-Binary "mge"
-[void](Find-Binary "mge-mcp-server")
-[void](Find-Binary "mge-synthetic-bench")
-[void](Find-Binary "mge-corpus-bench")
+foreach ($Name in $RequiredBins) {
+    [void](Find-Binary $Name)
+}
+
+$Os = if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
+    "windows"
+} elseif ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::OSX)) {
+    "macos"
+} else {
+    "linux"
+}
+$Arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+$LayoutDir = Join-Path $TargetRoot (Join-Path "mge-release" "$Os-$Arch")
+$LayoutBinDir = Join-Path $LayoutDir "bin"
+$LayoutDocsDir = Join-Path $LayoutDir "docs"
+
+New-Item -ItemType Directory -Force -Path $LayoutBinDir, $LayoutDocsDir | Out-Null
+
+foreach ($Name in $RequiredBins) {
+    $Source = Find-Binary $Name
+    Copy-Item -Force -Path $Source -Destination (Join-Path $LayoutBinDir (Split-Path -Leaf $Source))
+}
+
+foreach ($Path in @("LICENSE", "README.md", "README.ru.md", "QUICKSTART.md", "QUICKSTART.ru.md", "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md")) {
+    if (Test-Path $Path) {
+        Copy-Item -Force -Path $Path -Destination (Join-Path $LayoutDir (Split-Path -Leaf $Path))
+    }
+}
+
+foreach ($Path in @("docs\RELEASE.md", "docs\RELEASE.ru.md", "docs\SECURITY.md", "docs\SECURITY.ru.md", "docs\INTEGRATION.md", "docs\INTEGRATION.ru.md")) {
+    if (Test-Path $Path) {
+        Copy-Item -Force -Path $Path -Destination (Join-Path $LayoutDocsDir (Split-Path -Leaf $Path))
+    }
+}
 
 & $Mge --version
 
 Write-Host "Release build ok: $BinDir"
+Write-Host "Release layout ok: $LayoutDir"

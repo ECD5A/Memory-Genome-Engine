@@ -4,6 +4,19 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+require_command() {
+  local name="$1"
+  if ! command -v "$name" >/dev/null 2>&1; then
+    echo "missing required command: $name" >&2
+    return 127
+  fi
+}
+
+require_command cargo
+require_command grep
+require_command mktemp
+require_command tee
+
 echo "Building release binaries for smoke..."
 cargo build -p mge-cli --bins --release
 

@@ -17,8 +17,8 @@ Memory Genome Engine - Rust-first локальный memory engine для аге
 
 Текущий этап:
 
-- Mandate 4 закрыт.
-- Рекомендуемый следующий мандат: Product Distribution / Installers / Release Targets.
+- Mandate 5: Product Distribution / Installers / Release Targets активен.
+- Цель: подготовить чистые local release/install artifacts и GitHub repository polish без новых core features.
 
 ## Карта Документации
 
@@ -140,7 +140,7 @@ Product UI / Packaging закрыт.
   - `scripts/smoke-release.ps1`
 - Release scripts выполняют `cargo build -p mge-cli --bins --release`, проверяют release binaries и запускают CLI/encrypted/MCP/SDK smoke checks без публикации packages и без коммита artifacts.
 - Windows PowerShell build/smoke scripts проверены на этой машине.
-- Linux/macOS `.sh` build/smoke scripts присутствуют и синхронизированы с PowerShell behavior, но локально не запускались, потому что WSL/Linux не установлен.
+- Linux/macOS `.sh` build/smoke scripts присутствуют и синхронизированы с PowerShell behavior, но локально не запускались полностью, потому что в WSL Ubuntu не установлен Linux Rust toolchain.
 - CLI, MCP JSON-RPC, Python SDK, TypeScript SDK и Rust example smokes проходят через release smoke script.
 - Local encrypted demo workflow scripts:
   - `scripts/demo-local-memory.sh`
@@ -164,7 +164,7 @@ Product UI / Packaging закрыт.
 - Encrypted indexes и blind marker metadata пока нет.
 - Encrypted Markdown export пока нет.
 - Package publishing пока нет.
-- Linux/macOS `.sh` release scripts присутствуют, но не проверены локально на этой Windows-машине.
+- Linux/macOS `.sh` release scripts присутствуют, но не проверены полностью на этой Windows-машине, потому что в WSL Ubuntu нет Linux `cargo`.
 - Markdown import disabled.
 - External MCP SDK dependency не добавлена.
 - Automatic migration from unencrypted stores to encrypted stores пока нет.
@@ -172,12 +172,15 @@ Product UI / Packaging закрыт.
 
 ## Последняя Verification Baseline
 
-Последняя Mandate 4 TUI/package/release проверка:
+Последняя Mandate 5 distribution проверка:
 
 - `cargo fmt --check`: passed.
 - `cargo test`: passed, 157 tests.
 - `cargo check -p mge-cli --bins`: passed.
 - `cargo build -p mge-cli --bins --release`: passed.
+- `scripts/build-release.ps1`: passed и создал `target/mge-release/windows-x64`.
+- `scripts/smoke-release.ps1`: passed.
+- `scripts/install.ps1 -NoBuild`: passed во временную install directory.
 - Release binary TUI help smoke: `mge tui --help` passed.
 - Release binary setup help smoke: `mge setup --help` passed.
 - CLI quickstart smoke: passed во временном store через release script.
@@ -186,13 +189,42 @@ Product UI / Packaging закрыт.
 - Python SDK smoke: passed при запуске из `scripts/smoke-release.ps1`.
 - TypeScript SDK smoke: passed при запуске из `scripts/smoke-release.ps1`.
 - Rust agent host example smoke: passed при запуске из `scripts/smoke-release.ps1`.
-- `scripts/build-release.ps1`: passed.
-- `scripts/smoke-release.ps1`: passed.
-- POSIX `.sh` release scripts обновлены для Linux/macOS; на этом Windows host они не запускались, потому что WSL не имеет установленного distribution.
-- `scripts/demo-local-memory.ps1`: passed.
+- Markdown link sanity: passed.
+- `git diff --check`: passed.
+- `scripts/build-release.sh` через WSL Ubuntu: blocked by missing Linux `cargo` после clean preflight.
+- `scripts/smoke-release.sh` через WSL Ubuntu: blocked by missing Linux `cargo` после clean preflight.
+- `scripts/install.sh --help` через WSL Ubuntu: passed.
 
-Mandate 4 закрыл terminal UI, packaging/dev UX, release-script и read-only diagnostics слой. Storage/codec/filter/recall/security formats не менялись.
+Mandate 5 имеет local Windows release/build/smoke/install coverage. Linux/macOS shell scripts присутствуют и имеют clean toolchain preflight, но full execution всё ещё требует Linux/macOS machine или WSL Ubuntu с установленным Rust. Storage/codec/filter/recall/security formats не менялись.
+
+## Mandate 5 Distribution Status
+
+Mandate 5 активен.
+
+Добавлено в этом distribution pass:
+
+- Local release layout generation в `target/mge-release/<platform>/`.
+- User-local install scripts:
+  - `scripts/install.sh`
+  - `scripts/install.ps1`
+- GitHub community files:
+  - `SECURITY.md`
+  - `CONTRIBUTING.md`
+  - `CODE_OF_CONDUCT.md`
+- Release docs для build, smoke, install и local layout behavior.
+
+Правила Mandate 5:
+
+- Package publishing пока нет.
+- Binaries и generated stores не коммитятся.
+- Core/storage/codec/filter/recall/security behavior не менялись.
+- Install scripts только копируют локально собранные binaries и не требуют admin/root privileges.
+
+Текущее замечание по платформам:
+
+- Windows PowerShell release scripts - основной локально проверенный путь на этой машине.
+- WSL Ubuntu доступен, но Linux Rust toolchain внутри Ubuntu не установлен, поэтому POSIX `.sh` release scripts на этой машине можно проверить только до toolchain preflight, если отдельно не установить Linux `cargo`.
 
 ## Следующий Рекомендуемый Шаг
 
-Начать Mandate 5: Product Distribution / Installers / Release Targets.
+Завершить Mandate 5 release verification, затем готовить GitHub release candidate.

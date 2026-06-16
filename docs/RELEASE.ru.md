@@ -28,7 +28,33 @@ Repo-local build helpers:
 powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 ```
 
-Scripts собирают local release binaries и проверяют наличие expected executables. Они учитывают `CARGO_TARGET_DIR`, если он задан. Они не публикуют packages, не создают `dist/` и не коммитят artifacts.
+Scripts собирают local release binaries, проверяют наличие expected executables и готовят local release layout:
+
+```text
+target/mge-release/<platform>/
+  bin/
+  docs/
+```
+
+Они учитывают `CARGO_TARGET_DIR`, если он задан. Они не публикуют packages, не создают tracked `dist/` и не коммитят artifacts.
+
+## Install From Source
+
+Установить local release binaries в user-writable directory:
+
+```bash
+./scripts/install.sh --install-dir "$HOME/.local/bin"
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -InstallDir "$env:USERPROFILE\.local\bin"
+```
+
+Install scripts собирают release binaries, если не передан `--no-build` / `-NoBuild`, затем копируют:
+
+- `mge`
+- `mge-mcp-server`
+- `mge-synthetic-bench`
+- `mge-corpus-bench`
+
+Они не публикуют packages, не требуют admin/root privileges и не меняют shell profile files. Добавьте install directory в `PATH` вручную, если нужно.
 
 ## Test
 
@@ -206,6 +232,7 @@ Safety rules для corpus benchmark:
 - `cargo build -p mge-cli --bins --release` passes.
 - `scripts/build-release.sh` или `scripts/build-release.ps1` passes.
 - `scripts/smoke-release.sh` или `scripts/smoke-release.ps1` passes.
+- `scripts/install.sh` или `scripts/install.ps1` устанавливает binaries в user-writable directory.
 - CLI smoke passes во временном store.
 - TUI help smoke (`mge tui --help`) passes.
 - Setup help smoke (`mge setup --help`) passes.
@@ -220,6 +247,7 @@ Safety rules для corpus benchmark:
 ## Current Publishing Policy
 
 - Package publishing пока не автоматизирован.
+- Install scripts только копируют локально собранные binaries в user-writable directory.
 - External MCP SDK dependency не bundled.
 - Python и TypeScript packages - repository-local developer wrappers.
 - Release artifacts должны собираться из Rust workspace, а не из copied binaries.

@@ -17,8 +17,8 @@ Closed:
 
 Current stage:
 
-- Mandate 4 is closed.
-- Recommended next mandate: Product Distribution / Installers / Release Targets.
+- Mandate 5: Product Distribution / Installers / Release Targets is active.
+- Goal: prepare clean local release/install artifacts and GitHub repository polish without new core features.
 
 ## Documentation Map
 
@@ -140,7 +140,7 @@ Ready:
   - `scripts/smoke-release.ps1`
 - Release scripts build `cargo build -p mge-cli --bins --release`, verify release binaries, and run CLI/encrypted/MCP/SDK smoke checks without publishing packages or committing artifacts.
 - Windows PowerShell build/smoke scripts are verified on this host.
-- Linux/macOS `.sh` build/smoke scripts are present and aligned with PowerShell behavior, but were not locally executed because WSL/Linux is not installed.
+- Linux/macOS `.sh` build/smoke scripts are present and aligned with PowerShell behavior, but were not fully locally executed because WSL Ubuntu does not have a Linux Rust toolchain installed.
 - CLI, MCP JSON-RPC, Python SDK, TypeScript SDK, and Rust example smokes pass through the release smoke script.
 - Local encrypted demo workflow scripts:
   - `scripts/demo-local-memory.sh`
@@ -163,7 +163,7 @@ Still intentionally not implemented:
 - No encrypted indexes or blind marker metadata yet.
 - No encrypted Markdown export yet.
 - No package publishing yet.
-- Linux/macOS `.sh` release scripts are present but not locally verified on this Windows machine.
+- Linux/macOS `.sh` release scripts are present but not fully locally verified on this Windows machine because WSL Ubuntu does not have Linux `cargo`.
 - Markdown import is disabled.
 - No external MCP SDK dependency.
 - No automatic migration from unencrypted stores to encrypted stores.
@@ -171,12 +171,15 @@ Still intentionally not implemented:
 
 ## Latest Verification Baseline
 
-Latest Mandate 4 TUI/package/release verification:
+Latest Mandate 5 distribution verification:
 
 - `cargo fmt --check`: passed.
 - `cargo test`: passed, 157 tests.
 - `cargo check -p mge-cli --bins`: passed.
 - `cargo build -p mge-cli --bins --release`: passed.
+- `scripts/build-release.ps1`: passed and created `target/mge-release/windows-x64`.
+- `scripts/smoke-release.ps1`: passed.
+- `scripts/install.ps1 -NoBuild`: passed on a temporary install directory.
 - Release binary TUI help smoke: `mge tui --help` passed.
 - Release binary setup help smoke: `mge setup --help` passed.
 - CLI quickstart smoke: passed on a temporary store through release script.
@@ -185,13 +188,42 @@ Latest Mandate 4 TUI/package/release verification:
 - Python SDK smoke: passed when run from `scripts/smoke-release.ps1`.
 - TypeScript SDK smoke: passed when run from `scripts/smoke-release.ps1`.
 - Rust agent host example smoke: passed when run from `scripts/smoke-release.ps1`.
-- `scripts/build-release.ps1`: passed.
-- `scripts/smoke-release.ps1`: passed.
-- POSIX `.sh` release scripts are updated for Linux/macOS; they were not executed on this Windows host because WSL has no installed distribution.
-- `scripts/demo-local-memory.ps1`: passed.
+- Markdown link sanity: passed.
+- `git diff --check`: passed.
+- `scripts/build-release.sh` through WSL Ubuntu: blocked by missing Linux `cargo` after clean preflight.
+- `scripts/smoke-release.sh` through WSL Ubuntu: blocked by missing Linux `cargo` after clean preflight.
+- `scripts/install.sh --help` through WSL Ubuntu: passed.
 
-Mandate 4 closed the terminal UI, packaging/dev UX, release-script, and read-only diagnostics layer. Storage/codec/filter/recall/security formats remain unchanged.
+Mandate 5 has local Windows release/build/smoke/install coverage. Linux/macOS shell scripts are present and have clean toolchain preflight, but full execution still needs a Linux/macOS machine or WSL Ubuntu with Rust installed. Storage/codec/filter/recall/security formats remain unchanged.
+
+## Mandate 5 Distribution Status
+
+Mandate 5 is active.
+
+Added in this distribution pass:
+
+- Local release layout generation under `target/mge-release/<platform>/`.
+- User-local install scripts:
+  - `scripts/install.sh`
+  - `scripts/install.ps1`
+- GitHub community files:
+  - `SECURITY.md`
+  - `CONTRIBUTING.md`
+  - `CODE_OF_CONDUCT.md`
+- Release docs for build, smoke, install, and local layout behavior.
+
+Mandate 5 rules:
+
+- No package publishing yet.
+- No committed binaries or generated stores.
+- No core/storage/codec/filter/recall/security behavior changes.
+- Install scripts copy locally built binaries only and do not require admin/root privileges.
+
+Current platform note:
+
+- Windows PowerShell release scripts are the primary locally verified path on this host.
+- WSL Ubuntu is available, but the Linux Rust toolchain is not installed inside Ubuntu, so POSIX `.sh` release scripts can only be checked up to toolchain preflight on this machine unless Linux `cargo` is installed separately.
 
 ## Next Recommended Step
 
-Start Mandate 5: Product Distribution / Installers / Release Targets.
+Finish Mandate 5 release verification, then prepare a GitHub release candidate.

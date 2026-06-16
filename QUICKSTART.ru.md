@@ -207,9 +207,11 @@ node examples/typescript_basic_usage.ts
 ```bash
 ./scripts/build-release.sh
 ./scripts/smoke-release.sh
+./scripts/install.sh --install-dir "$HOME/.local/bin"
 # или на Windows:
 powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-release.ps1
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -InstallDir "$env:USERPROFILE\.local\bin"
 ```
 
 Подробности: [Release](docs/RELEASE.ru.md).

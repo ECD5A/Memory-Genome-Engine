@@ -207,9 +207,11 @@ For local release readiness without publishing packages or committing binaries:
 ```bash
 ./scripts/build-release.sh
 ./scripts/smoke-release.sh
+./scripts/install.sh --install-dir "$HOME/.local/bin"
 # or on Windows:
 powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-release.ps1
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -InstallDir "$env:USERPROFILE\.local\bin"
 ```
 
 Details: [Release](docs/RELEASE.md).
