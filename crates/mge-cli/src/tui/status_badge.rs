@@ -1,7 +1,7 @@
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
-use crate::tui::i18n::{tr, Language, TKey};
+use crate::tui::i18n::Language;
 use crate::tui::theme;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -11,11 +11,11 @@ pub enum BadgeKind {
     Error,
 }
 
-pub fn badge_text(language: Language, kind: BadgeKind) -> String {
+pub fn badge_text(_language: Language, kind: BadgeKind) -> String {
     match kind {
-        BadgeKind::Ok => format!("[✓] {}", tr(language, TKey::Ok)),
-        BadgeKind::Warn => format!("[!] {}", tr(language, TKey::Warn)),
-        BadgeKind::Error => format!("[x] {}", tr(language, TKey::Error)),
+        BadgeKind::Ok => "[OK]".to_string(),
+        BadgeKind::Warn => "[WARN]".to_string(),
+        BadgeKind::Error => "[ERR]".to_string(),
     }
 }
 
@@ -41,7 +41,7 @@ mod tests {
     #[test]
     fn status_badges_include_text_not_only_color() {
         assert!(badge_text(Language::En, BadgeKind::Ok).contains("OK"));
-        assert!(badge_text(Language::Ru, BadgeKind::Error).contains("ОШИБКА"));
-        assert!(badge_text(Language::En, BadgeKind::Ok).contains("✓"));
+        assert!(badge_text(Language::Ru, BadgeKind::Error).contains("ERR"));
+        assert!(badge_text(Language::En, BadgeKind::Ok).is_ascii());
     }
 }
