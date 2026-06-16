@@ -140,7 +140,7 @@ Ready:
   - `scripts/smoke-release.ps1`
 - Release scripts build `cargo build -p mge-cli --bins --release`, verify release binaries, and run CLI/encrypted/MCP/SDK smoke checks without publishing packages or committing artifacts.
 - Windows PowerShell build/smoke scripts are verified on this host.
-- Linux/macOS `.sh` build/smoke scripts are present and aligned with PowerShell behavior, but were not fully locally executed because WSL Ubuntu does not have a Linux Rust toolchain installed.
+- Linux `.sh` build/smoke scripts are verified through WSL Ubuntu in Mandate 5; macOS has not been locally executed on this Windows host.
 - CLI, MCP JSON-RPC, Python SDK, TypeScript SDK, and Rust example smokes pass through the release smoke script.
 - Local encrypted demo workflow scripts:
   - `scripts/demo-local-memory.sh`
@@ -163,7 +163,7 @@ Still intentionally not implemented:
 - No encrypted indexes or blind marker metadata yet.
 - No encrypted Markdown export yet.
 - No package publishing yet.
-- Linux/macOS `.sh` release scripts are present but not fully locally verified on this Windows machine because WSL Ubuntu does not have Linux `cargo`.
+- Linux `.sh` release scripts are verified through WSL Ubuntu; macOS `.sh` execution is still not locally verified on this Windows machine.
 - Markdown import is disabled.
 - No external MCP SDK dependency.
 - No automatic migration from unencrypted stores to encrypted stores.
@@ -190,11 +190,12 @@ Latest Mandate 5 distribution verification:
 - Rust agent host example smoke: passed when run from `scripts/smoke-release.ps1`.
 - Markdown link sanity: passed.
 - `git diff --check`: passed.
-- `scripts/build-release.sh` through WSL Ubuntu: blocked by missing Linux `cargo` after clean preflight.
-- `scripts/smoke-release.sh` through WSL Ubuntu: blocked by missing Linux `cargo` after clean preflight.
+- WSL Ubuntu environment: `rustc 1.96.0`, `cargo 1.96.0`, GNU bash 5.3.9, GCC 15.2.0, `pkg-config` 2.5.1.
+- `scripts/build-release.sh` through WSL Ubuntu: passed with `CARGO_TARGET_DIR=target/wsl-release`.
+- `scripts/smoke-release.sh` through WSL Ubuntu: passed with `CARGO_TARGET_DIR=target/wsl-release`.
 - `scripts/install.sh --help` through WSL Ubuntu: passed.
 
-Mandate 5 has local Windows release/build/smoke/install coverage. Linux/macOS shell scripts are present and have clean toolchain preflight, but full execution still needs a Linux/macOS machine or WSL Ubuntu with Rust installed. Storage/codec/filter/recall/security formats remain unchanged.
+Mandate 5 has local Windows and WSL Ubuntu release/build/smoke/install coverage. macOS shell execution still needs a macOS host. Storage/codec/filter/recall/security formats remain unchanged.
 
 ## Mandate 5 Distribution Status
 
@@ -221,8 +222,10 @@ Mandate 5 rules:
 
 Current platform note:
 
-- Windows PowerShell release scripts are the primary locally verified path on this host.
-- WSL Ubuntu is available, but the Linux Rust toolchain is not installed inside Ubuntu, so POSIX `.sh` release scripts can only be checked up to toolchain preflight on this machine unless Linux `cargo` is installed separately.
+- Windows PowerShell release scripts are locally verified on this host.
+- WSL Ubuntu release scripts are locally verified after installing the minimal Linux build toolchain and Rust stable.
+- Python and Node were not installed in WSL; optional Python/TypeScript SDK smokes were skipped there. They remain covered by the Windows release smoke.
+- macOS shell scripts are expected to follow the POSIX path but are not locally executed on this Windows machine.
 
 ## Next Recommended Step
 
