@@ -22,8 +22,9 @@ Memory Genome Engine is a local-first Rust project. Keep changes small, measurab
 Keep Markdown consolidated:
 
 - short product entry: `README.md` / `README.ru.md`;
-- quick commands: `QUICKSTART.md` / `QUICKSTART.ru.md`;
-- architecture, security, integration, and release details under `docs/`.
+- quick commands: `QUICKSTART.md`;
+- architecture, security, integration, and release details under `docs/`;
+- keep Russian public documentation limited to `README.ru.md` unless a new mirror is explicitly approved.
 
 Do not recreate removed long-form docs such as `docs/MCP.md`, `docs/SDK.md`, `docs/BENCHMARKS.md`, `docs/ROADMAP.md`, `examples/basic_usage.md`, or `examples/agent_workflow.md`.
 

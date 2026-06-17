@@ -1,7 +1,5 @@
 # Release
 
-[Russian version](RELEASE.ru.md)
-
 This document is for local build, packaging, and release readiness checks. It does not define runtime storage behavior.
 
 ## Build

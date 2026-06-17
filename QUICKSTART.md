@@ -1,7 +1,5 @@
 # Quickstart
 
-[Russian version](QUICKSTART.ru.md)
-
 This guide shows the shortest path from a clean checkout to a working local Memory Genome store.
 
 ## Build

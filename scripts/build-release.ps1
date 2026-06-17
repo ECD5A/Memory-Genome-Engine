@@ -87,13 +87,13 @@ if ($env:MGE_INCLUDE_DEV_TOOLS -eq "1") {
     Write-Host "Development benchmark tools copied to: $LayoutDevToolsDir"
 }
 
-foreach ($Path in @("LICENSE", "README.md", "README.ru.md", "QUICKSTART.md", "QUICKSTART.ru.md", "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md")) {
+foreach ($Path in @("LICENSE", "README.md", "README.ru.md", "QUICKSTART.md", "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md")) {
     if (Test-Path $Path) {
         Copy-Item -Force -Path $Path -Destination (Join-Path $LayoutDir (Split-Path -Leaf $Path))
     }
 }
 
-foreach ($Path in @("docs\RELEASE.md", "docs\RELEASE.ru.md", "docs\SECURITY.md", "docs\SECURITY.ru.md", "docs\INTEGRATION.md", "docs\INTEGRATION.ru.md")) {
+foreach ($Path in @("docs\RELEASE.md", "docs\SECURITY.md", "docs\INTEGRATION.md")) {
     if (Test-Path $Path) {
         Copy-Item -Force -Path $Path -Destination (Join-Path $LayoutDocsDir (Split-Path -Leaf $Path))
     }

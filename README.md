@@ -115,7 +115,3 @@ For commercial integration, support, collaboration, and partnership inquiries:
   &nbsp;
   <a href="https://github.com/ECD5A/Memory-Genome-Engine" aria-label="GitHub repository"><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/github/FFFFFF"><img alt="GitHub repository" height="24" src="https://cdn.simpleicons.org/github/181717"></picture></a>
 </p>
-
-## License
-
-Apache License, Version 2.0. Copyright (c) 2026 ECD5A.

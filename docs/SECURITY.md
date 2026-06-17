@@ -1,7 +1,5 @@
 # Security Model
 
-[Russian version](SECURITY.ru.md)
-
 This document describes the security and encryption model for Memory Genome Engine. The current implemented scope is session unlock plus authenticated encryption for L1 hot storage and sealed page payloads.
 
 Current implementation status:

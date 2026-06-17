@@ -3,11 +3,11 @@
 <p align="center">
   <a href="https://www.rust-lang.org/"><img alt="Rust 1.95+" src="https://img.shields.io/badge/Rust-1.95%2B-b45309?style=flat-square&logo=rust&logoColor=white"></a>
   <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-15803d?style=flat-square"></a>
-  <a href="docs/ARCHITECTURE.ru.md"><img alt="Local-first memory" src="https://img.shields.io/badge/local--first-memory-0e7490?style=flat-square"></a>
-  <a href="docs/ARCHITECTURE.ru.md"><img alt="Binary storage" src="https://img.shields.io/badge/binary-storage-6d28d9?style=flat-square"></a>
-  <a href="docs/INTEGRATION.ru.md"><img alt="CLI TUI MCP" src="https://img.shields.io/badge/CLI%20.%20TUI%20.%20MCP-ready-0369a1?style=flat-square"></a>
-  <a href="docs/SECURITY.ru.md"><img alt="Encrypted stores" src="https://img.shields.io/badge/encrypted-stores-15803d?style=flat-square"></a>
-  <a href="docs/INTEGRATION.ru.md"><img alt="Python TypeScript SDK" src="https://img.shields.io/badge/Python%20.%20TypeScript-SDK-2563eb?style=flat-square"></a>
+  <a href="docs/ARCHITECTURE.md"><img alt="Local-first memory" src="https://img.shields.io/badge/local--first-memory-0e7490?style=flat-square"></a>
+  <a href="docs/ARCHITECTURE.md"><img alt="Binary storage" src="https://img.shields.io/badge/binary-storage-6d28d9?style=flat-square"></a>
+  <a href="docs/INTEGRATION.md"><img alt="CLI TUI MCP" src="https://img.shields.io/badge/CLI%20.%20TUI%20.%20MCP-ready-0369a1?style=flat-square"></a>
+  <a href="docs/SECURITY.md"><img alt="Encrypted stores" src="https://img.shields.io/badge/encrypted-stores-15803d?style=flat-square"></a>
+  <a href="docs/INTEGRATION.md"><img alt="Python TypeScript SDK" src="https://img.shields.io/badge/Python%20.%20TypeScript-SDK-2563eb?style=flat-square"></a>
   <br>
   <sub><a href="https://github.com/ECD5A/Memory-Genome-Engine/blob/main/README.md">English version</a></sub>
 </p>
@@ -58,7 +58,7 @@ cargo run -p mge-cli -- seal --passphrase-env MGE_PASSPHRASE
 cargo run -p mge-cli -- validate --deep --passphrase-env MGE_PASSPHRASE
 ```
 
-Payload encryption защищает hot records, snapshots и sealed page payloads. Metadata вроде marker dictionary, indexes, catalog summaries, Markdown export и process memory while unlocked остаётся plaintext by design. Подробнее: [Security](docs/SECURITY.ru.md).
+Payload encryption защищает hot records, snapshots и sealed page payloads. Metadata вроде marker dictionary, indexes, catalog summaries, Markdown export и process memory while unlocked остаётся plaintext by design. Подробнее: [Security](docs/SECURITY.md).
 
 ## Agent Integration
 
@@ -83,11 +83,11 @@ node examples/typescript_agent_host.ts
 
 ## Документация
 
-- [Quickstart](QUICKSTART.ru.md)
-- [Архитектура](docs/ARCHITECTURE.ru.md)
-- [Security model](docs/SECURITY.ru.md)
-- [Интеграция / MCP / SDK](docs/INTEGRATION.ru.md)
-- [Release checks](docs/RELEASE.ru.md)
+- [Quickstart](QUICKSTART.md)
+- [Архитектура](docs/ARCHITECTURE.md)
+- [Security model](docs/SECURITY.md)
+- [Интеграция / MCP / SDK](docs/INTEGRATION.md)
+- [Release checks](docs/RELEASE.md)
 
 ## Community
 
@@ -115,7 +115,3 @@ node examples/typescript_agent_host.ts
   &nbsp;
   <a href="https://github.com/ECD5A/Memory-Genome-Engine" aria-label="GitHub repository"><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/github/FFFFFF"><img alt="GitHub repository" height="24" src="https://cdn.simpleicons.org/github/181717"></picture></a>
 </p>
-
-## Лицензия
-
-Apache License, Version 2.0. Copyright (c) 2026 ECD5A.

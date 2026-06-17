@@ -1,7 +1,5 @@
 # Integration
 
-[Russian version](INTEGRATION.ru.md)
-
 This document is the single integration reference for agent hosts, the local JSON-RPC MCP-ready adapter, and the thin Python/TypeScript SDK wrappers.
 
 JSON in this layer is protocol/debug output only. It is not runtime storage.

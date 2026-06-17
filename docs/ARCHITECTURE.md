@@ -1,7 +1,5 @@
 # Architecture
 
-[Русская версия](ARCHITECTURE.ru.md)
-
 Memory Genome Engine is a Rust-first structured memory layer for LLM agents.
 
 ## Pipeline

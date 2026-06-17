@@ -77,13 +77,13 @@ if [[ "${MGE_INCLUDE_DEV_TOOLS:-0}" == "1" ]]; then
   echo "Development benchmark tools copied to: $layout_dev_tools_dir"
 fi
 
-for path in LICENSE README.md README.ru.md QUICKSTART.md QUICKSTART.ru.md SECURITY.md CONTRIBUTING.md CODE_OF_CONDUCT.md; do
+for path in LICENSE README.md README.ru.md QUICKSTART.md SECURITY.md CONTRIBUTING.md CODE_OF_CONDUCT.md; do
   if [[ -f "$path" ]]; then
     cp -f "$path" "$layout_dir/$(basename "$path")"
   fi
 done
 
-for path in docs/RELEASE.md docs/RELEASE.ru.md docs/SECURITY.md docs/SECURITY.ru.md docs/INTEGRATION.md docs/INTEGRATION.ru.md; do
+for path in docs/RELEASE.md docs/SECURITY.md docs/INTEGRATION.md; do
   if [[ -f "$path" ]]; then
     cp -f "$path" "$layout_docs_dir/$(basename "$path")"
   fi
