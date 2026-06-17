@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/ECD5A/Memory-Genome-Engine/security/policy
+    about: Please report security vulnerabilities privately through the GitHub security policy.
+  - name: Commercial integration or partnership
+    url: mailto:stelmak159@gmail.com
+    about: Use email for commercial support, integration, and partnership inquiries.

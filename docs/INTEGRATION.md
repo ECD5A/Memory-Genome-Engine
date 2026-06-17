@@ -107,6 +107,12 @@ Schema discovery:
 
 The schema response includes tool schemas, the `ContextPacket` wrapper contract, and the structured error contract. Golden fixtures live under `crates/mge-cli/tests/fixtures/mcp`.
 
+One-line local schema smoke:
+
+```bash
+printf '%s\n' '{"jsonrpc":"2.0","id":"schema","method":"mge_schema","params":{}}' | cargo run -p mge-cli --bin mge-mcp-server
+```
+
 ### MCP Tools
 
 `mge_remember` input:
@@ -179,6 +185,12 @@ Malformed JSON returns `-32700`; unknown tools return `-32601`; missing or inval
 ```
 
 A reusable session transcript is in `examples/mcp_agent_session.jsonl`.
+
+Run the transcript against the local adapter:
+
+```bash
+cargo run -p mge-cli --bin mge-mcp-server < examples/mcp_agent_session.jsonl
+```
 
 ## Python SDK
 

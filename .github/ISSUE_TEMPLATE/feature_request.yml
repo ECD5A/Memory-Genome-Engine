@@ -1,0 +1,48 @@
+name: Feature request
+description: Propose a focused improvement.
+title: "feature: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or agent workflow does this improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Keep the proposal scoped. Avoid storage/codec/filter rewrites unless you include a design rationale.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Developer experience
+        - Agent integration
+        - CLI / TUI
+        - Security
+        - Release / packaging
+        - Documentation
+        - Core storage / recall
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Architecture constraints
+      options:
+        - label: This does not require changing the storage layout.
+        - label: This does not require changing recall semantics.
+        - label: This does not add a new filter family without benchmark evidence.
+        - label: This keeps JSON out of runtime storage.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

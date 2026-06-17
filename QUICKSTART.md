@@ -5,6 +5,8 @@ This guide shows the shortest path from a clean checkout to a working local Memo
 ## Build
 
 ```bash
+git clone https://github.com/ECD5A/Memory-Genome-Engine.git
+cd Memory-Genome-Engine
 cargo build
 ```
 
@@ -132,6 +134,8 @@ Soft memory maintenance without rewriting sealed pages:
 cargo run -p mge-cli -- mark 1 --status rejected
 cargo run -p mge-cli -- mark 1 --status active
 ```
+
+`rejected`, `deprecated`, and `superseded` overrides hide memory from normal recall. `active` clears the override. Sealed page payloads are not rewritten.
 
 `mge doctor` is read-only by default. Use `--deep` only when you explicitly want validation work:
 

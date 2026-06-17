@@ -226,3 +226,33 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 - Python and TypeScript packages are repository-local developer wrappers.
 - Release artifacts should be generated from the Rust workspace, not from copied binaries.
 - Local archives under `target/mge-release/archives/` are generated artifacts and must not be committed.
+
+## GitHub Preview Release
+
+For a first public preview, create a draft release from a clean `main` commit after the checklist above passes.
+
+Recommended assets:
+
+- Windows archive from `scripts/build-release.ps1`;
+- Linux archive from `scripts/build-release.sh`;
+- combined `SHA256SUMS`.
+
+Keep the release product-focused:
+
+- include `mge` and `mge-mcp-server`;
+- do not include development benchmark binaries unless the release is explicitly marked as a development/tooling release;
+- do not upload generated stores, logs, passphrases, private corpus data, or `target/` directories;
+- state that macOS is not locally verified until a macOS host has run the shell scripts.
+
+Draft release command shape:
+
+```bash
+gh release create v0.1.0-preview --draft \
+  --title "v0.1.0-preview" \
+  --notes-file release-notes.md \
+  target/mge-release/archives/mge-windows-x64.zip \
+  target/mge-release/archives/mge-linux-x86_64.tar.gz \
+  target/mge-release/archives/SHA256SUMS
+```
+
+Do not publish the draft until the uploaded assets and checksums are reviewed.

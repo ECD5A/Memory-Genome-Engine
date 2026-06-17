@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a reproducible problem in Memory Genome Engine.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please keep reports focused and reproducible.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: "mge recall returns..."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Include exact commands when possible.
+      placeholder: |
+        1. cargo run -p mge-cli -- init
+        2. cargo run -p mge-cli -- remember ...
+        3. cargo run -p mge-cli -- recall ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include stderr/stdout snippets if useful. Do not paste secrets or passphrases.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Core storage / recall
+        - CLI
+        - TUI
+        - MCP / JSON-RPC
+        - Python SDK
+        - TypeScript SDK
+        - Release / install scripts
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: "mge 0.1.0 or commit hash"
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "Windows 11, Ubuntu 24.04, macOS ..."
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Do not include private stores, real secrets, passphrases, or private corpus data.

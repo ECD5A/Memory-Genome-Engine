@@ -4,6 +4,7 @@ Memory Genome Engine is a local-first Rust project. Keep changes small, measurab
 
 ## Before Opening A Pull Request
 
+- Work from a topic branch or fork; do not ask for direct write access to `main`.
 - Run `cargo fmt --check`.
 - Run `cargo test`.
 - Run `cargo check -p mge-cli --bins` when CLI, MCP, TUI, release, or SDK-facing code changes.
@@ -33,4 +34,5 @@ Do not recreate removed long-form docs such as `docs/MCP.md`, `docs/SDK.md`, `do
 - Explain the user-visible behavior change.
 - List tests and smokes run.
 - Call out any skipped platform checks.
+- Keep PRs small enough to review. Split unrelated core, UI, docs, and release changes.
 - Keep generated benchmark output out of the repository unless it is a small intentional fixture.
