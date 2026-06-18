@@ -11,6 +11,19 @@ Memory Genome Engine is a local-first Rust project. Keep changes small, measurab
 - Run `scripts/smoke-release.ps1` on Windows or `scripts/smoke-release.sh` on Linux/macOS when release packaging changes.
 - Do not commit binaries, generated stores, target directories, passphrases, `.env` files, or private corpus data.
 
+## Preview Feedback Checklist
+
+When reporting preview feedback, include:
+
+- OS and terminal used.
+- Install path used: release archive, source checkout, or local install script.
+- First command that failed or felt unclear.
+- Surface used: CLI, TUI, MCP/JSON-RPC, Python SDK, or TypeScript SDK.
+- Whether encrypted mode was used.
+- What you expected agent memory to remember or recall.
+
+Do not attach private Memory Genome stores, real secrets, passphrases, private corpus data, or generated logs containing sensitive content.
+
 ## Architecture Rules
 
 - Do not rewrite storage layout, page codec, recall semantics, encryption format, or candidate index API without a design note and maintainer agreement.

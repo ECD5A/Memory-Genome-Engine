@@ -75,6 +75,12 @@ Rust remains the core. Python and TypeScript wrappers delegate to the Rust CLI a
 
 ## MCP-Ready JSON-RPC Adapter
 
+The adapter expects an existing initialized Memory Genome store. Create it once with CLI/setup before sending `mge_remember`, `mge_recall`, or other store tools:
+
+```bash
+cargo run -p mge-cli -- init --profile fast
+```
+
 Run:
 
 ```bash
@@ -154,6 +160,8 @@ Store tools:
 
 All store tools accept `store_path`; encrypted stores also accept `passphrase_env`. `mge_validate` accepts `deep`; `mge_export_markdown` accepts optional `output_path`.
 
+There is no `mge_init` MCP tool in the current contract. This keeps the adapter focused on agent memory operations after the host has chosen or created the local store. If an agent host needs automated first-run setup, run `mge init` / `mge setup` once before starting the MCP session.
+
 ### Structured Errors
 
 Errors are stable for SDKs:
@@ -175,6 +183,14 @@ Important `details.error_kind` values:
 Malformed JSON returns `-32700`; unknown tools return `-32601`; missing or invalid params return `-32602`; store/runtime failures use `-32000`.
 
 ### MCP Workflow Example
+
+Bootstrap the store first:
+
+```bash
+cargo run -p mge-cli -- init --profile fast
+```
+
+Then send JSON-RPC requests to `mge-mcp-server`:
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"mge_remember","params":{"store_path":".memory-genome","content":"Agent should recall memory before editing.","kind":"procedure","scope":"agent","markers":["topic:agent_memory"],"trust":"user_confirmed","sensitivity":"private"}}

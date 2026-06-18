@@ -1,8 +1,38 @@
 # Quickstart
 
-This guide shows the shortest path from a clean checkout to a working local Memory Genome store.
+This guide shows the shortest path to a working local Memory Genome store.
 
-## Build
+## Use A Release Binary
+
+For the public preview release, download the archive for your platform from:
+
+```text
+https://github.com/ECD5A/Memory-Genome-Engine/releases
+```
+
+Unpack it into a user-writable directory, then run the binary from `bin/`:
+
+```bash
+mge --help
+mge setup
+mge tui
+```
+
+On Windows, the binary is `mge.exe`. On Linux, it is `mge`.
+
+Most commands below use `cargo run -p mge-cli --` because they also work from a clean source checkout. If you use a release binary, replace:
+
+```bash
+cargo run -p mge-cli --
+```
+
+with:
+
+```bash
+mge
+```
+
+## Build From Source
 
 ```bash
 git clone https://github.com/ECD5A/Memory-Genome-Engine.git
@@ -22,7 +52,7 @@ Human terminal interface:
 cargo run -p mge-cli -- tui
 ```
 
-Inside the TUI, use arrows, Enter, Space, Esc, F1/L/Д for language, and F2 for help. Scriptable CLI commands remain unchanged.
+Inside the TUI, use arrows, Enter, Space, Esc, F1/L/D/Д for language, and F2 for help. Scriptable CLI commands remain unchanged.
 
 First-run setup helper:
 
@@ -200,11 +230,19 @@ Switching index kind rebuilds candidate indexes from existing sealed pages; it d
 
 ## Local Integration
 
+Initialize the store with the CLI/setup flow before connecting an agent host:
+
+```bash
+cargo run -p mge-cli -- init --profile fast
+```
+
 Run the JSON-RPC adapter:
 
 ```bash
 cargo run -p mge-cli --bin mge-mcp-server
 ```
+
+The MCP-ready adapter currently operates on an existing `store_path`; it does not create a new store by itself. Agent hosts should bootstrap the store once through CLI/setup, then use MCP tools for `remember`, `recall`, `checkpoint`, `seal`, `validate`, `rebuild-indexes`, and export.
 
 Run SDK examples:
 
