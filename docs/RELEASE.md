@@ -227,6 +227,20 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 - Release artifacts should be generated from the Rust workspace, not from copied binaries.
 - Local archives under `target/mge-release/archives/` are generated artifacts and must not be committed.
 
+## Package Publishing Plan
+
+Recommended order:
+
+1. Keep GitHub release archives as the primary distribution path for preview releases.
+2. Keep `cargo install --git https://github.com/ECD5A/Memory-Genome-Engine.git --bin mge` as a developer path after each release candidate is tagged.
+3. Add Scoop later for Windows if release archives prove stable.
+4. Add Homebrew later after macOS build/smoke is verified on a real macOS host.
+5. Treat PyPI and npm as separate thin-SDK packaging work; do not publish them until the CLI binary discovery/install story is clear.
+
+Do not publish packages from this repository until release ownership, versioning, and rollback rules are explicit. Do not introduce admin/root installer flows for preview releases.
+
+Current recommendation: GitHub release assets are enough for the public preview. Package-manager publishing should wait until Windows and Linux preview users have exercised the archives, and macOS has been verified on a macOS host.
+
 ## GitHub Preview Release
 
 For a first public preview, create a draft release from a clean `main` commit after the checklist above passes.

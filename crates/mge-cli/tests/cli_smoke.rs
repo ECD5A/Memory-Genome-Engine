@@ -568,7 +568,9 @@ fn cli_encrypted_passphrase_env_encrypts_hot_files_and_unlocks() {
         &["stats", "--passphrase-env", wrong_passphrase_env, "--json"],
     );
     let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(stderr.contains("failed to unlock encrypted store"));
     assert!(stderr.contains("authentication failed"));
+    assert!(stderr.contains("--passphrase-env"));
     assert!(!stderr.contains("cli correct passphrase"));
     assert!(!stderr.contains("cli wrong passphrase"));
 

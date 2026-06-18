@@ -189,6 +189,18 @@ Future phased plan, not implemented now:
 - Phase 2: move catalog summaries and index files to keyed marker IDs/fingerprints; require unlock for validate/rebuild and rebuild existing indexes explicitly.
 - Phase 3: consider an optional higher-privacy mode with reduced pruning or more expensive validation for users who accept slower recall.
 
+Before implementing any blind marker prototype, it must prove:
+
+- no false negatives for focused, broad, or full-scope recall under the existing recall modes;
+- `CandidatePageIndex` stays stable and does not introduce a new filter family;
+- `ExactMarkerPageIndex` remains the reliable baseline and Binary Fuse remains the only optional static filter backend;
+- `validate --deep` and `rebuild-indexes` work after unlock and produce understandable errors when locked;
+- migration from plaintext marker metadata is explicit and reversible for test stores;
+- benchmark results show acceptable overhead for recall, seal, validate, and rebuild;
+- leakage is documented honestly: equality/frequency, page count, page size, timing, and access patterns may still leak.
+
+If those points are not satisfied, keep payload-encrypted mode as the default and leave blind marker metadata as future work.
+
 ## Recovery
 
 Hot recovery remains crash-safe:

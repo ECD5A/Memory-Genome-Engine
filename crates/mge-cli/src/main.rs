@@ -25,8 +25,9 @@ use app_service::{doctor_report, AppService};
 use clap::{Parser, Subcommand};
 use mge_core::{
     CellId, CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine, MemoryKind,
-    MemorySource, MemoryStatus, MemoryValue, PageClustererKind, PageCodecKind, RecallMode,
-    RecallRequest, RememberRequest, SecurityMode, SensitivityLevel, TrustLevel, DEFAULT_STORE_DIR,
+    MemorySource, MemoryStatus, MemoryValue, MgeError, PageClustererKind, PageCodecKind,
+    RecallMode, RecallRequest, RememberRequest, SecurityMode, SensitivityLevel, TrustLevel,
+    DEFAULT_STORE_DIR,
 };
 use serde::Serialize;
 
@@ -701,12 +702,37 @@ fn main() -> Result<()> {
 
 fn open_engine(store: &PathBuf, passphrase_env: Option<&str>) -> Result<MemoryEngine> {
     let passphrase = passphrase_from_env(passphrase_env)?;
-    MemoryEngine::open_at_with_passphrase(store, passphrase.as_deref()).with_context(|| {
-        format!(
+    MemoryEngine::open_at_with_passphrase(store, passphrase.as_deref()).map_err(|err| {
+        let context = open_engine_error_context(store, passphrase_env, &err);
+        anyhow::Error::new(err).context(context)
+    })
+}
+
+fn open_engine_error_context(store: &Path, passphrase_env: Option<&str>, err: &MgeError) -> String {
+    match err {
+        MgeError::AuthenticationFailed(_) => {
+            if let Some(name) = passphrase_env {
+                format!(
+                    "failed to unlock encrypted store {}; check --passphrase-env {name} and the passphrase value it names",
+                    store.display()
+                )
+            } else {
+                format!(
+                    "failed to unlock encrypted store {}; pass --passphrase-env <ENV> with the correct passphrase",
+                    store.display()
+                )
+            }
+        }
+        MgeError::StoreLocked(_) => format!(
+            "encrypted store {} is locked; pass --passphrase-env <ENV> to unlock payload operations",
+            store.display()
+        ),
+        MgeError::NotInitialized(_) => format!(
             "failed to open {}; run `mge init` first or pass --store",
             store.display()
-        )
-    })
+        ),
+        _ => format!("failed to open {}", store.display()),
+    }
 }
 
 fn passphrase_from_env(passphrase_env: Option<&str>) -> Result<Option<String>> {
@@ -1144,6 +1170,35 @@ mod tests {
             init_options_from_args("unknown", None, None, None, None, None, false).unwrap_err();
 
         assert!(err.to_string().contains("unknown init profile"));
+    }
+
+    #[test]
+    fn open_engine_error_context_distinguishes_encrypted_auth_failures() {
+        let store = Path::new(".memory-genome");
+
+        let auth = open_engine_error_context(
+            store,
+            Some("MGE_PASSPHRASE"),
+            &MgeError::AuthenticationFailed("bad key".to_string()),
+        );
+        assert!(auth.contains("failed to unlock encrypted store"));
+        assert!(auth.contains("--passphrase-env MGE_PASSPHRASE"));
+        assert!(!auth.contains("run `mge init`"));
+
+        let locked = open_engine_error_context(
+            store,
+            None,
+            &MgeError::StoreLocked("unlock required".to_string()),
+        );
+        assert!(locked.contains("encrypted store"));
+        assert!(locked.contains("--passphrase-env <ENV>"));
+
+        let uninitialized = open_engine_error_context(
+            store,
+            None,
+            &MgeError::NotInitialized("missing manifest".to_string()),
+        );
+        assert!(uninitialized.contains("run `mge init`"));
     }
 
     #[test]
