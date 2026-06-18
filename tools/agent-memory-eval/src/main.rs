@@ -18,6 +18,7 @@ use mge_core::{
     RecallRequest, RememberRequest, SecurityMode, SensitivityLevel, TrustLevel,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -28,6 +29,10 @@ struct Args {
     /// Optional neutral JSON dataset. If omitted, a deterministic generated dataset is used.
     #[arg(long)]
     input: Option<PathBuf>,
+
+    /// Input dataset format.
+    #[arg(long, value_enum, default_value_t = InputFormat::Auto)]
+    input_format: InputFormat,
 
     /// Generated dataset profile.
     #[arg(long, value_enum, default_value_t = GeneratedProfile::Small)]
@@ -64,6 +69,26 @@ struct Args {
     /// Print the neutral EvalDataset JSON shape and exit.
     #[arg(long)]
     print_schema: bool,
+
+    /// Limit the number of converted queries for local smoke runs.
+    #[arg(long)]
+    max_queries: Option<usize>,
+
+    /// Limit the number of converted memories for local smoke runs.
+    #[arg(long)]
+    max_memories: Option<usize>,
+
+    /// Optional path for the report. Uses --output format.
+    #[arg(long)]
+    report: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum InputFormat {
+    Auto,
+    Neutral,
+    LongMemEval,
+    Locomo,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -195,10 +220,12 @@ fn main() -> Result<()> {
 
     match args.output {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&report)?);
+            let text = serde_json::to_string_pretty(&report)?;
+            write_or_print_report(&args, &text)?;
         }
         OutputFormat::Text => {
-            print_text_report(&report);
+            let text = text_report(&report);
+            write_or_print_report(&args, &text)?;
         }
     }
 
@@ -209,12 +236,32 @@ fn load_dataset(args: &Args) -> Result<EvalDataset> {
     if let Some(input) = &args.input {
         let bytes = fs::read(input)
             .with_context(|| format!("failed to read dataset {}", input.display()))?;
-        let dataset: EvalDataset = serde_json::from_slice(&bytes).with_context(|| {
-            format!(
-                "failed to parse dataset {}; expected neutral EvalDataset JSON",
-                input.display()
-            )
-        })?;
+        let format = match args.input_format {
+            InputFormat::Auto => detect_input_format(&bytes)?,
+            explicit => explicit,
+        };
+        let mut dataset = match format {
+            InputFormat::Auto => unreachable!("auto input format should be resolved"),
+            InputFormat::Neutral => serde_json::from_slice(&bytes).with_context(|| {
+                format!(
+                    "failed to parse dataset {}; expected neutral EvalDataset JSON",
+                    input.display()
+                )
+            })?,
+            InputFormat::LongMemEval => convert_longmemeval(
+                &serde_json::from_slice(&bytes)?,
+                input.display().to_string(),
+                args.max_memories,
+                args.max_queries,
+            )?,
+            InputFormat::Locomo => convert_locomo(
+                &serde_json::from_slice(&bytes)?,
+                input.display().to_string(),
+                args.max_memories,
+                args.max_queries,
+            )?,
+        };
+        apply_limits(&mut dataset, args.max_memories, args.max_queries);
         return Ok(dataset);
     }
 
@@ -249,9 +296,6 @@ fn validate_dataset(dataset: &EvalDataset) -> Result<()> {
         if query.query.trim().is_empty() {
             return Err(anyhow!("query {} has empty text", query.id));
         }
-        if query.relevant_ids.is_empty() {
-            return Err(anyhow!("query {} has no relevant_ids", query.id));
-        }
         for relevant in &query.relevant_ids {
             if !memory_ids.contains(relevant.as_str()) {
                 return Err(anyhow!(
@@ -262,8 +306,457 @@ fn validate_dataset(dataset: &EvalDataset) -> Result<()> {
             }
         }
     }
+    if dataset
+        .queries
+        .iter()
+        .all(|query| query.relevant_ids.is_empty())
+    {
+        return Err(anyhow!(
+            "dataset has no queries with relevant_ids; retrieval metrics need evidence labels"
+        ));
+    }
 
     Ok(())
+}
+
+fn detect_input_format(bytes: &[u8]) -> Result<InputFormat> {
+    let value: Value = serde_json::from_slice(bytes)?;
+    if value.get("memories").is_some() && value.get("queries").is_some() {
+        return Ok(InputFormat::Neutral);
+    }
+    let first = value
+        .as_array()
+        .and_then(|items| items.first())
+        .unwrap_or(&value);
+    if first.get("haystack_sessions").is_some() || first.get("question_id").is_some() {
+        return Ok(InputFormat::LongMemEval);
+    }
+    if first.get("qa").is_some()
+        || first.get("conversation").is_some()
+        || first
+            .as_object()
+            .is_some_and(|object| object.keys().any(|key| key.starts_with("session")))
+    {
+        return Ok(InputFormat::Locomo);
+    }
+    Err(anyhow!(
+        "could not detect dataset format; pass --input-format neutral|long-mem-eval|locomo"
+    ))
+}
+
+fn apply_limits(
+    dataset: &mut EvalDataset,
+    max_memories: Option<usize>,
+    max_queries: Option<usize>,
+) {
+    if let Some(max) = max_memories {
+        dataset.memories.truncate(max);
+        let memory_ids = dataset
+            .memories
+            .iter()
+            .map(|memory| memory.id.as_str())
+            .collect::<HashSet<_>>();
+        dataset.queries.retain(|query| {
+            !query.relevant_ids.is_empty()
+                && query
+                    .relevant_ids
+                    .iter()
+                    .all(|id| memory_ids.contains(id.as_str()))
+        });
+    }
+    if let Some(max) = max_queries {
+        dataset.queries.truncate(max);
+    }
+}
+
+fn convert_longmemeval(
+    value: &Value,
+    source: String,
+    max_memories: Option<usize>,
+    max_queries: Option<usize>,
+) -> Result<EvalDataset> {
+    let instances = value
+        .as_array()
+        .ok_or_else(|| anyhow!("LongMemEval input must be a JSON array"))?;
+    let mut memories = Vec::new();
+    let mut queries = Vec::new();
+    let mut skipped_without_evidence = 0usize;
+
+    for (instance_index, instance) in instances.iter().enumerate() {
+        let question_id = string_field(instance, &["question_id", "id"])
+            .unwrap_or_else(|| format!("longmemeval-{instance_index}"));
+        let question_type = string_field(instance, &["question_type", "category"])
+            .unwrap_or_else(|| "unknown".to_string());
+        let question = string_field(instance, &["question"])
+            .ok_or_else(|| anyhow!("LongMemEval instance {question_id} has no question"))?;
+
+        let haystack_sessions = instance
+            .get("haystack_sessions")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                anyhow!("LongMemEval instance {question_id} has no haystack_sessions")
+            })?;
+        let session_ids = instance
+            .get("haystack_session_ids")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let answer_session_ids = instance
+            .get("answer_session_ids")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(value_to_compact_string)
+                    .collect::<HashSet<_>>()
+            })
+            .unwrap_or_default();
+
+        let mut session_turn_ids: HashMap<String, Vec<String>> = HashMap::new();
+        let mut relevant_ids = Vec::new();
+        let scope = format!("longmemeval:{question_id}");
+
+        for (session_index, session) in haystack_sessions.iter().enumerate() {
+            let session_id = session_ids
+                .get(session_index)
+                .and_then(value_to_compact_string)
+                .unwrap_or_else(|| format!("session-{session_index}"));
+            let Some(turns) = session.as_array() else {
+                continue;
+            };
+            for (turn_index, turn) in turns.iter().enumerate() {
+                let content = string_field(turn, &["content", "text", "message"])
+                    .or_else(|| turn.as_str().map(str::to_string));
+                let Some(content) = content else {
+                    continue;
+                };
+                if !is_safe_memory_text(&content) {
+                    continue;
+                }
+                let role =
+                    string_field(turn, &["role", "speaker"]).unwrap_or_else(|| "turn".to_string());
+                let id = format!("{question_id}:s{session_index}:{session_id}:turn-{turn_index}");
+                if turn
+                    .get("has_answer")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    relevant_ids.push(id.clone());
+                }
+                session_turn_ids
+                    .entry(session_id.clone())
+                    .or_default()
+                    .push(id.clone());
+                memories.push(EvalMemory {
+                    id,
+                    scope: scope.clone(),
+                    subject: Some(format!("{question_type} {role} {session_id}")),
+                    text: content,
+                    markers: vec![
+                        format!("benchmark:longmemeval"),
+                        format!("question_type:{}", safe_marker_value(&question_type)),
+                        format!("role:{}", safe_marker_value(&role)),
+                        format!("session:{}", safe_marker_value(&session_id)),
+                    ],
+                    kind: "project_fact".to_string(),
+                    status: "active".to_string(),
+                    trust: "user_confirmed".to_string(),
+                    sensitivity: "private".to_string(),
+                });
+            }
+        }
+
+        if relevant_ids.is_empty() {
+            for answer_session_id in &answer_session_ids {
+                if let Some(turn_ids) = session_turn_ids.get(answer_session_id) {
+                    relevant_ids.extend(turn_ids.iter().cloned());
+                }
+            }
+        }
+        relevant_ids.sort();
+        relevant_ids.dedup();
+
+        if relevant_ids.is_empty() {
+            skipped_without_evidence += 1;
+            continue;
+        }
+
+        queries.push(EvalQuery {
+            id: question_id,
+            query: question,
+            scope: Some(scope),
+            relevant_ids,
+            category: question_type,
+        });
+        if max_queries.is_some_and(|max| queries.len() >= max) {
+            break;
+        }
+        if max_memories.is_some_and(|max| memories.len() >= max) {
+            break;
+        }
+    }
+
+    Ok(EvalDataset {
+        name: "longmemeval_converted".to_string(),
+        source: format!("{source}; skipped queries without evidence: {skipped_without_evidence}"),
+        memories,
+        queries,
+    })
+}
+
+fn convert_locomo(
+    value: &Value,
+    source: String,
+    max_memories: Option<usize>,
+    max_queries: Option<usize>,
+) -> Result<EvalDataset> {
+    let records = value
+        .as_array()
+        .ok_or_else(|| anyhow!("LoCoMo input must be a JSON array"))?;
+    let mut memories = Vec::new();
+    let mut queries = Vec::new();
+    let mut skipped_without_evidence = 0usize;
+
+    for (record_index, record) in records.iter().enumerate() {
+        let conversation_id = string_field(
+            record,
+            &["conversation_id", "sample_id", "id", "dialogue_id"],
+        )
+        .unwrap_or_else(|| format!("locomo-{record_index}"));
+        let scope = format!("locomo:{conversation_id}");
+        let before = memories.len();
+        let mut dialog_to_memory = HashMap::new();
+        collect_locomo_memories(
+            record,
+            &scope,
+            &conversation_id,
+            "root",
+            &mut memories,
+            &mut dialog_to_memory,
+        );
+        if memories.len() == before {
+            continue;
+        }
+
+        if let Some(qa_items) = record.get("qa").and_then(Value::as_array) {
+            for (qa_index, qa) in qa_items.iter().enumerate() {
+                let Some(question) = string_field(qa, &["question", "query"]) else {
+                    continue;
+                };
+                let mut relevant_ids = Vec::new();
+                if let Some(evidence) = qa.get("evidence") {
+                    collect_locomo_relevant_ids(
+                        evidence,
+                        &dialog_to_memory,
+                        &memories,
+                        &mut relevant_ids,
+                    );
+                }
+                relevant_ids.sort();
+                relevant_ids.dedup();
+                if relevant_ids.is_empty() {
+                    skipped_without_evidence += 1;
+                    continue;
+                }
+                let category = value_to_compact_string(qa.get("category").unwrap_or(&Value::Null))
+                    .unwrap_or_else(|| "qa".to_string());
+                queries.push(EvalQuery {
+                    id: format!("{conversation_id}:qa-{qa_index}"),
+                    query: question,
+                    scope: Some(scope.clone()),
+                    relevant_ids,
+                    category,
+                });
+                if max_queries.is_some_and(|max| queries.len() >= max) {
+                    break;
+                }
+            }
+        }
+        if max_queries.is_some_and(|max| queries.len() >= max) {
+            break;
+        }
+        if max_memories.is_some_and(|max| memories.len() >= max) {
+            break;
+        }
+    }
+
+    Ok(EvalDataset {
+        name: "locomo_converted".to_string(),
+        source: format!("{source}; skipped queries without evidence: {skipped_without_evidence}"),
+        memories,
+        queries,
+    })
+}
+
+fn collect_locomo_memories(
+    value: &Value,
+    scope: &str,
+    conversation_id: &str,
+    path: &str,
+    memories: &mut Vec<EvalMemory>,
+    dialog_to_memory: &mut HashMap<String, String>,
+) {
+    match value {
+        Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                collect_locomo_memories(
+                    item,
+                    scope,
+                    conversation_id,
+                    &format!("{path}.{index}"),
+                    memories,
+                    dialog_to_memory,
+                );
+            }
+        }
+        Value::Object(object) => {
+            if let Some(text) = string_field(value, &["text", "content", "message", "utterance"]) {
+                if is_safe_memory_text(&text) {
+                    let speaker = string_field(value, &["speaker", "role", "name"])
+                        .unwrap_or_else(|| "speaker".to_string());
+                    let dialog_id = string_field(value, &["dialog_id", "dia_id", "id", "turn_id"])
+                        .unwrap_or_else(|| path.to_string());
+                    let id = format!("{conversation_id}:{dialog_id}");
+                    dialog_to_memory.insert(dialog_id.clone(), id.clone());
+                    memories.push(EvalMemory {
+                        id,
+                        scope: scope.to_string(),
+                        subject: Some(format!("locomo {speaker} {dialog_id}")),
+                        text,
+                        markers: vec![
+                            "benchmark:locomo".to_string(),
+                            format!("speaker:{}", safe_marker_value(&speaker)),
+                            format!("dialog:{}", safe_marker_value(&dialog_id)),
+                        ],
+                        kind: "project_fact".to_string(),
+                        status: "active".to_string(),
+                        trust: "user_confirmed".to_string(),
+                        sensitivity: "private".to_string(),
+                    });
+                    return;
+                }
+            }
+
+            for (key, nested) in object {
+                if matches!(
+                    key.as_str(),
+                    "qa" | "qa_pairs" | "event_summary" | "summary"
+                ) {
+                    continue;
+                }
+                collect_locomo_memories(
+                    nested,
+                    scope,
+                    conversation_id,
+                    &format!("{path}.{key}"),
+                    memories,
+                    dialog_to_memory,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_locomo_relevant_ids(
+    evidence: &Value,
+    dialog_to_memory: &HashMap<String, String>,
+    memories: &[EvalMemory],
+    output: &mut Vec<String>,
+) {
+    match evidence {
+        Value::Array(items) => {
+            for item in items {
+                collect_locomo_relevant_ids(item, dialog_to_memory, memories, output);
+            }
+        }
+        Value::Object(object) => {
+            for key in ["dialog_id", "dia_id", "id", "turn_id"] {
+                if let Some(id) = object
+                    .get(key)
+                    .and_then(value_to_compact_string)
+                    .and_then(|dialog_id| dialog_to_memory.get(&dialog_id).cloned())
+                {
+                    output.push(id);
+                }
+            }
+            for nested in object.values() {
+                collect_locomo_relevant_ids(nested, dialog_to_memory, memories, output);
+            }
+        }
+        Value::String(text) => {
+            if let Some(id) = dialog_to_memory.get(text) {
+                output.push(id.clone());
+                return;
+            }
+            let needle = text.trim();
+            if needle.len() < 8 {
+                return;
+            }
+            for memory in memories {
+                if memory.text.contains(needle) || needle.contains(memory.text.as_str()) {
+                    output.push(memory.id.clone());
+                }
+            }
+        }
+        Value::Number(_) | Value::Bool(_) => {
+            if let Some(key) = value_to_compact_string(evidence) {
+                if let Some(id) = dialog_to_memory.get(&key) {
+                    output.push(id.clone());
+                }
+            }
+        }
+        Value::Null => {}
+    }
+}
+
+fn string_field(value: &Value, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Some(text) = value.get(*key).and_then(Value::as_str) {
+            return Some(text.to_string());
+        }
+    }
+    None
+}
+
+fn value_to_compact_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn safe_marker_value(input: &str) -> String {
+    let mut output = String::new();
+    let mut last_was_separator = false;
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            output.push(ch.to_ascii_lowercase());
+            last_was_separator = false;
+        } else if !last_was_separator {
+            output.push('_');
+            last_was_separator = true;
+        }
+    }
+    let output = output.trim_matches('_').to_string();
+    if output.is_empty() {
+        "unknown".to_string()
+    } else {
+        output
+    }
+}
+
+fn is_safe_memory_text(input: &str) -> bool {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.len() <= 64 && trimmed.chars().all(|ch| !ch.is_ascii_alphanumeric()) {
+        return false;
+    }
+    true
 }
 
 fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
@@ -347,8 +840,7 @@ fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
         notes: vec![
             "Developer-only harness; datasets are not bundled and JSON is eval input/output only."
                 .to_string(),
-            "Known benchmarks such as LongMemEval or LoCoMo should be converted into the neutral EvalDataset JSON before running this tool."
-                .to_string(),
+            "LongMemEval and best-effort LoCoMo-style JSON adapters are local-only; no datasets are committed or downloaded by the tool.".to_string(),
             "This measures retrieval behavior, not final LLM answer quality.".to_string(),
         ],
     })
@@ -542,10 +1034,19 @@ fn summarize_run(
                 .cloned()
                 .collect::<BTreeSet<String>>();
             let relevant_returned = returned.intersection(&expected).count();
-            hit_sum += if relevant_returned > 0 { 1.0 } else { 0.0 };
-            recall_sum += relevant_returned as f64 / expected.len() as f64;
+            if expected.is_empty() {
+                hit_sum += if returned.is_empty() { 1.0 } else { 0.0 };
+                recall_sum += if returned.is_empty() { 1.0 } else { 0.0 };
+            } else {
+                hit_sum += if relevant_returned > 0 { 1.0 } else { 0.0 };
+                recall_sum += relevant_returned as f64 / expected.len() as f64;
+            }
             precision_sum += if returned.is_empty() {
-                0.0
+                if expected.is_empty() {
+                    1.0
+                } else {
+                    0.0
+                }
             } else {
                 relevant_returned as f64 / returned.len() as f64
             };
@@ -700,22 +1201,24 @@ fn schema_example() -> EvalDataset {
     }
 }
 
-fn print_text_report(report: &EvalReport) {
-    println!("Agent Memory Eval");
-    println!("=================");
-    println!(
+fn text_report(report: &EvalReport) -> String {
+    let mut output = String::new();
+    output.push_str("Agent Memory Eval\n");
+    output.push_str("=================\n");
+    output.push_str(&format!(
         "dataset: {} ({})",
         report.dataset.name, report.dataset.source
-    );
-    println!(
+    ));
+    output.push('\n');
+    output.push_str(&format!(
         "memories: {} | queries: {} | avg memory bytes: {:.1} | avg markers/memory: {:.1}",
         report.dataset.memories,
         report.dataset.queries,
         report.dataset.avg_memory_bytes,
         report.dataset.avg_markers_per_memory
-    );
-    println!();
-    println!(
+    ));
+    output.push_str("\n\n");
+    output.push_str(&format!(
         "{:<28} {:<8} {:<18} {:<8} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8} {:>9} {:>8}",
         "system",
         "layer",
@@ -729,10 +1232,12 @@ fn print_text_report(report: &EvalReport) {
         "p95_us",
         "ctx_bytes",
         "items"
-    );
-    println!("{}", "-".repeat(134));
+    ));
+    output.push('\n');
+    output.push_str(&"-".repeat(134));
+    output.push('\n');
     for run in &report.runs {
-        println!(
+        output.push_str(&format!(
             "{:<28} {:<8} {:<18} {:<8} {:>7.3} {:>7.3} {:>7.3} {:>8} {:>8} {:>8} {:>9} {:>8.2}",
             run.system,
             run.layer,
@@ -746,13 +1251,28 @@ fn print_text_report(report: &EvalReport) {
             run.p95_latency_micros,
             run.avg_context_bytes,
             run.avg_returned_items
-        );
+        ));
+        output.push('\n');
     }
-    println!();
-    println!("notes:");
+    output.push_str("\nnotes:\n");
     for note in &report.notes {
-        println!("- {note}");
+        output.push_str(&format!("- {note}\n"));
     }
+    output
+}
+
+fn write_or_print_report(args: &Args, text: &str) -> Result<()> {
+    if let Some(report_path) = &args.report {
+        if let Some(parent) = report_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(report_path, text)
+            .with_context(|| format!("failed to write report {}", report_path.display()))?;
+        println!("wrote report {}", report_path.display());
+    } else {
+        println!("{text}");
+    }
+    Ok(())
 }
 
 fn selected_indexes(index: IndexSelection) -> Vec<IndexKind> {
@@ -841,6 +1361,49 @@ mod tests {
     #[test]
     fn schema_example_is_valid() {
         validate_dataset(&schema_example()).unwrap();
+    }
+
+    #[test]
+    fn converts_longmemeval_turn_level_evidence() {
+        let value = serde_json::json!([
+            {
+                "question_id": "q1",
+                "question_type": "single-session-user",
+                "question": "What color is the notebook?",
+                "haystack_session_ids": ["s1"],
+                "answer_session_ids": ["s1"],
+                "haystack_sessions": [[
+                    {"role": "user", "content": "The notebook is blue.", "has_answer": true},
+                    {"role": "assistant", "content": "Got it."}
+                ]]
+            }
+        ]);
+        let dataset = convert_longmemeval(&value, "test".to_string(), None, None).expect("convert");
+        validate_dataset(&dataset).unwrap();
+        assert_eq!(dataset.memories.len(), 2);
+        assert_eq!(dataset.queries.len(), 1);
+        assert_eq!(dataset.queries[0].relevant_ids.len(), 1);
+    }
+
+    #[test]
+    fn converts_locomo_evidence_ids() {
+        let value = serde_json::json!([
+            {
+                "conversation_id": "c1",
+                "session_1": [
+                    {"dialog_id": "d1", "speaker": "Alice", "text": "Alice ordered tea."},
+                    {"dialog_id": "d2", "speaker": "Bob", "text": "Bob ordered coffee."}
+                ],
+                "qa": [
+                    {"question": "What did Alice order?", "evidence": ["d1"], "category": 1}
+                ]
+            }
+        ]);
+        let dataset = convert_locomo(&value, "test".to_string(), None, None).expect("convert");
+        validate_dataset(&dataset).unwrap();
+        assert_eq!(dataset.memories.len(), 2);
+        assert_eq!(dataset.queries.len(), 1);
+        assert_eq!(dataset.queries[0].relevant_ids.len(), 1);
     }
 
     #[test]
