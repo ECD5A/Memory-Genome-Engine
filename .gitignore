@@ -1,4 +1,6 @@
 /target/
+tools/*/target/
+tools/*/Cargo.lock
 /.memory-genome/
 .env
 *.key
