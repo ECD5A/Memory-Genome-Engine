@@ -967,6 +967,10 @@ fn mcp_server_remembers_session_chunks() {
         responses[1]["result"]["context_packet"]["relevant_memory"][0]["kind"],
         "project_fact"
     );
+    assert_eq!(
+        responses[1]["result"]["context_packet"]["relevant_memory"][0]["trust"],
+        "tool_observed"
+    );
 }
 
 #[test]
@@ -1026,6 +1030,14 @@ fn mcp_standard_lifecycle_lists_and_calls_tools() {
     assert!(tools
         .iter()
         .all(|tool| tool["inputSchema"]["type"] == "object"));
+    let session_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "mge_remember_session")
+        .unwrap();
+    assert_eq!(
+        session_tool["inputSchema"]["properties"]["trust"]["default"],
+        "tool_observed"
+    );
     assert_eq!(responses[2]["result"]["isError"], false);
     assert_eq!(
         responses[2]["result"]["structuredContent"]["stats"]["hot_cells"],
@@ -1035,6 +1047,101 @@ fn mcp_standard_lifecycle_lists_and_calls_tools() {
     assert_eq!(
         responses[3]["result"]["structuredContent"]["details"]["error_kind"],
         "unknown_tool"
+    );
+}
+
+#[test]
+fn mcp_standard_tool_workflow_runs_in_one_process() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    let store_path = json_safe_path(&store);
+    run_mge(&store, &["init"]);
+
+    let call = |id: u64, name: &str, arguments: Value| {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "tools/call",
+            "params": { "name": name, "arguments": arguments }
+        })
+    };
+    let responses = run_mcp_json_lines(&[
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "mge-workflow-test", "version": "0.1.0" }
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        }),
+        call(
+            2,
+            "mge_remember_session",
+            json!({
+                "store_path": store_path.clone(),
+                "scope": "standard-mcp",
+                "session_id": "release-session",
+                "max_turns": 2,
+                "turns": [
+                    { "role": "user", "content": "Prepare the cobalt release" },
+                    { "role": "assistant", "content": "Keep rollback steps" },
+                    { "role": "user", "content": "Validate indexes after sealing" }
+                ]
+            }),
+        ),
+        call(
+            3,
+            "mge_recall",
+            json!({
+                "store_path": store_path.clone(),
+                "scope": "standard-mcp",
+                "query": "cobalt rollback"
+            }),
+        ),
+        call(
+            4,
+            "mge_checkpoint",
+            json!({ "store_path": store_path.clone() }),
+        ),
+        call(5, "mge_seal", json!({ "store_path": store_path.clone() })),
+        call(
+            6,
+            "mge_validate",
+            json!({ "store_path": store_path.clone(), "deep": true }),
+        ),
+        call(7, "mge_stats", json!({ "store_path": store_path })),
+    ]);
+
+    assert_eq!(responses.len(), 7, "notifications must not emit responses");
+    assert_eq!(responses[0]["result"]["protocolVersion"], "2025-06-18");
+    for response in &responses[1..] {
+        assert_eq!(response["result"]["isError"], false, "{response:#}");
+    }
+    assert_eq!(responses[1]["result"]["structuredContent"]["chunks"], 2);
+    assert!(
+        !responses[2]["result"]["structuredContent"]["context_packet"]["relevant_memory"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        responses[5]["result"]["structuredContent"]["validation"]["ok"],
+        true
+    );
+    assert_eq!(
+        responses[6]["result"]["structuredContent"]["stats"]["hot_cells"],
+        0
+    );
+    assert_eq!(
+        responses[6]["result"]["structuredContent"]["stats"]["sealed_cells"],
+        2
     );
 }
 

@@ -124,7 +124,7 @@ struct RememberSessionParams {
     subject: Option<String>,
     #[serde(default)]
     markers: Vec<String>,
-    #[serde(default = "default_trust")]
+    #[serde(default = "default_session_trust")]
     trust: String,
     #[serde(default = "default_sensitivity")]
     sensitivity: String,
@@ -871,7 +871,7 @@ fn mcp_tools() -> Vec<Value> {
                     "scope": { "type": "string", "default": "global" },
                     "subject": { "type": "string" },
                     "markers": { "type": "array", "items": { "type": "string" } },
-                    "trust": { "type": "string", "default": "agent_inferred" },
+                    "trust": { "type": "string", "default": "tool_observed" },
                     "sensitivity": { "type": "string", "default": "private" },
                     "status": { "type": "string", "default": "active" },
                     "max_turns": { "type": "integer", "minimum": 1, "default": 8 },
@@ -1020,6 +1020,10 @@ fn default_scope() -> String {
 
 fn default_trust() -> String {
     "agent_inferred".to_string()
+}
+
+fn default_session_trust() -> String {
+    "tool_observed".to_string()
 }
 
 fn default_sensitivity() -> String {
