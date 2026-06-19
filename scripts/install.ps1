@@ -21,10 +21,10 @@ $DevToolBins = @(
 if (-not $NoBuild) {
     if ($IncludeDevTools) {
         Write-Host "Building product and development tool release binaries..."
-        cargo build -p mge-cli --bins --release
+        cargo build --locked -p mge-cli --bins --release
     } else {
         Write-Host "Building product release binaries..."
-        cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
+        cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server --release
     }
 }
 

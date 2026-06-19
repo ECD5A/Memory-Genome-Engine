@@ -14,10 +14,10 @@ $DevToolBins = @(
 
 if ($env:MGE_INCLUDE_DEV_TOOLS -eq "1") {
     Write-Host "Building product and development tool release binaries..."
-    cargo build -p mge-cli --bins --release
+    cargo build --locked -p mge-cli --bins --release
 } else {
     Write-Host "Building product release binaries..."
-    cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
+    cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server --release
 }
 
 $TargetRoot = if ($env:CARGO_TARGET_DIR) {
@@ -87,7 +87,7 @@ if ($env:MGE_INCLUDE_DEV_TOOLS -eq "1") {
     Write-Host "Development benchmark tools copied to: $LayoutDevToolsDir"
 }
 
-foreach ($Path in @("LICENSE", "README.md", "README.ru.md", "QUICKSTART.md", "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md")) {
+foreach ($Path in @("LICENSE", "NOTICE", "README.md", "README.ru.md", "QUICKSTART.md", "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md")) {
     if (Test-Path $Path) {
         Copy-Item -Force -Path $Path -Destination (Join-Path $LayoutDir (Split-Path -Leaf $Path))
     }

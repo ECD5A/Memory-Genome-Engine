@@ -65,10 +65,10 @@ if [[ "$no_build" != "1" ]]; then
   require_command cargo
   if [[ "$include_dev_tools" == "1" ]]; then
     echo "Building product and development tool release binaries..."
-    cargo build -p mge-cli --bins --release
+    cargo build --locked -p mge-cli --bins --release
   else
     echo "Building product release binaries..."
-    cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
+    cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server --release
   fi
 fi
 

@@ -5,7 +5,7 @@ This document is for local build, packaging, and release readiness checks. It do
 ## Build
 
 ```bash
-cargo build --release -p mge-cli --bin mge --bin mge-mcp-server
+cargo build --locked --release -p mge-cli --bin mge --bin mge-mcp-server
 ```
 
 Product release binaries:
@@ -52,7 +52,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 
 - Windows PowerShell scripts are locally verified on the current Windows host.
 - Linux shell scripts, including the standard MCP smoke revision, are locally verified through WSL2 Ubuntu with Rust 1.96.0 and Bash 5.3.9.
-- macOS uses the same POSIX smoke in CI, but no local macOS host verification is claimed.
+- macOS remains a supported release target and runs the same POSIX build/smoke path on the GitHub-hosted macOS runner. No local macOS execution is claimed because this development machine does not run macOS.
 
 ## Install From Source
 
@@ -81,8 +81,8 @@ powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -IncludeDevTools
 
 ```bash
 cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo test --locked --workspace
 cargo clippy --manifest-path tools/agent-memory-eval/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path tools/agent-memory-eval/Cargo.toml
 ```
@@ -213,9 +213,12 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 
 - Git working tree is clean.
 - `cargo fmt --check` passes.
-- `cargo test` passes.
-- `cargo check -p mge-cli --bins` passes.
-- `cargo build -p mge-cli --bin mge --bin mge-mcp-server --release` passes.
+- `cargo test --locked` passes.
+- `cargo clippy --locked --workspace --all-targets -- -D warnings` passes.
+- `RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps` passes.
+- `cargo check --locked -p mge-cli --bins` passes.
+- `cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server --release` passes.
+- The CI MSRV job passes on Rust 1.95.
 - `scripts/build-release.sh` or `scripts/build-release.ps1` passes and creates a local archive plus `SHA256SUMS`.
 - `scripts/smoke-release.sh` or `scripts/smoke-release.ps1` passes.
 - `scripts/install.sh` or `scripts/install.ps1` installs into a user-writable directory.
@@ -234,7 +237,7 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 
 - No package publishing is automated yet.
 - Install scripts only copy locally built binaries into a user-writable directory.
-- Windows and WSL Ubuntu release paths are locally verified; macOS still needs a macOS host before claiming full macOS release support.
+- Windows and WSL Ubuntu release paths are locally verified. macOS remains enabled in CI and release automation; its result must be taken from the GitHub-hosted macOS job because no local macOS host is available.
 - No external MCP SDK dependency is bundled.
 - Python and TypeScript packages are repository-local developer wrappers.
 - Release artifacts should be generated from the Rust workspace, not from copied binaries.
@@ -242,7 +245,7 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 
 ## Tag Release Workflow
 
-`.github/workflows/release.yml` runs only for `v*` tags. It builds checksummed product archives for Windows x86-64, Linux x86-64, and macOS arm64, uploads them as workflow artifacts, and creates or updates a **draft** GitHub Release. The workflow includes only `mge` and `mge-mcp-server`; SDK packages and development benchmark binaries are not published. A maintainer must review checksums, notes, and platform results before publishing the draft.
+`.github/workflows/release.yml` runs only for `v*` tags. It first verifies format, workspace tests, and strict clippy with the locked dependency graph. It then builds checksummed product archives for Windows x86-64, Linux x86-64, macOS Apple Silicon, and macOS Intel, uploads them as workflow artifacts, and creates or updates a **draft** GitHub Release. The workflow includes only `mge` and `mge-mcp-server`; SDK packages and development benchmark binaries are not published. A maintainer must review checksums, notes, and every platform result before publishing the draft.
 
 Rust crates and both repository-local SDK manifests use version `0.1.0`. Integration schema versioning is independent from package versioning.
 
@@ -253,12 +256,12 @@ Recommended order:
 1. Keep GitHub release archives as the primary distribution path for preview releases.
 2. Keep `cargo install --git https://github.com/ECD5A/Memory-Genome-Engine.git --bin mge` as a developer path after each release candidate is tagged.
 3. Add Scoop later for Windows if release archives prove stable.
-4. Add Homebrew later after macOS build/smoke is verified on a real macOS host.
+4. Add Homebrew later after the hosted macOS build/smoke and user feedback establish a stable installation path.
 5. Treat PyPI and npm as separate thin-SDK packaging work; do not publish them until the CLI binary discovery/install story is clear.
 
 Do not publish packages from this repository until release ownership, versioning, and rollback rules are explicit. Do not introduce admin/root installer flows for preview releases.
 
-Current recommendation: GitHub release assets are enough for the public preview. Package-manager publishing should wait until Windows and Linux preview users have exercised the archives, and macOS has been verified on a macOS host.
+Current recommendation: GitHub release assets are enough for the public preview. Package-manager publishing should wait until Windows, Linux, and macOS preview users have exercised the archives.
 
 ## GitHub Preview Release
 
@@ -275,7 +278,7 @@ Keep the release product-focused:
 - include `mge` and `mge-mcp-server`;
 - do not include development benchmark binaries unless the release is explicitly marked as a development/tooling release;
 - do not upload generated stores, logs, passphrases, private corpus data, or `target/` directories;
-- state that macOS is not locally verified until a macOS host has run the shell scripts.
+- state that macOS is a supported CI/release target but was not executed locally on this Windows development host.
 
 Draft release command shape:
 

@@ -5,10 +5,10 @@ Set-Location $RepoRoot
 
 if ($env:MGE_CHECK_DEV_TOOLS -eq "1") {
     Write-Host "Building product and development tool release binaries for smoke..."
-    cargo build -p mge-cli --bins --release
+    cargo build --locked -p mge-cli --bins --release
 } else {
     Write-Host "Building product release binaries for smoke..."
-    cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
+    cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server --release
 }
 
 $TargetRoot = if ($env:CARGO_TARGET_DIR) {
@@ -75,7 +75,13 @@ try {
     Write-Host "CLI smoke..."
     Invoke-Required $Mge --store $PlainStore init --profile fast
     Invoke-Required $Mge --store $PlainStore remember "release smoke memory" --kind project_fact --scope release --trust tool_observed
+    Invoke-Required $Mge --store $PlainStore remember-session --turn "user=Prepare release notes" --turn "assistant=Keep rollback steps" --session-id release-smoke --scope release-session --max-turns 2
+    $ImportFile = Join-Path $TmpRoot "release-import.md"
+    "# Imported release note`n`nValidate the imported memory before publishing." | Set-Content -Encoding utf8 $ImportFile
+    Invoke-Required $Mge --store $PlainStore import markdown $ImportFile --scope release-import
     Invoke-Required $Mge --store $PlainStore recall "release smoke"
+    Invoke-Required $Mge --store $PlainStore recall "rollback steps" --scope release-session
+    Invoke-Required $Mge --store $PlainStore recall "imported memory" --scope release-import
     Invoke-Required $Mge --store $PlainStore checkpoint
     Invoke-Required $Mge --store $PlainStore seal
     Invoke-Required $Mge doctor --store $PlainStore --deep

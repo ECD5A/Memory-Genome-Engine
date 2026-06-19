@@ -26,10 +26,10 @@ require_command uname
 
 if [[ "${MGE_INCLUDE_DEV_TOOLS:-0}" == "1" ]]; then
   echo "Building product and development tool release binaries..."
-  cargo build -p mge-cli --bins --release
+  cargo build --locked -p mge-cli --bins --release
 else
   echo "Building product release binaries..."
-  cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
+  cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server --release
 fi
 
 target_root="${CARGO_TARGET_DIR:-$repo_root/target}"
@@ -77,7 +77,7 @@ if [[ "${MGE_INCLUDE_DEV_TOOLS:-0}" == "1" ]]; then
   echo "Development benchmark tools copied to: $layout_dev_tools_dir"
 fi
 
-for path in LICENSE README.md README.ru.md QUICKSTART.md SECURITY.md CONTRIBUTING.md CODE_OF_CONDUCT.md; do
+for path in LICENSE NOTICE README.md README.ru.md QUICKSTART.md SECURITY.md CONTRIBUTING.md CODE_OF_CONDUCT.md; do
   if [[ -f "$path" ]]; then
     cp -f "$path" "$layout_dir/$(basename "$path")"
   fi

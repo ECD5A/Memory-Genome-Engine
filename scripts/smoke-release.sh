@@ -19,10 +19,10 @@ require_command tee
 
 if [[ "${MGE_CHECK_DEV_TOOLS:-0}" == "1" ]]; then
   echo "Building product and development tool release binaries for smoke..."
-  cargo build -p mge-cli --bins --release
+  cargo build --locked -p mge-cli --bins --release
 else
   echo "Building product release binaries for smoke..."
-  cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
+  cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server --release
 fi
 
 target_root="${CARGO_TARGET_DIR:-$repo_root/target}"
@@ -68,7 +68,12 @@ encrypted_store="$tmp_root/encrypted/.memory-genome"
 echo "CLI smoke..."
 "$mge_bin" --store "$plain_store" init --profile fast
 "$mge_bin" --store "$plain_store" remember "release smoke memory" --kind project_fact --scope release --trust tool_observed
+"$mge_bin" --store "$plain_store" remember-session --turn "user=Prepare release notes" --turn "assistant=Keep rollback steps" --session-id release-smoke --scope release-session --max-turns 2 >/dev/null
+printf '# Imported release note\n\nValidate the imported memory before publishing.\n' > "$tmp_root/release-import.md"
+"$mge_bin" --store "$plain_store" import markdown "$tmp_root/release-import.md" --scope release-import >/dev/null
 "$mge_bin" --store "$plain_store" recall "release smoke" >/dev/null
+"$mge_bin" --store "$plain_store" recall "rollback steps" --scope release-session >/dev/null
+"$mge_bin" --store "$plain_store" recall "imported memory" --scope release-import >/dev/null
 "$mge_bin" --store "$plain_store" checkpoint >/dev/null
 "$mge_bin" --store "$plain_store" seal >/dev/null
 "$mge_bin" doctor --store "$plain_store" --deep >/dev/null

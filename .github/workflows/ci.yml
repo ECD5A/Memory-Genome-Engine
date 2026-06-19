@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rust:
     name: Rust ${{ matrix.os }}
@@ -37,10 +41,10 @@ jobs:
         run: cargo fmt --check
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Eval tests
         if: runner.os == 'Linux'
@@ -51,10 +55,16 @@ jobs:
         run: cargo clippy --manifest-path tools/agent-memory-eval/Cargo.toml --all-targets -- -D warnings
 
       - name: Check CLI binaries
-        run: cargo check -p mge-cli --bins
+        run: cargo check --locked -p mge-cli --bins
 
       - name: Build product release binaries
-        run: cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
+        run: cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server --release
+
+      - name: Rustdoc
+        if: runner.os == 'Linux'
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --workspace --no-deps
 
       - name: Product release smoke
         if: runner.os != 'Windows'
@@ -64,3 +74,23 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/smoke-release.ps1
+
+  msrv:
+    name: Rust 1.95 MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.95
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv-1.95
+
+      - name: Check workspace on MSRV
+        run: cargo check --locked --workspace --all-targets

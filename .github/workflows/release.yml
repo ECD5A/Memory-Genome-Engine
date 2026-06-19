@@ -9,8 +9,30 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    name: Verify release source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verify format, tests, and lints
+        run: |
+          cargo fmt --check
+          cargo test --locked --workspace
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+
   build:
     name: Build ${{ matrix.target }}
+    needs: verify
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -25,6 +47,9 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             archive: mge-macos-aarch64.tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive: mge-macos-x86_64.tar.gz
 
     steps:
       - name: Checkout
@@ -41,7 +66,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build product binaries
-        run: cargo build -p mge-cli --bin mge --bin mge-mcp-server --release --target ${{ matrix.target }}
+        run: cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server --release --target ${{ matrix.target }}
 
       - name: Package Unix archive
         if: runner.os != 'Windows'
