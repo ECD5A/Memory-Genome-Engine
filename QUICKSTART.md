@@ -18,7 +18,7 @@ mge setup
 mge tui
 ```
 
-On Windows, the binary is `mge.exe`. On Linux, it is `mge`.
+On Windows, the binary is `mge.exe`. On Linux and macOS, it is `mge`. Windows and WSL/Linux are verified locally; macOS remains enabled in CI and release automation but is not locally executed on this Windows development host.
 
 Most commands below use `cargo run -p mge-cli --` because they also work from a clean source checkout. If you use a release binary, replace:
 
