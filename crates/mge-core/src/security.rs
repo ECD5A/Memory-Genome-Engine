@@ -40,17 +40,12 @@ const KDF_PARALLELISM: u32 = 1;
 const KEY_CHECK_PLAINTEXT: &[u8] = b"MGE key check v1";
 const KEY_CHECK_AAD: &[u8] = b"mge:key_check:v1";
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SecurityMode {
+    #[default]
     Unencrypted,
     Encrypted,
-}
-
-impl Default for SecurityMode {
-    fn default() -> Self {
-        Self::Unencrypted
-    }
 }
 
 impl SecurityMode {
@@ -367,21 +362,11 @@ impl AgentCapabilities {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RecallPolicy {
     pub include_deprecated: bool,
     pub include_rejected: bool,
     pub allow_secret_references: bool,
-}
-
-impl Default for RecallPolicy {
-    fn default() -> Self {
-        Self {
-            include_deprecated: false,
-            include_rejected: false,
-            allow_secret_references: false,
-        }
-    }
 }
 
 impl RecallPolicy {

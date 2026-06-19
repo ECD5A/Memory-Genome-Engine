@@ -22,9 +22,10 @@ use crate::errors::MgeError;
 
 const DEFAULT_ZSTD_LEVEL: i32 = 3;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompressionKind {
+    #[default]
     None,
     Zstd,
 }
@@ -35,12 +36,6 @@ impl CompressionKind {
             Self::None => "none",
             Self::Zstd => "zstd",
         }
-    }
-}
-
-impl Default for CompressionKind {
-    fn default() -> Self {
-        Self::None
     }
 }
 

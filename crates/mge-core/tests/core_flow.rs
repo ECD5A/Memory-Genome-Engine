@@ -9,11 +9,12 @@ use mge_core::{
     marker_strings_for_cell_fields, score_cell_debug, tokenize_keywords, AgentCapabilities,
     AgentCapability, AuditEvent, AuditLogger, BinaryFusePageIndex, CandidateIndexData,
     CandidatePageIndex, CompressionKind, Compressor, ContextDebugInfo, DurabilityPolicy,
-    ExactMarkerPageIndex, HotCandidateQuery, HotMemoryLayer, IndexKind, InitOptions, MarkerGenome,
-    MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
-    MessagePackPageCodec, NoopAuditLogger, PageBuildOptions, PageCatalog, PageCatalogEntry,
-    PageClustererKind, PageCodec, PageCodecKind, QueryMode, RecallMode, RecallPolicy,
-    RecallRequest, RememberRequest, ScopeKindClusterer, SecurityMode, SensitivityLevel,
+    ExactMarkerPageIndex, HotCandidateQuery, HotMemoryLayer, HotStore, IndexKind, InitOptions,
+    MarkerGenome, MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemorySource, MemoryStatus,
+    MemoryValue, MessagePackPageCodec, NoopAuditLogger, PageBuildOptions, PageCatalog,
+    PageCatalogEntry, PageClustererKind, PageCodec, PageCodecKind, QueryMode, RecallMode,
+    RecallPolicy, RecallRequest, RememberRequest, ScopeKindClusterer, SecurityMode,
+    SensitivityLevel, SessionChunkOptions, SessionRememberRequest, SessionTurn,
     StorageConfigUpdate, TrustLevel, ZstdCompression,
 };
 use serde::Serialize;
@@ -53,6 +54,79 @@ fn marker_canonicalization_and_keyword_tokenization_preserve_unicode() {
         tokenize_keywords("Локальная память и память агента"),
         vec!["локальная", "память", "агента"]
     );
+}
+
+#[test]
+fn session_chunking_is_deterministic_and_respects_turn_boundaries() {
+    let turns = (0..7)
+        .map(|index| SessionTurn::new("user", format!("memory turn {index}")))
+        .collect::<Vec<_>>();
+    let options = SessionChunkOptions {
+        max_turns: 3,
+        max_bytes: 1024,
+    };
+
+    let first = mge_core::chunk_session_turns(&turns, options).unwrap();
+    let second = mge_core::chunk_session_turns(&turns, options).unwrap();
+
+    assert_eq!(first, second);
+    assert_eq!(first.len(), 3);
+    assert_eq!((first[0].start_turn, first[0].end_turn), (0, 3));
+    assert_eq!((first[1].start_turn, first[1].end_turn), (3, 6));
+    assert_eq!((first[2].start_turn, first[2].end_turn), (6, 7));
+    assert_eq!(
+        first.iter().map(|chunk| chunk.turn_count()).sum::<usize>(),
+        7
+    );
+}
+
+#[test]
+fn remember_session_uses_production_chunks_in_hot_and_sealed_recall() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let turns = (0..5)
+        .map(|index| {
+            let content = if index == 4 {
+                "Deployment requires the cobalt release key".to_string()
+            } else {
+                format!("Routine project context {index}")
+            };
+            SessionTurn::new(if index % 2 == 0 { "user" } else { "assistant" }, content)
+        })
+        .collect();
+    let mut request = SessionRememberRequest::new(turns);
+    request.chunk_options = SessionChunkOptions {
+        max_turns: 2,
+        max_bytes: 1024,
+    };
+    request.session_id = Some("Release Session 7".to_string());
+    request.scope = "release-project".to_string();
+    request.subject = Some("Agent release session".to_string());
+
+    let report = engine.remember_session(request).unwrap();
+    assert_eq!(report.turns, 5);
+    assert_eq!(report.chunks, 3);
+    assert_eq!(report.cells.len(), 3);
+
+    let mut recall = RecallRequest::new("cobalt release key");
+    recall.scope = Some("release-project".to_string());
+    let hot = engine.recall(recall.clone()).unwrap();
+    assert!(hot
+        .relevant_memory
+        .iter()
+        .any(|item| item.content.contains("cobalt release key")));
+    assert!(hot.relevant_memory.iter().any(|item| {
+        item.markers
+            .iter()
+            .any(|marker| marker == "memory_granularity:session_chunk")
+    }));
+
+    engine.seal().unwrap();
+    let sealed = engine.recall(recall).unwrap();
+    assert!(sealed
+        .relevant_memory
+        .iter()
+        .any(|item| item.content.contains("cobalt release key")));
 }
 
 #[test]
@@ -376,6 +450,7 @@ fn encrypted_store_init_records_security_mode_and_locks_payload_operations() {
     assert!(err.to_string().contains("store is locked"));
     let err = engine.checkpoint().unwrap_err();
     assert!(err.to_string().contains("store is locked"));
+    drop(engine);
     let err = MemoryEngine::open_at(dir.path()).unwrap_err();
     assert!(err.to_string().contains("store is locked"));
 
@@ -462,6 +537,7 @@ fn encrypted_store_with_passphrase_encrypts_hot_log_snapshot_and_recovers() {
     let reopened_packet = reopened.recall(request).unwrap();
     assert_eq!(reopened_packet.relevant_memory.len(), 1);
     assert_eq!(reopened_packet.relevant_memory[0].content, plaintext);
+    drop(reopened);
 
     let wrong_key_err = MemoryEngine::open_at_with_passphrase(dir.path(), Some("wrong key"))
         .unwrap_err()
@@ -798,14 +874,15 @@ fn hot_ram_layer_indexes_candidates_and_recovers_from_log() {
     assert_eq!(checkpoint.hot_cells, 3);
     assert!(checkpoint.snapshot_path.is_file());
 
-    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    drop(engine);
+    let mut reopened = MemoryEngine::open_at(dir.path()).unwrap();
     let reopened_packet = reopened.recall(request.clone()).unwrap();
     assert_eq!(reopened_packet.relevant_memory.len(), 1);
     assert_eq!(reopened_packet.debug.hot_total_cells, 3);
     assert_eq!(reopened_packet.debug.hot_candidate_cells, 1);
 
-    engine.seal().unwrap();
-    assert_eq!(engine.stats().unwrap().hot_cells, 0);
+    reopened.seal().unwrap();
+    assert_eq!(reopened.stats().unwrap().hot_cells, 0);
     assert!(!dir.path().join("hot").join("snapshot.mgs").exists());
     assert_eq!(
         mge_core::HotStore::new(dir.path().join("hot").join("hot.mgl"))
@@ -814,7 +891,7 @@ fn hot_ram_layer_indexes_candidates_and_recovers_from_log() {
             .len(),
         0
     );
-    let sealed_packet = engine.recall(request).unwrap();
+    let sealed_packet = reopened.recall(request).unwrap();
     assert_eq!(sealed_packet.relevant_memory.len(), 1);
     assert_eq!(sealed_packet.debug.hot_total_cells, 0);
     assert_eq!(sealed_packet.debug.hot_candidate_cells, 0);
@@ -991,6 +1068,89 @@ fn safe_and_balanced_durability_flush_paths_restore_hot_memory() {
         assert_eq!(packet.relevant_memory.len(), 1);
         assert_eq!(packet.debug.hot_total_cells, 1);
     }
+}
+
+#[test]
+fn single_writer_lock_rejects_second_engine_and_releases_on_drop() {
+    let dir = tempdir().unwrap();
+    let engine = MemoryEngine::init_at(dir.path()).unwrap();
+
+    let error = MemoryEngine::open_at(dir.path()).unwrap_err().to_string();
+    assert!(error.contains("store is busy"));
+    assert!(dir.path().join(".mge.lock").is_file());
+
+    drop(engine);
+    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    assert_eq!(reopened.stats().unwrap().hot_cells, 0);
+}
+
+#[test]
+fn durability_modes_control_when_hot_records_reach_disk() {
+    let options = |durability| InitOptions {
+        page_codec: PageCodecKind::MessagePack,
+        compression: CompressionKind::None,
+        index_kind: IndexKind::ExactMarkerPage,
+        page_clusterer: PageClustererKind::ScopeKind,
+        durability,
+        security_mode: SecurityMode::Unencrypted,
+    };
+
+    let safe_dir = tempdir().unwrap();
+    let mut safe =
+        MemoryEngine::init_with_options(safe_dir.path(), options(DurabilityPolicy::Safe)).unwrap();
+    remember_text_cell(
+        &mut safe,
+        "durability",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "safe durable memory",
+        &["tag:safe".to_string()],
+    );
+    assert_eq!(
+        HotStore::new(safe_dir.path().join("hot").join("hot.mgl"))
+            .load_cells()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let balanced_dir = tempdir().unwrap();
+    let mut balanced =
+        MemoryEngine::init_with_options(balanced_dir.path(), options(DurabilityPolicy::Balanced))
+            .unwrap();
+    for index in 0..64 {
+        remember_text_cell(
+            &mut balanced,
+            "durability",
+            MemoryStatus::Active,
+            TrustLevel::UserConfirmed,
+            &format!("balanced durable memory {index}"),
+            &["tag:balanced".to_string()],
+        );
+    }
+    assert_eq!(
+        HotStore::new(balanced_dir.path().join("hot").join("hot.mgl"))
+            .load_cells()
+            .unwrap()
+            .len(),
+        64
+    );
+
+    let fast_dir = tempdir().unwrap();
+    let mut fast =
+        MemoryEngine::init_with_options(fast_dir.path(), options(DurabilityPolicy::Fast)).unwrap();
+    remember_text_cell(
+        &mut fast,
+        "durability",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "fast pending memory",
+        &["tag:fast".to_string()],
+    );
+    let fast_store = HotStore::new(fast_dir.path().join("hot").join("hot.mgl"));
+    assert!(fast_store.load_cells().unwrap().is_empty());
+    fast.checkpoint().unwrap();
+    assert_eq!(fast_store.load_cells().unwrap().len(), 1);
 }
 
 #[test]
@@ -1481,16 +1641,17 @@ fn status_override_hides_sealed_memory_without_rewriting_pages() {
     assert_eq!(included.relevant_memory[0].status, MemoryStatus::Rejected);
     assert!(engine.validate_deep().unwrap().ok);
 
-    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    drop(engine);
+    let mut reopened = MemoryEngine::open_at(dir.path()).unwrap();
     let hidden_after_reopen = reopened
         .recall(RecallRequest::new("override maintenance"))
         .unwrap();
     assert!(hidden_after_reopen.relevant_memory.is_empty());
 
-    engine
+    reopened
         .set_status_override(cell.id, MemoryStatus::Active)
         .unwrap();
-    let restored = engine
+    let restored = reopened
         .recall(RecallRequest::new("override maintenance"))
         .unwrap();
     assert_eq!(restored.relevant_memory.len(), 1);
@@ -2848,6 +3009,7 @@ fn validate_reports_marker_dictionary_inconsistency() {
         id_to_marker: BTreeMap::new(),
         next_id: 2,
     };
+    drop(engine);
     binary::write_messagepack_file(&markers_path, FileKind::MarkerDictionary, &broken).unwrap();
     let engine = MemoryEngine::open_at(dir.path()).unwrap();
 

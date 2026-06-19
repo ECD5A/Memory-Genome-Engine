@@ -26,8 +26,8 @@ use clap::{Parser, Subcommand};
 use mge_core::{
     CellId, CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine, MemoryKind,
     MemorySource, MemoryStatus, MemoryValue, MgeError, PageClustererKind, PageCodecKind,
-    RecallMode, RecallRequest, RememberRequest, SecurityMode, SensitivityLevel, TrustLevel,
-    DEFAULT_STORE_DIR,
+    RecallMode, RecallRequest, RememberRequest, SecurityMode, SensitivityLevel,
+    SessionChunkOptions, SessionRememberRequest, SessionTurn, TrustLevel, DEFAULT_STORE_DIR,
 };
 use serde::Serialize;
 
@@ -112,6 +112,55 @@ enum Commands {
 
         #[arg(long = "link")]
         links: Vec<CellId>,
+
+        #[arg(long)]
+        passphrase_env: Option<String>,
+    },
+    RememberSession {
+        #[arg(long = "turn", required = true)]
+        turns: Vec<String>,
+
+        #[arg(long = "session-id")]
+        session_id: Option<String>,
+
+        #[arg(long, default_value = "project_fact")]
+        kind: String,
+
+        #[arg(long)]
+        subject: Option<String>,
+
+        #[arg(long, default_value = "global")]
+        scope: String,
+
+        #[arg(long, default_value = "tool_observed")]
+        trust: String,
+
+        #[arg(long, default_value = "active")]
+        status: String,
+
+        #[arg(long, default_value = "private")]
+        sensitivity: String,
+
+        #[arg(long = "marker")]
+        markers: Vec<String>,
+
+        #[arg(long = "source-type")]
+        source_type: Option<String>,
+
+        #[arg(long = "source-ref")]
+        source_ref: Option<String>,
+
+        #[arg(long = "link")]
+        links: Vec<CellId>,
+
+        #[arg(long, default_value_t = 8)]
+        max_turns: usize,
+
+        #[arg(long, default_value_t = 4096)]
+        max_bytes: usize,
+
+        #[arg(long)]
+        json: bool,
 
         #[arg(long)]
         passphrase_env: Option<String>,
@@ -382,6 +431,57 @@ fn main() -> Result<()> {
 
             let cell = engine.remember(request)?;
             println!("Remembered cell {}", cell.id);
+        }
+        Commands::RememberSession {
+            turns,
+            session_id,
+            kind,
+            subject,
+            scope,
+            trust,
+            status,
+            sensitivity,
+            markers,
+            source_type,
+            source_ref,
+            links,
+            max_turns,
+            max_bytes,
+            json,
+            passphrase_env,
+        } => {
+            let mut engine = open_engine(&cli.store, passphrase_env.as_deref())?;
+            let turns = turns
+                .iter()
+                .enumerate()
+                .map(|(index, turn)| parse_session_turn(index, turn))
+                .collect::<Result<Vec<_>>>()?;
+            let mut request = SessionRememberRequest::new(turns);
+            request.chunk_options = SessionChunkOptions {
+                max_turns,
+                max_bytes,
+            };
+            request.session_id = session_id;
+            request.kind = MemoryKind::from_str(&kind)?;
+            request.subject = subject;
+            request.scope = scope;
+            request.trust = TrustLevel::from_str(&trust)?;
+            request.status = MemoryStatus::from_str(&status)?;
+            request.sensitivity = SensitivityLevel::from_str(&sensitivity)?;
+            request.markers = markers;
+            request.source = parse_memory_source(source_type, source_ref)?;
+            request.links = links;
+            let report = engine.remember_session(request)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "Remembered session: turns={}, chunks={}, cells={}",
+                    report.turns,
+                    report.chunks,
+                    report.cells.len()
+                );
+            }
         }
         Commands::Recall {
             query,
@@ -727,6 +827,10 @@ fn open_engine_error_context(store: &Path, passphrase_env: Option<&str>, err: &M
             "encrypted store {} is locked; pass --passphrase-env <ENV> to unlock payload operations",
             store.display()
         ),
+        MgeError::StoreBusy(_) => format!(
+            "store {} is already open; close the other MGE process and retry",
+            store.display()
+        ),
         MgeError::NotInitialized(_) => format!(
             "failed to open {}; run `mge init` first or pass --store",
             store.display()
@@ -897,6 +1001,19 @@ fn parse_memory_source(
         (None, None) => Ok(None),
         _ => bail!("remember source requires both --source-type and --source-ref"),
     }
+}
+
+fn parse_session_turn(index: usize, input: &str) -> Result<SessionTurn> {
+    let (role, content) = input
+        .split_once('=')
+        .or_else(|| input.split_once(':'))
+        .with_context(|| format!("turn {index} must use ROLE=CONTENT or ROLE:CONTENT format"))?;
+    let role = role.trim();
+    let content = content.trim();
+    if role.is_empty() || content.is_empty() {
+        bail!("turn {index} requires non-empty role and content");
+    }
+    Ok(SessionTurn::new(role, content))
 }
 
 fn parse_maintenance_status(raw: &str) -> Result<MemoryStatus> {

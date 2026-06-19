@@ -74,10 +74,11 @@ pub struct PageCatalogEntry {
     pub encoded_size_bytes: u64,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PageCodecKind {
     Json,
+    #[default]
     MessagePack,
 }
 
@@ -87,12 +88,6 @@ impl PageCodecKind {
             Self::Json => "json",
             Self::MessagePack => "messagepack",
         }
-    }
-}
-
-impl Default for PageCodecKind {
-    fn default() -> Self {
-        Self::MessagePack
     }
 }
 
@@ -195,9 +190,10 @@ impl Default for PageBuildOptions {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PageClustererKind {
+    #[default]
     ScopeKind,
     MarkerOverlap,
 }
@@ -208,12 +204,6 @@ impl PageClustererKind {
             Self::ScopeKind => "scope_kind",
             Self::MarkerOverlap => "marker_overlap",
         }
-    }
-}
-
-impl Default for PageClustererKind {
-    fn default() -> Self {
-        Self::ScopeKind
     }
 }
 

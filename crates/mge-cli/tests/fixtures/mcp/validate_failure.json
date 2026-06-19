@@ -5,7 +5,7 @@
     "ok": false,
     "tool": "mge_validate",
     "protocol_version": "mge-jsonrpc-1",
-    "integration_schema_version": 1,
+    "integration_schema_version": 2,
     "validation": {
       "ok": false,
       "index_kind": "exact_marker_page",

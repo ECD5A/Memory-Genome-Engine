@@ -5,7 +5,7 @@
     "ok": true,
     "tool": "mge_recall",
     "protocol_version": "mge-jsonrpc-1",
-    "integration_schema_version": 1,
+    "integration_schema_version": 2,
     "context": {
       "mode": "full_scope",
       "relevant_memory_count": 1,

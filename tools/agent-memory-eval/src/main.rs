@@ -13,9 +13,10 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, ValueEnum};
 use mge_core::{
-    CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine, MemoryKind,
-    MemorySource, MemoryStatus, MemoryValue, PageClustererKind, PageCodecKind, RecallMode,
-    RecallRequest, RememberRequest, SecurityMode, SensitivityLevel, TrustLevel,
+    chunk_session_turns, CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine,
+    MemoryKind, MemorySource, MemoryStatus, MemoryValue, PageClustererKind, PageCodecKind,
+    RecallMode, RecallRequest, RememberRequest, SecurityMode, SensitivityLevel,
+    SessionChunkOptions, SessionTurn, TrustLevel,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -234,6 +235,7 @@ struct RunSummary {
     recall_at_k: f64,
     precision_at_k: f64,
     avg_latency_micros: u64,
+    avg_end_to_end_micros: u64,
     p50_latency_micros: u64,
     p95_latency_micros: u64,
     avg_context_bytes: usize,
@@ -242,6 +244,7 @@ struct RunSummary {
     avg_pages_loaded: f64,
     avg_pages_pruned: f64,
     avg_cells_scanned: f64,
+    avg_store_open_micros: u64,
     avg_page_read_micros: u64,
     avg_page_decode_micros: u64,
     avg_scoring_cache_build_micros: u64,
@@ -254,6 +257,7 @@ struct RunSummary {
 struct QueryResult {
     returned_ids: Vec<String>,
     latency_micros: u64,
+    store_open_micros: u64,
     context_bytes: usize,
     hot_candidates: usize,
     pages_loaded: usize,
@@ -562,7 +566,7 @@ fn convert_longmemeval(
             }
 
             if ingest_mode == IngestMode::SessionChunk {
-                for (chunk_index, chunk) in chunk_session_turns(&converted_turns)
+                for (chunk_index, chunk) in chunk_longmemeval_session(&converted_turns)?
                     .into_iter()
                     .enumerate()
                 {
@@ -738,38 +742,23 @@ struct LongMemEvalChunk {
     has_answer: bool,
 }
 
-fn chunk_session_turns(turns: &[LongMemEvalTurn]) -> Vec<LongMemEvalChunk> {
-    const MAX_TURNS: usize = 8;
-    const MAX_BYTES: usize = 4 * 1024;
-
-    let mut chunks = Vec::new();
-    let mut lines = Vec::new();
-    let mut bytes = 0usize;
-    let mut has_answer = false;
-
-    for turn in turns {
-        let line = format!("{}: {}", turn.role, turn.content);
-        if !lines.is_empty() && (lines.len() >= MAX_TURNS || bytes + line.len() > MAX_BYTES) {
-            chunks.push(LongMemEvalChunk {
-                text: lines.join("\n"),
+fn chunk_longmemeval_session(turns: &[LongMemEvalTurn]) -> Result<Vec<LongMemEvalChunk>> {
+    let production_turns = turns
+        .iter()
+        .map(|turn| SessionTurn::new(&turn.role, &turn.content))
+        .collect::<Vec<_>>();
+    chunk_session_turns(&production_turns, SessionChunkOptions::default())?
+        .into_iter()
+        .map(|chunk| {
+            let has_answer = turns[chunk.start_turn..chunk.end_turn]
+                .iter()
+                .any(|turn| turn.has_answer);
+            Ok(LongMemEvalChunk {
+                text: chunk.text,
                 has_answer,
-            });
-            lines.clear();
-            bytes = 0;
-            has_answer = false;
-        }
-        bytes += line.len();
-        has_answer |= turn.has_answer;
-        lines.push(line);
-    }
-
-    if !lines.is_empty() {
-        chunks.push(LongMemEvalChunk {
-            text: lines.join("\n"),
-            has_answer,
-        });
-    }
-    chunks
+            })
+        })
+        .collect()
 }
 
 fn convert_locomo(
@@ -1212,6 +1201,7 @@ fn ingest_dataset(
     Ok(cell_to_eval_id)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn evaluate_mge(
     engine: &MemoryEngine,
     dataset: &EvalDataset,
@@ -1259,14 +1249,18 @@ fn evaluate_mge_cold(
     let mut results = Vec::new();
     for query in &dataset.queries {
         for _ in 0..repeats {
+            let open_started = Instant::now();
             let engine = MemoryEngine::open_at(store_root)?;
-            results.push(evaluate_mge_query(
+            let store_open_micros = elapsed_micros(open_started);
+            let mut result = evaluate_mge_query(
                 &engine,
                 query,
                 cell_to_eval_id,
                 mode,
                 top_k,
-            )?);
+            )?;
+            result.store_open_micros = store_open_micros;
+            results.push(result);
         }
     }
 
@@ -1326,6 +1320,7 @@ fn evaluate_mge_query(
     Ok(QueryResult {
         returned_ids,
         latency_micros,
+        store_open_micros: 0,
         context_bytes: packet.to_prompt_text().len(),
         hot_candidates: packet.debug.hot_candidate_cells,
         pages_loaded: packet.debug.loaded_pages,
@@ -1873,6 +1868,7 @@ fn bm25_term_score(
     idf * (tf * (k1 + 1.0)) / normalization
 }
 
+#[allow(clippy::too_many_arguments)]
 fn summarize_run(
     system: String,
     layer: String,
@@ -1892,6 +1888,7 @@ fn summarize_run(
     let mut pages_loaded_sum = 0usize;
     let mut pages_pruned_sum = 0usize;
     let mut cells_scanned_sum = 0usize;
+    let mut store_open_micros_sum = 0u64;
     let mut page_read_micros_sum = 0u64;
     let mut page_decode_micros_sum = 0u64;
     let mut scoring_cache_build_micros_sum = 0u64;
@@ -1936,6 +1933,8 @@ fn summarize_run(
             pages_loaded_sum += result.pages_loaded;
             pages_pruned_sum += result.pages_pruned;
             cells_scanned_sum += result.cells_scanned;
+            store_open_micros_sum =
+                store_open_micros_sum.saturating_add(result.store_open_micros);
             page_read_micros_sum = page_read_micros_sum.saturating_add(result.page_read_micros);
             page_decode_micros_sum =
                 page_decode_micros_sum.saturating_add(result.page_decode_micros);
@@ -1963,6 +1962,8 @@ fn summarize_run(
         recall_at_k: recall_sum / samples as f64,
         precision_at_k: precision_sum / samples as f64,
         avg_latency_micros: average_u64(&latencies),
+        avg_end_to_end_micros: average_u64(&latencies)
+            .saturating_add(store_open_micros_sum / samples as u64),
         p50_latency_micros: percentile(&latencies, 50.0),
         p95_latency_micros: percentile(&latencies, 95.0),
         avg_context_bytes: context_bytes_sum / samples,
@@ -1971,6 +1972,7 @@ fn summarize_run(
         avg_pages_loaded: pages_loaded_sum as f64 / samples as f64,
         avg_pages_pruned: pages_pruned_sum as f64 / samples as f64,
         avg_cells_scanned: cells_scanned_sum as f64 / samples as f64,
+        avg_store_open_micros: store_open_micros_sum / samples as u64,
         avg_page_read_micros: page_read_micros_sum / samples as u64,
         avg_page_decode_micros: page_decode_micros_sum / samples as u64,
         avg_scoring_cache_build_micros: scoring_cache_build_micros_sum / samples as u64,
@@ -2123,7 +2125,7 @@ fn text_report(report: &EvalReport) -> String {
     ));
     output.push_str("\n\n");
     output.push_str(&format!(
-        "{:<28} {:<18} {:<18} {:<8} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8} {:>9} {:>8}",
+        "{:<28} {:<18} {:<18} {:<8} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8} {:>8} {:>9} {:>8}",
         "system",
         "layer",
         "index",
@@ -2132,17 +2134,18 @@ fn text_report(report: &EvalReport) -> String {
         "rec@k",
         "prec@k",
         "avg_us",
+        "e2e_us",
         "p50_us",
         "p95_us",
         "ctx_bytes",
         "items"
     ));
     output.push('\n');
-    output.push_str(&"-".repeat(144));
+    output.push_str(&"-".repeat(153));
     output.push('\n');
     for run in &report.runs {
         output.push_str(&format!(
-            "{:<28} {:<18} {:<18} {:<8} {:>7.3} {:>7.3} {:>7.3} {:>8} {:>8} {:>8} {:>9} {:>8.2}",
+            "{:<28} {:<18} {:<18} {:<8} {:>7.3} {:>7.3} {:>7.3} {:>8} {:>8} {:>8} {:>8} {:>9} {:>8.2}",
             run.system,
             run.layer,
             run.index_kind,
@@ -2151,6 +2154,7 @@ fn text_report(report: &EvalReport) -> String {
             run.recall_at_k,
             run.precision_at_k,
             run.avg_latency_micros,
+            run.avg_end_to_end_micros,
             run.p50_latency_micros,
             run.p95_latency_micros,
             run.avg_context_bytes,
@@ -2179,17 +2183,18 @@ fn text_report(report: &EvalReport) -> String {
     }
     output.push_str("\ntiming breakdown (averages, microseconds):\n");
     output.push_str(&format!(
-        "{:<28} {:<18} {:<8} {:>8} {:>8} {:>10} {:>10} {:>8} {:>10}\n",
-        "system", "layer", "mode", "read", "decode", "score_build", "filter", "rerank", "packet"
+        "{:<28} {:<18} {:<8} {:>8} {:>8} {:>8} {:>10} {:>10} {:>8} {:>10}\n",
+        "system", "layer", "mode", "open", "read", "decode", "score_build", "filter", "rerank", "packet"
     ));
-    output.push_str(&"-".repeat(116));
+    output.push_str(&"-".repeat(125));
     output.push('\n');
     for run in &report.runs {
         output.push_str(&format!(
-            "{:<28} {:<18} {:<8} {:>8} {:>8} {:>10} {:>10} {:>8} {:>10}\n",
+            "{:<28} {:<18} {:<8} {:>8} {:>8} {:>8} {:>10} {:>10} {:>8} {:>10}\n",
             run.system,
             run.layer,
             run.mode,
+            run.avg_store_open_micros,
             run.avg_page_read_micros,
             run.avg_page_decode_micros,
             run.avg_scoring_cache_build_micros,
@@ -2199,6 +2204,7 @@ fn text_report(report: &EvalReport) -> String {
         ));
     }
     output.push_str("\nnotes:\n");
+    output.push_str("- avg_us measures recall after engine open; e2e_us adds store_open for sealed_cold runs.\n");
     for note in &report.notes {
         output.push_str(&format!("- {note}\n"));
     }

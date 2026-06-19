@@ -19,6 +19,23 @@ const client = new MemoryGenomeClient(storePath, {
 
 client.init("fast");
 
+const session = client.rememberSession(
+  [
+    { role: "user", content: "Prepare the local integration release" },
+    { role: "assistant", content: "Use the existing agent host contract" },
+    { role: "user", content: "Keep the verification result for recall" },
+  ],
+  {
+    sessionId: "typescript-agent-host",
+    scope: "agent_demo",
+    markers: ["topic:agent_host"],
+    maxTurns: 2,
+  },
+);
+if (session.chunks !== 2) {
+  throw new Error("expected two deterministic session chunks");
+}
+
 const task = "prepare local agent host integration smoke";
 const focusedPacket = client.recall(task, {
   mode: "focused",
@@ -40,8 +57,8 @@ const cellId = client.remember(workResult, {
 });
 
 const checkpoint = client.checkpoint() as { hot_cells: number };
-if (checkpoint.hot_cells !== 1) {
-  throw new Error("expected one hot cell at checkpoint");
+if (checkpoint.hot_cells !== 3) {
+  throw new Error("expected three hot cells at checkpoint");
 }
 
 const broadPacket = client.recall("agent host integration task", {
@@ -54,8 +71,8 @@ if (!broadPacket.relevant_memory.some((item) => item.content === workResult)) {
 }
 
 const seal = client.seal() as { hot_cells_sealed: number };
-if (seal.hot_cells_sealed !== 1) {
-  throw new Error("expected one sealed hot cell");
+if (seal.hot_cells_sealed !== 3) {
+  throw new Error("expected three sealed hot cells");
 }
 
 const sealedPacket = client.recall("agent host integration task", {

@@ -333,9 +333,12 @@ enum_with_snake_names!(SensitivityLevel {
     SecretReference => "secret_reference",
 });
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RecallMode {
+    #[default]
     Focused,
     Broad,
     FullScope,
@@ -346,12 +349,6 @@ enum_with_snake_names!(RecallMode {
     Broad => "broad",
     FullScope => "full_scope",
 });
-
-impl Default for RecallMode {
-    fn default() -> Self {
-        Self::Focused
-    }
-}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]

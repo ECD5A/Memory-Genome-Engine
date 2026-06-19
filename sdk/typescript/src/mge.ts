@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 export const PROTOCOL_VERSION = "mge-jsonrpc-1";
-export const INTEGRATION_SCHEMA_VERSION = 1;
+export const INTEGRATION_SCHEMA_VERSION = 2;
 
 export type RecallMode = "focused" | "broad" | "full_scope" | "full-scope";
 
@@ -39,6 +39,30 @@ export interface RememberOptions {
   sensitivity?: string;
   status?: string;
   subject?: string;
+}
+
+export interface SessionTurnInput {
+  role: string;
+  content: string;
+}
+
+export interface RememberSessionOptions {
+  sessionId?: string;
+  kind?: string;
+  scope?: string;
+  subject?: string;
+  markers?: string[];
+  trust?: string;
+  sensitivity?: string;
+  status?: string;
+  maxTurns?: number;
+  maxBytes?: number;
+}
+
+export interface SessionRememberResult {
+  turns: number;
+  chunks: number;
+  cells: Array<Record<string, unknown>>;
 }
 
 export interface RecallOptions {
@@ -204,6 +228,44 @@ export class MemoryGenomeClient {
       throw new Error(`could not parse remembered cell id from: ${output}`);
     }
     return Number(match[1]);
+  }
+
+  rememberSession(
+    turns: SessionTurnInput[],
+    options: RememberSessionOptions = {},
+  ): SessionRememberResult {
+    const args = [
+      "remember-session",
+      "--kind",
+      options.kind ?? "project_fact",
+      "--scope",
+      options.scope ?? "global",
+      "--trust",
+      options.trust ?? "tool_observed",
+      "--sensitivity",
+      options.sensitivity ?? "private",
+      "--status",
+      options.status ?? "active",
+      "--max-turns",
+      String(options.maxTurns ?? 8),
+      "--max-bytes",
+      String(options.maxBytes ?? 4096),
+      "--json",
+    ];
+    if (options.sessionId) {
+      args.push("--session-id", options.sessionId);
+    }
+    if (options.subject) {
+      args.push("--subject", options.subject);
+    }
+    for (const marker of options.markers ?? []) {
+      args.push("--marker", marker);
+    }
+    for (const turn of turns) {
+      args.push("--turn", `${turn.role}=${turn.content}`);
+    }
+    args.push(...this.securityArgs());
+    return this.runJson(args);
   }
 
   recall(query = "", options: RecallOptions = {}): ContextPacket {

@@ -3,6 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use mge_core::MemoryEngine;
 use serde_json::{json, Value};
 use tempfile::tempdir;
 
@@ -104,6 +105,79 @@ fn cli_milestone_flow_outputs_context_stats_and_validation_json() {
     assert!(!store.join("manifest.json").exists());
     assert!(!store.join("markers.json").exists());
     assert!(!store.join("hot").join("hot_cells.jsonl").exists());
+}
+
+#[test]
+fn cli_reports_store_busy_while_another_process_owns_the_store() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    run_mge(&store, &["init"]);
+
+    let engine = MemoryEngine::open_at(&store).unwrap();
+    let blocked = run_mge_failure(&store, &["stats"]);
+    let stderr = String::from_utf8_lossy(&blocked.stderr);
+    assert!(stderr.contains("store is busy"), "stderr: {stderr}");
+
+    drop(engine);
+    let stats = run_mge_json(&store, &["stats", "--json"]);
+    assert_eq!(stats["hot_cells"], 0);
+}
+
+#[test]
+fn cli_remember_session_chunks_and_recalls_context() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    run_mge(&store, &["init"]);
+
+    let report = run_mge_json(
+        &store,
+        &[
+            "remember-session",
+            "--session-id",
+            "release-review",
+            "--scope",
+            "release",
+            "--marker",
+            "topic:release",
+            "--max-turns",
+            "2",
+            "--turn",
+            "user=Review the cobalt deployment plan",
+            "--turn",
+            "assistant=The deployment uses staged rollout",
+            "--turn",
+            "user=Record the rollback requirement",
+            "--turn",
+            "assistant=Rollback must finish within five minutes",
+            "--turn",
+            "user=Keep the result for the next agent",
+            "--json",
+        ],
+    );
+    assert_eq!(report["turns"], 5);
+    assert_eq!(report["chunks"], 3);
+    assert_eq!(report["cells"].as_array().unwrap().len(), 3);
+
+    let recalled = run_mge_json(
+        &store,
+        &[
+            "recall",
+            "cobalt rollback deployment",
+            "--scope",
+            "release",
+            "--json",
+        ],
+    );
+    assert!(!recalled["relevant_memory"].as_array().unwrap().is_empty());
+    assert!(recalled["relevant_memory"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| {
+            item["content"]
+                .as_str()
+                .is_some_and(|content| content.contains("cobalt deployment"))
+        }));
 }
 
 #[test]
@@ -717,7 +791,7 @@ fn mcp_server_json_rpc_adapter_supports_agent_workflow() {
 
     assert_eq!(responses.len(), 9);
     assert_eq!(responses[0]["result"]["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(responses[0]["result"]["integration_schema_version"], 1);
+    assert_eq!(responses[0]["result"]["integration_schema_version"], 2);
     assert_eq!(responses[0]["result"]["tool"], "mge_remember");
     assert_eq!(responses[0]["result"]["ok"], true);
     assert_eq!(responses[0]["result"]["cell_id"], 1);
@@ -791,9 +865,10 @@ fn mcp_server_exposes_stable_schema_and_structured_errors() {
 
     let schema = &responses[0]["result"];
     assert_eq!(schema["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(schema["integration_schema_version"], 1);
+    assert_eq!(schema["integration_schema_version"], 2);
     for tool in [
         "mge_remember",
+        "mge_remember_session",
         "mge_recall",
         "mge_seal",
         "mge_checkpoint",
@@ -843,6 +918,127 @@ fn mcp_server_exposes_stable_schema_and_structured_errors() {
 }
 
 #[test]
+fn mcp_server_remembers_session_chunks() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    let store_path = json_safe_path(&store);
+    run_mge(&store, &["init"]);
+
+    let responses = run_mcp_json_lines(&[
+        json!({
+            "jsonrpc": "2.0",
+            "id": "session",
+            "method": "mge_remember_session",
+            "params": {
+                "store_path": store_path.clone(),
+                "session_id": "mcp-release-review",
+                "scope": "mcp-session",
+                "max_turns": 2,
+                "turns": [
+                    {"role": "user", "content": "Review the indigo release"},
+                    {"role": "assistant", "content": "Use a staged rollout"},
+                    {"role": "user", "content": "Keep rollback instructions"}
+                ]
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "recall",
+            "method": "mge_recall",
+            "params": {
+                "store_path": store_path,
+                "query": "indigo release rollback",
+                "scope": "mcp-session"
+            }
+        }),
+    ]);
+
+    assert_eq!(responses[0]["result"]["turns"], 3);
+    assert_eq!(responses[0]["result"]["chunks"], 2);
+    assert_eq!(
+        responses[0]["result"]["cell_ids"].as_array().unwrap().len(),
+        2
+    );
+    assert!(!responses[1]["result"]["context_packet"]["relevant_memory"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        responses[1]["result"]["context_packet"]["relevant_memory"][0]["kind"],
+        "project_fact"
+    );
+}
+
+#[test]
+fn mcp_standard_lifecycle_lists_and_calls_tools() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    let store_path = json_safe_path(&store);
+    run_mge(&store, &["init"]);
+
+    let responses = run_mcp_json_lines(&[
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "mge-test-host", "version": "0.1.0" }
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {}
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "mge_stats",
+                "arguments": { "store_path": store_path }
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": { "name": "mge_missing", "arguments": {} }
+        }),
+    ]);
+
+    assert_eq!(responses.len(), 4, "notifications must not emit responses");
+    assert_eq!(responses[0]["result"]["protocolVersion"], "2025-06-18");
+    assert_eq!(
+        responses[0]["result"]["serverInfo"]["name"],
+        "memory-genome-engine"
+    );
+    let tools = responses[1]["result"]["tools"].as_array().unwrap();
+    assert!(tools.iter().any(|tool| tool["name"] == "mge_recall"));
+    assert!(tools
+        .iter()
+        .all(|tool| tool["inputSchema"]["type"] == "object"));
+    assert_eq!(responses[2]["result"]["isError"], false);
+    assert_eq!(
+        responses[2]["result"]["structuredContent"]["stats"]["hot_cells"],
+        0
+    );
+    assert_eq!(responses[3]["result"]["isError"], true);
+    assert_eq!(
+        responses[3]["result"]["structuredContent"]["details"]["error_kind"],
+        "unknown_tool"
+    );
+}
+
+#[test]
 fn mcp_server_hardens_error_paths() {
     let dir = tempdir().unwrap();
     let store = dir.path().join(".memory-genome");
@@ -876,6 +1072,7 @@ fn mcp_server_hardens_error_paths() {
     let malformed = run_mcp_raw_lines("{not-json}\n");
     assert_eq!(malformed.len(), 1);
     assert_eq!(malformed[0]["error"]["code"], -32700);
+    assert_eq!(malformed[0]["id"], Value::Null);
     assert_eq!(malformed[0]["error"]["tool_name"], "unknown");
     assert_eq!(malformed[0]["error"]["recoverable"], true);
     assert_eq!(
@@ -1111,7 +1308,7 @@ fn mcp_agent_session_fixture_runs_as_one_process() {
     assert_eq!(responses.len(), 10);
     assert_eq!(responses[0]["result"]["tool"], "mge_schema");
     assert_eq!(responses[0]["result"]["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(responses[0]["result"]["integration_schema_version"], 1);
+    assert_eq!(responses[0]["result"]["integration_schema_version"], 2);
     assert_eq!(responses[1]["result"]["tool"], "mge_remember");
     assert_eq!(responses[1]["result"]["cell_id"], 1);
     assert_eq!(
@@ -1777,44 +1974,38 @@ fn corpus_benchmark_outputs_valid_core_metrics() {
         report["subset_check"]["focused_exact_candidates_subset_of_binary_fuse_candidates"],
         true
     );
-    assert_eq!(
+    assert!(
         report["comparison"]["sealed_cold_avg_micros"]["focused"]["exact_marker_page"]
             .as_u64()
-            .is_some(),
-        true
+            .is_some()
     );
-    assert_eq!(
+    assert!(
         report["comparison"]["sealed_cold_avg_micros"]["broad"]["binary_fuse_page"]
             .as_u64()
-            .is_some(),
-        true
+            .is_some()
     );
-    assert_eq!(
+    assert!(
         report["comparison"]["sealed_repeated_avg_micros"]["full_scope"]["exact_marker_page"]
             .as_u64()
-            .is_some(),
-        true
+            .is_some()
     );
-    assert_eq!(
+    assert!(
         report["comparison"]["sealed_repeated_timing_avg_micros"]["focused"]["page_decode"]
             ["exact_marker_page"]
             .as_u64()
-            .is_some(),
-        true
+            .is_some()
     );
-    assert_eq!(
+    assert!(
         report["comparison"]["sealed_repeated_timing_avg_micros"]["focused"]["scoring_cache_build"]
             ["binary_fuse_page"]
             .as_u64()
-            .is_some(),
-        true
+            .is_some()
     );
-    assert_eq!(
+    assert!(
         report["comparison"]["sealed_repeated_timing_avg_micros"]["focused"]
             ["context_packet_build"]["exact_marker_page"]
             .as_u64()
-            .is_some(),
-        true
+            .is_some()
     );
     assert!(
         report["comparison"]["page_shape"]["avg_encoded_page_bytes"]["exact_marker_page"]

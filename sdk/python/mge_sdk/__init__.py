@@ -36,6 +36,17 @@ class RememberOptions(TypedDict, total=False):
     subject: str
 
 
+class SessionTurnInput(TypedDict):
+    role: str
+    content: str
+
+
+class SessionRememberResult(TypedDict):
+    turns: int
+    chunks: int
+    cells: list[Mapping[str, Any]]
+
+
 class ContextMemoryItem(TypedDict, total=False):
     kind: str
     content: str
@@ -221,6 +232,50 @@ class MemoryGenomeClient:
         args.extend(self._security_args())
         return cast(ContextPacket, self._run_json(args))
 
+    def remember_session(
+        self,
+        turns: Iterable[SessionTurnInput],
+        *,
+        session_id: str | None = None,
+        kind: str = "project_fact",
+        scope: str = "global",
+        subject: str | None = None,
+        markers: Iterable[str] = (),
+        trust: str = "tool_observed",
+        sensitivity: str = "private",
+        status: str = "active",
+        max_turns: int = 8,
+        max_bytes: int = 4096,
+    ) -> SessionRememberResult:
+        args = [
+            "remember-session",
+            "--kind",
+            kind,
+            "--scope",
+            scope,
+            "--trust",
+            trust,
+            "--sensitivity",
+            sensitivity,
+            "--status",
+            status,
+            "--max-turns",
+            str(max_turns),
+            "--max-bytes",
+            str(max_bytes),
+            "--json",
+        ]
+        if session_id is not None:
+            args.extend(["--session-id", session_id])
+        if subject is not None:
+            args.extend(["--subject", subject])
+        for marker in markers:
+            args.extend(["--marker", marker])
+        for turn in turns:
+            args.extend(["--turn", f"{turn['role']}={turn['content']}"])
+        args.extend(self._security_args())
+        return cast(SessionRememberResult, self._run_json(args))
+
     def seal(self) -> Mapping[str, Any]:
         return self._run_json(["seal", *self._security_args()])
 
@@ -333,6 +388,8 @@ __all__ = [
     "MgeProtocolError",
     "RecallMode",
     "RememberOptions",
+    "SessionRememberResult",
+    "SessionTurnInput",
     "SecurityConfig",
     "StoreStats",
     "ValidationReport",

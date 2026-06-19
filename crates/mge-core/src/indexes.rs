@@ -51,9 +51,10 @@ pub struct CandidatePageQueryResult {
     pub candidate_pages_returned: usize,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IndexKind {
+    #[default]
     ExactMarkerPage,
     BinaryFusePage,
 }
@@ -64,12 +65,6 @@ impl IndexKind {
             Self::ExactMarkerPage => "exact_marker_page",
             Self::BinaryFusePage => "binary_fuse_page",
         }
-    }
-}
-
-impl Default for IndexKind {
-    fn default() -> Self {
-        Self::ExactMarkerPage
     }
 }
 

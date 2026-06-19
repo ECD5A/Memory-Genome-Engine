@@ -13,13 +13,9 @@ pub fn is_language_key(key: KeyEvent) -> bool {
 
 pub fn edit_text(value: &mut String, key: KeyEvent) -> bool {
     match key.code {
-        KeyCode::Char(ch) => {
-            if !key.modifiers.contains(KeyModifiers::CONTROL) {
-                value.push(ch);
-                true
-            } else {
-                false
-            }
+        KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            value.push(ch);
+            true
         }
         KeyCode::Backspace => {
             value.pop();

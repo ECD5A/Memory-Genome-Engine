@@ -17,6 +17,7 @@ pub mod compression;
 pub mod errors;
 pub mod hot;
 pub mod indexes;
+pub mod ingestion;
 pub mod markers;
 pub mod models;
 pub mod packet;
@@ -31,6 +32,11 @@ pub use hot::{allowed_statuses_for_policy, HotCandidateQuery, HotMemoryLayer, Ho
 pub use indexes::{
     BinaryFusePageFilter, BinaryFusePageIndex, CandidateIndexData, CandidatePageIndex,
     CandidatePageQueryResult, ExactMarkerPageIndex, IndexKind, QueryMode,
+};
+pub use ingestion::{
+    chunk_session_turns, SessionChunk, SessionChunkOptions, SessionRememberReport,
+    SessionRememberRequest, SessionTurn, DEFAULT_SESSION_CHUNK_MAX_BYTES,
+    DEFAULT_SESSION_CHUNK_MAX_TURNS,
 };
 pub use markers::{
     canonicalize_marker, canonicalize_marker_value, extract_query_marker_strings,

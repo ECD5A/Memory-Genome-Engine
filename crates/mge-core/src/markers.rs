@@ -250,6 +250,7 @@ fn canonicalize_marker_value_unicode(trimmed: &str) -> String {
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn marker_strings_for_cell_fields(
     kind: &MemoryKind,
     subject: Option<&str>,

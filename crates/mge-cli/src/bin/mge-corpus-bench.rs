@@ -908,12 +908,6 @@ fn run_mode(
     let rebuild_indexes_ok = engine.rebuild_catalog_and_indexes().is_ok();
     let validate_after_rebuild_ok = engine.validate_deep()?.ok;
 
-    let sealed_cold_focused_recall =
-        run_cold_recall_bench(&mode_root, RecallMode::Focused, config.repeats, queries)?;
-    let sealed_cold_broad_recall =
-        run_cold_recall_bench(&mode_root, RecallMode::Broad, config.repeats, queries)?;
-    let sealed_cold_full_scope_recall =
-        run_cold_recall_bench(&mode_root, RecallMode::FullScope, config.repeats, queries)?;
     let sealed_repeated_focused_recall =
         run_recall_bench(&engine, RecallMode::Focused, config.repeats, queries)?;
     let sealed_repeated_broad_recall =
@@ -923,6 +917,14 @@ fn run_mode(
 
     let stats = engine.stats()?;
     let catalog = engine.inspect()?.page_catalog;
+    drop(engine);
+
+    let sealed_cold_focused_recall =
+        run_cold_recall_bench(&mode_root, RecallMode::Focused, config.repeats, queries)?;
+    let sealed_cold_broad_recall =
+        run_cold_recall_bench(&mode_root, RecallMode::Broad, config.repeats, queries)?;
+    let sealed_cold_full_scope_recall =
+        run_cold_recall_bench(&mode_root, RecallMode::FullScope, config.repeats, queries)?;
     let encoded_total = catalog
         .pages
         .iter()
@@ -1674,19 +1676,11 @@ fn slugify(input: &str) -> String {
 }
 
 fn average_usize(total: usize, count: usize) -> u64 {
-    if count == 0 {
-        0
-    } else {
-        u64::try_from(total / count).unwrap_or(u64::MAX)
-    }
+    u64::try_from(total.checked_div(count).unwrap_or(0)).unwrap_or(u64::MAX)
 }
 
 fn percent_of(part: u64, total: u64) -> u64 {
-    if total == 0 {
-        0
-    } else {
-        part.saturating_mul(100) / total
-    }
+    part.saturating_mul(100).checked_div(total).unwrap_or(0)
 }
 
 fn percent_reduction(before: u64, after: u64) -> i64 {

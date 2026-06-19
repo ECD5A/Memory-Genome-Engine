@@ -28,6 +28,19 @@ def main() -> None:
 
     client.init(profile="fast")
 
+    session = client.remember_session(
+        [
+            {"role": "user", "content": "Prepare the local integration release"},
+            {"role": "assistant", "content": "Use the existing agent host contract"},
+            {"role": "user", "content": "Keep the verification result for recall"},
+        ],
+        session_id="python-agent-host",
+        scope="agent_demo",
+        markers=["topic:agent_host"],
+        max_turns=2,
+    )
+    assert session["chunks"] == 2
+
     task = "prepare local agent host integration smoke"
     focused_packet = client.recall(
         task,
@@ -49,7 +62,7 @@ def main() -> None:
     )
 
     checkpoint = client.checkpoint()
-    assert checkpoint["hot_cells"] == 1
+    assert checkpoint["hot_cells"] == 3
 
     broad_packet = client.recall(
         "agent host integration task",
@@ -60,7 +73,7 @@ def main() -> None:
     assert any(item["content"] == work_result for item in broad_packet["relevant_memory"])
 
     seal = client.seal()
-    assert seal["hot_cells_sealed"] == 1
+    assert seal["hot_cells_sealed"] == 3
 
     sealed_packet = client.recall(
         "agent host integration task",

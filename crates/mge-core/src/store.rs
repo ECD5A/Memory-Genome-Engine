@@ -15,11 +15,11 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt;
-use std::fs;
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -31,9 +31,10 @@ use crate::indexes::{
     BinaryFusePageIndex, CandidateIndexData, CandidatePageIndex, ExactMarkerPageIndex, IndexKind,
     QueryMode,
 };
+use crate::ingestion::{chunk_session_turns, SessionRememberReport, SessionRememberRequest};
 use crate::markers::{
-    canonicalize_marker, extract_query_marker_strings, marker_strings_for_cell_fields,
-    tokenize_keywords, MarkerDebugEntry, MarkerDictionary,
+    canonicalize_marker, canonicalize_marker_value, extract_query_marker_strings,
+    marker_strings_for_cell_fields, tokenize_keywords, MarkerDebugEntry, MarkerDictionary,
 };
 use crate::models::{
     current_timestamp, CellId, MarkerGenome, MarkerId, MemoryCell, MemoryKind, MemorySource,
@@ -64,7 +65,10 @@ const HOT_LOG_FILE: &str = "hot.mgl";
 const PAGE_CATALOG_FILE: &str = "page_index.mgi";
 const EXACT_MARKER_INDEX_FILE: &str = "marker_index.mgi";
 const BINARY_FUSE_INDEX_FILE: &str = "fuse_index.mgi";
+const STORE_LOCK_FILE: &str = ".mge.lock";
 const DECODED_PAGE_CACHE_CAPACITY: usize = 256;
+const BALANCED_FLUSH_EVENTS: usize = 64;
+const BALANCED_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
 const PAGE_PAYLOAD_AAD: &[u8] = b"mge:sealed_page:v1";
 
 pub trait Store {
@@ -76,6 +80,7 @@ pub trait Store {
 
 #[derive(Debug)]
 pub struct MemoryEngine {
+    _store_lock: StoreFileLock,
     root: PathBuf,
     manifest: Manifest,
     dictionary: MarkerDictionary,
@@ -90,10 +95,42 @@ pub struct MemoryEngine {
     session_key: Option<SessionKey>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Debug)]
+struct StoreFileLock {
+    file: File,
+}
+
+impl StoreFileLock {
+    fn acquire(root: &Path) -> Result<Self> {
+        let path = root.join(STORE_LOCK_FILE);
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)?;
+        file.try_lock().map_err(|err| match err {
+            TryLockError::WouldBlock => MgeError::StoreBusy(format!(
+                "{} is already open by another MemoryEngine process",
+                root.display()
+            )),
+            TryLockError::Error(err) => MgeError::Io(err),
+        })?;
+        Ok(Self { file })
+    }
+}
+
+impl Drop for StoreFileLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DurabilityPolicy {
     Fast,
+    #[default]
     Balanced,
     Safe,
 }
@@ -105,12 +142,6 @@ impl DurabilityPolicy {
             Self::Balanced => "balanced",
             Self::Safe => "safe",
         }
-    }
-}
-
-impl Default for DurabilityPolicy {
-    fn default() -> Self {
-        Self::Balanced
     }
 }
 
@@ -659,6 +690,8 @@ impl MemoryEngine {
         ensure_runtime_page_codec(options.page_codec)?;
 
         let root = store_root.as_ref().to_path_buf();
+        fs::create_dir_all(&root)?;
+        let store_lock = StoreFileLock::acquire(&root)?;
         fs::create_dir_all(root.join("dictionary"))?;
         fs::create_dir_all(root.join("hot"))?;
         fs::create_dir_all(root.join("pages"))?;
@@ -722,12 +755,19 @@ impl MemoryEngine {
             let manifest: Manifest =
                 binary::read_messagepack_file(&manifest_path, FileKind::Manifest)?;
             if let Some(passphrase) = passphrase {
-                return Self::open_at_with_passphrase(root, Some(passphrase));
+                return Self::open_at_with_passphrase_recovery_and_lock(
+                    root,
+                    Some(passphrase),
+                    true,
+                    Some(store_lock),
+                );
             }
-            return Ok(Self::locked_empty_engine(root, manifest, dictionary));
+            return Ok(Self::locked_empty_engine(
+                root, manifest, dictionary, store_lock,
+            ));
         }
 
-        Self::open_at_with_passphrase(root, passphrase)
+        Self::open_at_with_passphrase_recovery_and_lock(root, passphrase, true, Some(store_lock))
     }
 
     pub fn open_at(store_root: impl AsRef<Path>) -> Result<Self> {
@@ -753,11 +793,29 @@ impl MemoryEngine {
         passphrase: Option<&str>,
         truncate_bad_hot_tail: bool,
     ) -> Result<Self> {
+        Self::open_at_with_passphrase_recovery_and_lock(
+            store_root,
+            passphrase,
+            truncate_bad_hot_tail,
+            None,
+        )
+    }
+
+    fn open_at_with_passphrase_recovery_and_lock(
+        store_root: impl AsRef<Path>,
+        passphrase: Option<&str>,
+        truncate_bad_hot_tail: bool,
+        store_lock: Option<StoreFileLock>,
+    ) -> Result<Self> {
         let root = store_root.as_ref().to_path_buf();
         let manifest_path = root.join(MANIFEST_FILE);
         if !manifest_path.exists() {
             return Err(MgeError::NotInitialized(root.display().to_string()));
         }
+        let store_lock = match store_lock {
+            Some(store_lock) => store_lock,
+            None => StoreFileLock::acquire(&root)?,
+        };
 
         let mut manifest: Manifest =
             binary::read_messagepack_file(&manifest_path, FileKind::Manifest)?;
@@ -790,6 +848,7 @@ impl MemoryEngine {
         let hot = HotMemoryLayer::from_cells(hot_recovery.cells);
 
         Ok(Self {
+            _store_lock: store_lock,
             root,
             manifest,
             dictionary,
@@ -809,8 +868,10 @@ impl MemoryEngine {
         root: PathBuf,
         manifest: Manifest,
         dictionary: MarkerDictionary,
+        store_lock: StoreFileLock,
     ) -> Self {
         Self {
+            _store_lock: store_lock,
             root,
             manifest,
             dictionary,
@@ -971,8 +1032,67 @@ impl MemoryEngine {
         self.pending_hot_cells.push(cell.clone());
         self.hot_metadata_dirty = true;
         self.manifest.updated_at = current_timestamp();
+        self.flush_pending_after_remember()?;
 
         Ok(cell)
+    }
+
+    pub fn remember_session(
+        &mut self,
+        request: SessionRememberRequest,
+    ) -> Result<SessionRememberReport> {
+        if request.scope.trim().is_empty() {
+            return Err(MgeError::InvalidInput(
+                "session scope must not be empty".to_string(),
+            ));
+        }
+        for marker in &request.markers {
+            canonicalize_marker(marker)?;
+        }
+        let session_marker = request
+            .session_id
+            .as_deref()
+            .map(canonicalize_marker_value)
+            .filter(|value| !value.is_empty())
+            .map(|value| format!("session:{value}"));
+        if request.session_id.is_some() && session_marker.is_none() {
+            return Err(MgeError::InvalidInput(
+                "session_id must contain at least one alphanumeric character".to_string(),
+            ));
+        }
+
+        let chunks = chunk_session_turns(&request.turns, request.chunk_options)?;
+        let chunk_count = chunks.len();
+        let turn_count = request.turns.len();
+        let mut cells = Vec::with_capacity(chunk_count);
+        for chunk in chunks {
+            let mut markers = request.markers.clone();
+            markers.push("memory_granularity:session_chunk".to_string());
+            markers.push(format!("chunk:{}", chunk.index));
+            if let Some(marker) = &session_marker {
+                markers.push(marker.clone());
+            }
+            let subject = request.subject.as_ref().map_or_else(
+                || format!("Session context chunk {}/{}", chunk.index + 1, chunk_count),
+                |subject| format!("{subject} (chunk {}/{chunk_count})", chunk.index + 1),
+            );
+            let mut remember = RememberRequest::new(request.kind, MemoryValue::Text(chunk.text));
+            remember.subject = Some(subject);
+            remember.scope = request.scope.clone();
+            remember.status = request.status;
+            remember.trust = request.trust;
+            remember.sensitivity = request.sensitivity;
+            remember.markers = markers;
+            remember.source = request.source.clone();
+            remember.links = request.links.clone();
+            cells.push(self.remember(remember)?);
+        }
+
+        Ok(SessionRememberReport {
+            turns: turn_count,
+            chunks: chunk_count,
+            cells,
+        })
     }
 
     pub fn set_status_override(
@@ -1138,13 +1258,12 @@ impl MemoryEngine {
             .into_iter()
             .map(|(cell_id, _)| cell_id)
             .collect::<Vec<_>>();
-        let hot_candidate_marker_ids = if hot_lexical_candidate_ids.is_empty() {
-            query_marker_ids.as_slice()
-        } else if request.mode == RecallMode::Focused {
-            query_marker_ids.as_slice()
-        } else {
-            explicit_marker_ids.as_slice()
-        };
+        let hot_candidate_marker_ids =
+            if hot_lexical_candidate_ids.is_empty() || request.mode == RecallMode::Focused {
+                query_marker_ids.as_slice()
+            } else {
+                explicit_marker_ids.as_slice()
+            };
         let hot_candidate_ids = self.hot.candidate_ids(HotCandidateQuery {
             marker_ids: hot_candidate_marker_ids,
             lexical_candidate_ids: &hot_lexical_candidate_ids,
@@ -2205,9 +2324,7 @@ impl MemoryEngine {
         let hot_store = HotStore::new(self.hot_cells_path());
         let pending = std::mem::take(&mut self.pending_hot_cells);
         for (index, cell) in pending.iter().enumerate() {
-            let sync_each_record = self.manifest.durability == DurabilityPolicy::Safe;
-            if let Err(err) =
-                hot_store.append_cell_with_key(cell, sync_each_record, self.session_key.as_ref())
+            if let Err(err) = hot_store.append_cell_with_key(cell, false, self.session_key.as_ref())
             {
                 self.pending_hot_cells = pending[index..].to_vec();
                 return Err(err);
@@ -2229,6 +2346,21 @@ impl MemoryEngine {
                 .saturating_add(u64::try_from(pending.len()).unwrap_or(u64::MAX));
         }
         self.hot_metadata_dirty = false;
+        Ok(())
+    }
+
+    fn flush_pending_after_remember(&mut self) -> Result<()> {
+        let should_flush = match self.manifest.durability {
+            DurabilityPolicy::Fast => false,
+            DurabilityPolicy::Balanced => {
+                self.pending_hot_cells.len() >= BALANCED_FLUSH_EVENTS
+                    || self.last_hot_sync.elapsed() >= BALANCED_FLUSH_INTERVAL
+            }
+            DurabilityPolicy::Safe => true,
+        };
+        if should_flush {
+            self.flush_pending_hot(true)?;
+        }
         Ok(())
     }
 
@@ -2893,7 +3025,7 @@ fn append_cell_markdown(
     if !markers.is_empty() {
         output.push_str(&format!("- markers: `{}`\n", markers.join("`, `")));
     }
-    output.push_str("\n");
+    output.push('\n');
     output.push_str(&cell.value.to_plain_text());
     output.push_str("\n\n");
 }

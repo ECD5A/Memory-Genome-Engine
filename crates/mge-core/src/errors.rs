@@ -42,6 +42,9 @@ pub enum MgeError {
     #[error("store is locked: {0}")]
     StoreLocked(String),
 
+    #[error("store is busy: {0}")]
+    StoreBusy(String),
+
     #[error("authentication failed: {0}")]
     AuthenticationFailed(String),
 
