@@ -266,7 +266,7 @@ pub fn atomic_write_bytes(path: impl AsRef<Path>, bytes: &[u8]) -> Result<()> {
     }
 
     let temp_path = unique_temp_path(path);
-    {
+    let write_result = (|| -> Result<()> {
         let mut file = OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -274,6 +274,11 @@ pub fn atomic_write_bytes(path: impl AsRef<Path>, bytes: &[u8]) -> Result<()> {
         file.write_all(bytes)?;
         file.flush()?;
         file.sync_all()?;
+        Ok(())
+    })();
+    if let Err(err) = write_result {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err);
     }
 
     if let Err(err) = replace_with_temp(&temp_path, path) {
