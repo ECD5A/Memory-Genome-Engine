@@ -85,10 +85,13 @@ export MGE_RELEASE_SMOKE_PASSPHRASE="${MGE_RELEASE_SMOKE_PASSPHRASE:-local-relea
 "$mge_bin" --store "$encrypted_store" validate --deep --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE >/dev/null
 
 echo "MCP smoke..."
-printf '{"jsonrpc":"2.0","id":1,"method":"mge_schema","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"mge_stats","params":{"store_path":"%s"}}\n' "$plain_store" \
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mge-release-smoke","version":"0.1.0"}}}\n{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mge_stats","arguments":{"store_path":"%s"}}}\n' "$plain_store" \
   | "$mcp_bin" \
   | tee "$tmp_root/mcp-response.jsonl" >/dev/null
-grep -q '"protocol_version":"mge-jsonrpc-1"' "$tmp_root/mcp-response.jsonl"
+test "$(wc -l < "$tmp_root/mcp-response.jsonl" | tr -d ' ')" = "3"
+grep -q '"protocolVersion":"2025-06-18"' "$tmp_root/mcp-response.jsonl"
+grep -q '"name":"mge_recall"' "$tmp_root/mcp-response.jsonl"
+grep -q '"structuredContent"' "$tmp_root/mcp-response.jsonl"
 grep -q '"tool":"mge_stats"' "$tmp_root/mcp-response.jsonl"
 
 if command -v python >/dev/null 2>&1; then

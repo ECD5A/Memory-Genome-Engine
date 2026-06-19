@@ -94,23 +94,39 @@ try {
     Invoke-Required $Mge --store $EncryptedStore validate --deep --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE
 
     Write-Host "MCP smoke..."
-    $SchemaRequest = @{
+    $InitializeRequest = @{
         jsonrpc = "2.0"
         id = 1
-        method = "mge_schema"
+        method = "initialize"
+        params = @{
+            protocolVersion = "2025-06-18"
+            capabilities = @{}
+            clientInfo = @{ name = "mge-release-smoke"; version = "0.1.0" }
+        }
+    } | ConvertTo-Json -Compress -Depth 6
+    $InitializedNotification = @{
+        jsonrpc = "2.0"
+        method = "notifications/initialized"
         params = @{}
-    } | ConvertTo-Json -Compress
-    $StatsRequest = @{
+    } | ConvertTo-Json -Compress -Depth 6
+    $ToolsRequest = @{
         jsonrpc = "2.0"
         id = 2
-        method = "mge_stats"
+        method = "tools/list"
+        params = @{}
+    } | ConvertTo-Json -Compress -Depth 6
+    $StatsRequest = @{
+        jsonrpc = "2.0"
+        id = 3
+        method = "tools/call"
         params = @{
-            store_path = $PlainStore
+            name = "mge_stats"
+            arguments = @{ store_path = $PlainStore }
         }
-    } | ConvertTo-Json -Compress
-    $Response = @($SchemaRequest, $StatsRequest) | & $Mcp
+    } | ConvertTo-Json -Compress -Depth 6
+    $Response = @($InitializeRequest, $InitializedNotification, $ToolsRequest, $StatsRequest) | & $Mcp
     $ResponseText = $Response -join "`n"
-    if ($LASTEXITCODE -ne 0 -or ($ResponseText -notmatch '"protocol_version":"mge-jsonrpc-1"') -or ($ResponseText -notmatch '"tool":"mge_stats"')) {
+    if ($LASTEXITCODE -ne 0 -or ($Response.Count -ne 3) -or ($ResponseText -notmatch '"protocolVersion":"2025-06-18"') -or ($ResponseText -notmatch '"name":"mge_recall"') -or ($ResponseText -notmatch '"structuredContent"') -or ($ResponseText -notmatch '"tool":"mge_stats"')) {
         throw "MCP smoke failed: $ResponseText"
     }
 

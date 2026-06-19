@@ -5,7 +5,7 @@
   <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-15803d?style=flat-square"></a>
   <a href="docs/ARCHITECTURE.md"><img alt="Local-first memory" src="https://img.shields.io/badge/local--first-memory-0e7490?style=flat-square"></a>
   <a href="docs/ARCHITECTURE.md"><img alt="Binary storage" src="https://img.shields.io/badge/binary-storage-6d28d9?style=flat-square"></a>
-  <a href="docs/INTEGRATION.md"><img alt="CLI TUI MCP" src="https://img.shields.io/badge/CLI%20.%20TUI%20.%20MCP-ready-0369a1?style=flat-square"></a>
+  <a href="docs/INTEGRATION.md"><img alt="CLI TUI MCP" src="https://img.shields.io/badge/CLI%20.%20TUI%20.%20MCP-0369a1?style=flat-square"></a>
   <a href="docs/SECURITY.md"><img alt="Encrypted stores" src="https://img.shields.io/badge/encrypted-stores-15803d?style=flat-square"></a>
   <a href="docs/INTEGRATION.md"><img alt="Python TypeScript SDK" src="https://img.shields.io/badge/Python%20.%20TypeScript-SDK-2563eb?style=flat-square"></a>
   <br>
@@ -25,7 +25,7 @@ Memory Genome Engine - local-first движок структурированно
 - Запечатывает старую память в immutable binary pages с candidate indexes.
 - Поддерживает focused, broad и full-scope recall.
 - Импортирует существующие Markdown-заметки как разовый migration input и поддерживает мягкое обслуживание статусов памяти.
-- Даёт CLI, TUI, JSON-RPC/MCP-ready adapter, Python SDK и TypeScript SDK.
+- Даёт CLI, TUI, MCP-compatible stdio server, Python SDK и TypeScript SDK.
 - Поддерживает opt-in encrypted stores для hot payloads, snapshots и sealed page payloads.
 - Использует binary runtime storage; JSON только protocol/debug report output.
 
@@ -68,7 +68,7 @@ CLI:
 cargo run -p mge-cli -- recall "project context" --mode broad --scope my_project
 ```
 
-MCP-ready JSON-RPC adapter:
+MCP stdio server:
 
 ```bash
 cargo run -p mge-cli --bin mge-mcp-server

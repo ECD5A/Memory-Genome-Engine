@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: mge-linux-x86_64.tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: mge-windows-x86_64.zip
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: mge-macos-aarch64.tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build product binaries
+        run: cargo build -p mge-cli --bin mge --bin mge-mcp-server --release --target ${{ matrix.target }}
+
+      - name: Package Unix archive
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="dist/mge-${{ matrix.target }}"
+          mkdir -p "$stage/bin"
+          cp "target/${{ matrix.target }}/release/mge" "$stage/bin/"
+          cp "target/${{ matrix.target }}/release/mge-mcp-server" "$stage/bin/"
+          cp LICENSE NOTICE README.md QUICKSTART.md SECURITY.md "$stage/"
+          tar -czf "dist/${{ matrix.archive }}" -C dist "mge-${{ matrix.target }}"
+          shasum -a 256 "dist/${{ matrix.archive }}" > "dist/${{ matrix.archive }}.sha256"
+
+      - name: Package Windows archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $stage = "dist/mge-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force "$stage/bin" | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/mge.exe" "$stage/bin/"
+          Copy-Item "target/${{ matrix.target }}/release/mge-mcp-server.exe" "$stage/bin/"
+          Copy-Item LICENSE,NOTICE,README.md,QUICKSTART.md,SECURITY.md $stage
+          Compress-Archive -Path $stage -DestinationPath "dist/${{ matrix.archive }}"
+          $hash = (Get-FileHash "dist/${{ matrix.archive }}" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  ${{ matrix.archive }}" | Set-Content -Encoding ascii "dist/${{ matrix.archive }}.sha256"
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            dist/${{ matrix.archive }}
+            dist/${{ matrix.archive }}.sha256
+          if-no-files-found: error
+
+  draft-release:
+    name: Create draft release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/* --draft --generate-notes --title "${GITHUB_REF_NAME}"
+          fi

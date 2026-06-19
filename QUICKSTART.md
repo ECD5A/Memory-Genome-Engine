@@ -116,6 +116,17 @@ cargo run -p mge-cli -- remember "Decision recorded" \
   --link 1
 ```
 
+Deterministic agent-session ingestion keeps turn boundaries and creates bounded memory cells:
+
+```bash
+cargo run -p mge-cli -- remember-session \
+  --session-id task-42 \
+  --scope my_project \
+  --turn "user=Review the release plan" \
+  --turn "assistant=Use a staged rollout" \
+  --turn "user=Keep the rollback requirement"
+```
+
 One-time Markdown import for migrating existing notes:
 
 ```bash
@@ -242,7 +253,7 @@ Run the JSON-RPC adapter:
 cargo run -p mge-cli --bin mge-mcp-server
 ```
 
-The MCP-ready adapter currently operates on an existing `store_path`; it does not create a new store by itself. Agent hosts should bootstrap the store once through CLI/setup, then use MCP tools for `remember`, `recall`, `checkpoint`, `seal`, `validate`, `rebuild-indexes`, and export.
+The MCP server implements the standard stdio lifecycle (`initialize`, `tools/list`, `tools/call`) and keeps direct `mge_*` JSON-RPC methods for compatibility. It operates on an existing `store_path`; bootstrap the store once through CLI/setup, then use MCP tools for session ingestion, recall, checkpoint, seal, validation, index rebuild, and export.
 
 Run SDK examples:
 

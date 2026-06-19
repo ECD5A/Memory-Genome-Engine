@@ -77,6 +77,7 @@ Sealed memory is semi-static and page based:
 
 ```text
 .memory-genome/manifest.mgm
+.memory-genome/.mge.lock              # operational single-writer lock
 .memory-genome/dictionary/markers.mgd
 .memory-genome/hot/hot.mgl
 .memory-genome/hot/snapshot.mgs
@@ -87,6 +88,14 @@ Sealed memory is semi-static and page based:
 .memory-genome/indexes/fuse_index.mgi
 .memory-genome/exports/memory.md
 ```
+
+## Store Ownership And Session Ingestion
+
+`MemoryEngine` acquires an exclusive OS file lock on `.mge.lock` for its lifetime. A second process receives a structured `store_busy` error instead of racing manifest, hot-log, checkpoint, seal, or index writes. The lock file is operational coordination metadata, not memory data or a binary format revision.
+
+Durability remains policy driven: `fast` keeps pending records until a boundary, `balanced` (default) flushes at 64 pending events or on the first remember after a two-second interval, and `safe` flushes and synchronizes every successful remember. Checkpoint, seal, recovery-safe drop, and explicit maintenance boundaries flush pending records. There is no background persistence thread in v0.1.
+
+Agent sessions can be ingested through the production `SessionTurn`/`SessionChunk` API or `mge remember-session`. The deterministic chunker preserves turn boundaries, defaults to 8 turns and 4096 bytes per cell where an individual turn permits, and uses the normal `MemoryCell`/`MarkerGenome`/hot-log pipeline. It does not introduce another storage representation.
 
 ## Storage Format Direction
 

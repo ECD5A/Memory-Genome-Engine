@@ -51,8 +51,8 @@ powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 ## Platform Verification
 
 - Windows PowerShell scripts are locally verified on the current Windows host.
-- Linux shell scripts are locally verified through WSL Ubuntu.
-- macOS shell scripts follow the same POSIX path, but macOS is not locally verified from this Windows machine.
+- Linux shell scripts have a prior WSL Ubuntu verification baseline. The current MCP-smoke revision was not rerun locally because no WSL distribution is currently registered; CI runs the POSIX smoke on Ubuntu.
+- macOS uses the same POSIX smoke in CI, but no local macOS host verification is claimed.
 
 ## Install From Source
 
@@ -81,7 +81,10 @@ powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -IncludeDevTools
 
 ```bash
 cargo fmt --check
-cargo test
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo clippy --manifest-path tools/agent-memory-eval/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path tools/agent-memory-eval/Cargo.toml
 ```
 
 Run focused integration smokes when changing MCP/SDK packaging:
@@ -183,6 +186,16 @@ npm run check
 
 `mge-synthetic-bench` and `mge-corpus-bench` are internal development tools for measuring core changes. They are kept in the repository for regression checks and future performance work, but they are not part of the default user-facing product surface, install path, or release layout.
 
+The separate eval harness compares MGE with keyword/BM25/text-candidate/page-token baselines and reports recall-only versus store-open-inclusive cold latency:
+
+```bash
+cargo run --release --manifest-path tools/agent-memory-eval/Cargo.toml -- \
+  --profile medium --ingest-mode session-chunk --top-k 5 --repeats 3 \
+  --index both --modes focused-broad --baselines all --output text
+```
+
+Generated fixtures are deterministic but synthetic. Local LongMemEval/LoCoMo adapters require user-supplied datasets; results measure retrieval, not final LLM answer quality, and must not be presented as cross-project claims without identical corpora and settings.
+
 ## Benchmark Smoke
 
 Run benchmark smoke only when benchmark output or performance-related code changes:
@@ -226,6 +239,12 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 - Python and TypeScript packages are repository-local developer wrappers.
 - Release artifacts should be generated from the Rust workspace, not from copied binaries.
 - Local archives under `target/mge-release/archives/` are generated artifacts and must not be committed.
+
+## Tag Release Workflow
+
+`.github/workflows/release.yml` runs only for `v*` tags. It builds checksummed product archives for Windows x86-64, Linux x86-64, and macOS arm64, uploads them as workflow artifacts, and creates or updates a **draft** GitHub Release. The workflow includes only `mge` and `mge-mcp-server`; SDK packages and development benchmark binaries are not published. A maintainer must review checksums, notes, and platform results before publishing the draft.
+
+Rust crates and both repository-local SDK manifests use version `0.1.0`. Integration schema versioning is independent from package versioning.
 
 ## Package Publishing Plan
 

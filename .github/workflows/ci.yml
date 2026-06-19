@@ -19,6 +19,7 @@ jobs:
         os:
           - ubuntu-latest
           - windows-latest
+          - macos-latest
 
     steps:
       - name: Checkout
@@ -26,6 +27,8 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -34,7 +37,18 @@ jobs:
         run: cargo fmt --check
 
       - name: Test
-        run: cargo test
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Eval tests
+        if: runner.os == 'Linux'
+        run: cargo test --manifest-path tools/agent-memory-eval/Cargo.toml
+
+      - name: Eval clippy
+        if: runner.os == 'Linux'
+        run: cargo clippy --manifest-path tools/agent-memory-eval/Cargo.toml --all-targets -- -D warnings
 
       - name: Check CLI binaries
         run: cargo check -p mge-cli --bins
@@ -43,7 +57,7 @@ jobs:
         run: cargo build -p mge-cli --bin mge --bin mge-mcp-server --release
 
       - name: Product release smoke
-        if: runner.os == 'Linux'
+        if: runner.os != 'Windows'
         run: bash scripts/smoke-release.sh
 
       - name: Product release smoke

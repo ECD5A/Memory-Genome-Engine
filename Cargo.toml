@@ -7,6 +7,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
+rust-version = "1.95"
 authors = ["ECD5A"]
 license = "Apache-2.0"
 repository = "https://github.com/ECD5A/Memory-Genome-Engine"

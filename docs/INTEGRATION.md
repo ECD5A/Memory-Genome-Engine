@@ -1,6 +1,6 @@
 # Integration
 
-This document is the single integration reference for agent hosts, the local JSON-RPC MCP-ready adapter, and the thin Python/TypeScript SDK wrappers.
+This document is the single integration reference for agent hosts, the MCP-compatible stdio server, and the thin Python/TypeScript SDK wrappers.
 
 JSON in this layer is protocol/debug output only. It is not runtime storage.
 
@@ -67,13 +67,13 @@ Use the lowest layer that fits the host:
 
 - Rust: `mge-core::MemoryEngine`.
 - CLI: `mge`.
-- MCP-ready local adapter: `mge-mcp-server`, JSON-RPC over stdin/stdout.
+- MCP-compatible local server: `mge-mcp-server`, JSON-RPC over stdin/stdout.
 - Python: thin wrapper in `sdk/python`.
 - TypeScript: thin wrapper in `sdk/typescript`.
 
 Rust remains the core. Python and TypeScript wrappers delegate to the Rust CLI and do not duplicate memory logic.
 
-## MCP-Ready JSON-RPC Adapter
+## MCP Stdio Server
 
 The adapter expects an existing initialized Memory Genome store. Create it once with CLI/setup before sending `mge_remember`, `mge_recall`, or other store tools:
 
@@ -90,8 +90,9 @@ cargo run -p mge-cli --bin mge-mcp-server
 Contract:
 
 - JSON-RPC version: `2.0`
+- supported MCP protocol revision: `2025-06-18` (with `2024-11-05` negotiation support)
 - `protocol_version`: `mge-jsonrpc-1`
-- `integration_schema_version`: `1`
+- `integration_schema_version`: `2`
 
 Each input line is one JSON-RPC request:
 
@@ -102,7 +103,15 @@ Each input line is one JSON-RPC request:
 Each output line is one JSON-RPC response:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"ok":true,"tool":"mge_stats","protocol_version":"mge-jsonrpc-1","integration_schema_version":1,"stats":{}}}
+{"jsonrpc":"2.0","id":1,"result":{"ok":true,"tool":"mge_stats","protocol_version":"mge-jsonrpc-1","integration_schema_version":2,"stats":{}}}
+```
+
+Standard MCP hosts use `initialize`, `notifications/initialized`, `ping`, `tools/list`, and `tools/call`. Notifications do not produce JSON-RPC responses. `tools/call` returns text content plus `structuredContent` and `isError`. Direct `mge_*` methods remain available as a versioned extension for existing hosts and SDK tests.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"local-agent","version":"1.0"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mge_stats","arguments":{"store_path":".memory-genome"}}}
 ```
 
 Schema discovery:
@@ -136,6 +145,15 @@ printf '%s\n' '{"jsonrpc":"2.0","id":"schema","method":"mge_schema","params":{}}
 - optional `links`
 - optional `passphrase_env`
 
+`mge_remember_session` input:
+
+- `store_path`
+- non-empty `turns` array with `role` and `content`
+- optional `session_id`, `subject`, and explicit `markers`
+- optional `max_turns`, default `8`
+- optional `max_bytes`, default `4096`
+- the same kind/scope/trust/status/sensitivity/passphrase fields as `mge_remember`
+
 `mge_recall` input:
 
 - `store_path`
@@ -167,7 +185,7 @@ There is no `mge_init` MCP tool in the current contract. This keeps the adapter 
 Errors are stable for SDKs:
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params: missing field `content`","tool_name":"mge_remember","recoverable":true,"protocol_version":"mge-jsonrpc-1","integration_schema_version":1,"details":{"error_kind":"invalid_params"}}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params: missing field `content`","tool_name":"mge_remember","recoverable":true,"protocol_version":"mge-jsonrpc-1","integration_schema_version":2,"details":{"error_kind":"invalid_params"}}}
 ```
 
 Important `details.error_kind` values:
@@ -328,6 +346,6 @@ The passphrase value must stay outside protocol payloads and logs. Encrypted mod
 
 ## Current Limits
 
-- `mge-mcp-server` is MCP-ready local JSON-RPC, not a full external MCP SDK implementation.
+- `mge-mcp-server` implements the MCP stdio lifecycle without bundling an external MCP SDK dependency.
 - SDKs are thin local wrappers around `mge`; package publishing is not done yet.
 - Encrypted indexes/blind marker metadata, vector DB, UI, and remote service hosting are outside the current integration layer.

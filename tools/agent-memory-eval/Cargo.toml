@@ -2,6 +2,7 @@
 name = "mge-agent-memory-eval"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.95"
 authors = ["ECD5A"]
 license = "Apache-2.0"
 publish = false
