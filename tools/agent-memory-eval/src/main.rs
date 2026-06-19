@@ -1252,13 +1252,7 @@ fn evaluate_mge_cold(
             let open_started = Instant::now();
             let engine = MemoryEngine::open_at(store_root)?;
             let store_open_micros = elapsed_micros(open_started);
-            let mut result = evaluate_mge_query(
-                &engine,
-                query,
-                cell_to_eval_id,
-                mode,
-                top_k,
-            )?;
+            let mut result = evaluate_mge_query(&engine, query, cell_to_eval_id, mode, top_k)?;
             result.store_open_micros = store_open_micros;
             results.push(result);
         }
@@ -1933,18 +1927,17 @@ fn summarize_run(
             pages_loaded_sum += result.pages_loaded;
             pages_pruned_sum += result.pages_pruned;
             cells_scanned_sum += result.cells_scanned;
-            store_open_micros_sum =
-                store_open_micros_sum.saturating_add(result.store_open_micros);
+            store_open_micros_sum = store_open_micros_sum.saturating_add(result.store_open_micros);
             page_read_micros_sum = page_read_micros_sum.saturating_add(result.page_read_micros);
             page_decode_micros_sum =
                 page_decode_micros_sum.saturating_add(result.page_decode_micros);
-            scoring_cache_build_micros_sum = scoring_cache_build_micros_sum
-                .saturating_add(result.scoring_cache_build_micros);
+            scoring_cache_build_micros_sum =
+                scoring_cache_build_micros_sum.saturating_add(result.scoring_cache_build_micros);
             cell_filtering_micros_sum =
                 cell_filtering_micros_sum.saturating_add(result.cell_filtering_micros);
             reranking_micros_sum = reranking_micros_sum.saturating_add(result.reranking_micros);
-            context_packet_build_micros_sum = context_packet_build_micros_sum
-                .saturating_add(result.context_packet_build_micros);
+            context_packet_build_micros_sum =
+                context_packet_build_micros_sum.saturating_add(result.context_packet_build_micros);
             latencies.push(result.latency_micros);
         }
     }
@@ -2062,7 +2055,9 @@ fn generate_dataset(profile: GeneratedProfile) -> EvalDataset {
             if row % query_stride == 0 {
                 queries.push(EvalQuery {
                     id: format!("q:{scope}:{component}:{row}"),
-                    query: format!("{scope} {component} {decision} decision"),
+                    query: format!(
+                        "In {scope}, what does integration note {row} record for {component} {decision}?"
+                    ),
                     scope: Some(scope.clone()),
                     relevant_ids: vec![id],
                     category: "single_fact_recall".to_string(),
@@ -2184,7 +2179,16 @@ fn text_report(report: &EvalReport) -> String {
     output.push_str("\ntiming breakdown (averages, microseconds):\n");
     output.push_str(&format!(
         "{:<28} {:<18} {:<8} {:>8} {:>8} {:>8} {:>10} {:>10} {:>8} {:>10}\n",
-        "system", "layer", "mode", "open", "read", "decode", "score_build", "filter", "rerank", "packet"
+        "system",
+        "layer",
+        "mode",
+        "open",
+        "read",
+        "decode",
+        "score_build",
+        "filter",
+        "rerank",
+        "packet"
     ));
     output.push_str(&"-".repeat(125));
     output.push('\n');
@@ -2310,6 +2314,10 @@ mod tests {
         validate_dataset(&dataset).unwrap();
         assert!(!dataset.memories.is_empty());
         assert!(!dataset.queries.is_empty());
+        for query in &dataset.queries {
+            let row = query.relevant_ids[0].rsplit(':').next().unwrap();
+            assert!(query.query.contains(&format!("note {row}")));
+        }
     }
 
     #[test]
