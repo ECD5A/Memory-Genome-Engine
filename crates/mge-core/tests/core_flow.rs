@@ -4,6 +4,7 @@ use std::io::Write;
 use std::path::Path;
 
 use mge_core::binary::{self, CodecId, FileKind};
+use mge_core::store::Manifest;
 use mge_core::{
     build_context_packet, build_pages_from_cells, build_pages_with_clusterer, canonicalize_marker,
     marker_strings_for_cell_fields, score_cell_debug, tokenize_keywords, AgentCapabilities,
@@ -685,6 +686,21 @@ fn init_creates_binary_storage_layout() {
         .join("indexes")
         .join("marker_to_pages.json")
         .exists());
+}
+
+#[test]
+fn open_rejects_unsupported_logical_store_version() {
+    let dir = tempdir().unwrap();
+    drop(MemoryEngine::init_at(dir.path()).unwrap());
+    let manifest_path = dir.path().join("manifest.mgm");
+    let mut manifest: Manifest =
+        binary::read_messagepack_file(&manifest_path, FileKind::Manifest).unwrap();
+    manifest.version = mge_core::STORE_FORMAT_VERSION + 1;
+    binary::write_messagepack_file(&manifest_path, FileKind::Manifest, &manifest).unwrap();
+
+    let error = MemoryEngine::open_at(dir.path()).unwrap_err().to_string();
+    assert!(error.contains("unsupported store format version"));
+    assert!(error.contains(&mge_core::STORE_FORMAT_VERSION.to_string()));
 }
 
 #[test]
@@ -2844,6 +2860,33 @@ fn validate_reports_page_checksum_mismatch() {
         .errors
         .iter()
         .any(|error| error.contains("checksum mismatch")));
+}
+
+#[test]
+fn validate_reports_unsupported_logical_page_version() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let page_file = engine.inspect().unwrap().page_catalog.pages[0].file.clone();
+    let page_path = dir.path().join("pages").join(page_file);
+    drop(engine);
+    let codec = MessagePackPageCodec;
+    let frame = binary::decode_frame(&fs::read(&page_path).unwrap(), FileKind::Page).unwrap();
+    let mut page: mge_core::MemoryPage = codec.decode(&frame.payload).unwrap();
+    page.version = mge_core::PAGE_FORMAT_VERSION + 1;
+    let page_payload = codec.encode(&page).unwrap();
+    let framed = binary::encode_frame(FileKind::Page, CodecId::MessagePack, &page_payload).unwrap();
+    fs::write(&page_path, framed).unwrap();
+
+    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    let report = reopened.validate_deep().unwrap();
+    assert!(!report.ok);
+    assert!(report.errors.iter().any(|error| {
+        error.contains("unsupported page format version")
+            && error.contains(&mge_core::PAGE_FORMAT_VERSION.to_string())
+    }));
 }
 
 #[test]

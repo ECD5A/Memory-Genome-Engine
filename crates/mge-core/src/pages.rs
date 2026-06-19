@@ -28,6 +28,7 @@ use crate::models::{
 
 pub const DEFAULT_TARGET_PAGE_BYTES: usize = 64 * 1024;
 pub const DEFAULT_MAX_CELLS_PER_PAGE: usize = 512;
+pub const PAGE_FORMAT_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MemoryPage {
@@ -364,7 +365,7 @@ pub fn build_pages_with_clusterer<C: PageClusterer>(
             let marker_summary = marker_summary_for_cells(&page_cells);
             pages.push(MemoryPage {
                 page_id: next_page_id,
-                version: 1,
+                version: PAGE_FORMAT_VERSION,
                 created_at: current_timestamp(),
                 marker_summary,
                 cell_count: page_cells.len(),

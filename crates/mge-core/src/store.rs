@@ -44,7 +44,7 @@ use crate::packet::{ContextDebugInfo, ContextMemoryItem, ContextPacket, ContextS
 use crate::pages::{
     attach_page_checksum, build_pages_with_kind, decode_page_with, encode_page_with,
     page_checksum_matches, page_file_name, MemoryPage, PageBuildOptions, PageCatalog,
-    PageCatalogEntry, PageClustererKind, PageCodecKind,
+    PageCatalogEntry, PageClustererKind, PageCodecKind, PAGE_FORMAT_VERSION,
 };
 use crate::retrieval::{
     full_scope_cell_debug_with_filter, score_cell_debug_with_cached_context,
@@ -70,6 +70,7 @@ const DECODED_PAGE_CACHE_CAPACITY: usize = 256;
 const BALANCED_FLUSH_EVENTS: usize = 64;
 const BALANCED_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
 const PAGE_PAYLOAD_AAD: &[u8] = b"mge:sealed_page:v1";
+pub const STORE_FORMAT_VERSION: u32 = 1;
 
 pub trait Store {
     fn remember(&mut self, request: RememberRequest) -> Result<MemoryCell>;
@@ -713,7 +714,7 @@ impl MemoryEngine {
                 SecurityMetadata::default()
             };
             let manifest = Manifest {
-                version: 1,
+                version: STORE_FORMAT_VERSION,
                 created_at: now,
                 updated_at: now,
                 next_cell_id: 1,
@@ -820,6 +821,7 @@ impl MemoryEngine {
 
         let mut manifest: Manifest =
             binary::read_messagepack_file(&manifest_path, FileKind::Manifest)?;
+        ensure_store_version(manifest.version)?;
         ensure_runtime_page_codec(manifest.page_codec)?;
         let session_key = if manifest.security_mode.is_encrypted() {
             let passphrase = passphrase.ok_or_else(|| {
@@ -919,6 +921,7 @@ impl MemoryEngine {
             return Err(MgeError::NotInitialized(root.display().to_string()));
         }
         let manifest: Manifest = binary::read_messagepack_file(&manifest_path, FileKind::Manifest)?;
+        ensure_store_version(manifest.version)?;
         Ok(security_config_from_parts(
             manifest.security_mode,
             &manifest.security,
@@ -2436,6 +2439,7 @@ impl MemoryEngine {
         let opened = self.open_page_payload(&frame)?;
         let decoded = decompress_with(compression, &opened)?;
         let page = decode_page_with(page_codec, &decoded)?;
+        ensure_page_version(&page)?;
         let decode_micros = elapsed_micros(decode_started);
 
         Ok(TimedPageRead {
@@ -2579,6 +2583,7 @@ impl MemoryEngine {
         let opened = self.open_page_payload(&frame)?;
         let decoded = decompress_with(compression, &opened)?;
         let page = decode_page_with(page_codec, &decoded)?;
+        ensure_page_version(&page)?;
         let entry = self.page_catalog_entry_for_existing_page(
             &page,
             file_name.to_string(),
@@ -3084,6 +3089,25 @@ fn ensure_runtime_page_codec(page_codec: PageCodecKind) -> Result<()> {
             "json page codec is only allowed for optional debug/export paths, not runtime storage"
                 .to_string(),
         ));
+    }
+    Ok(())
+}
+
+fn ensure_store_version(version: u32) -> Result<()> {
+    if version != STORE_FORMAT_VERSION {
+        return Err(MgeError::StorageFormat(format!(
+            "unsupported store format version {version}; this build supports version {STORE_FORMAT_VERSION}"
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_page_version(page: &MemoryPage) -> Result<()> {
+    if page.version != PAGE_FORMAT_VERSION {
+        return Err(MgeError::StorageFormat(format!(
+            "unsupported page format version {} for page {}; this build supports version {PAGE_FORMAT_VERSION}",
+            page.version, page.page_id
+        )));
     }
     Ok(())
 }

@@ -52,7 +52,7 @@ pub use pages::{
     build_pages_with_kind, page_checksum_matches, page_content_checksum, JsonPageCodec,
     MarkerOverlapClusterer, MemoryPage, MessagePackPageCodec, PageBuildOptions, PageCatalog,
     PageCatalogEntry, PageClusterer, PageClustererKind, PageCodec, PageCodecKind,
-    ScopeKindClusterer, DEFAULT_MAX_CELLS_PER_PAGE, DEFAULT_TARGET_PAGE_BYTES,
+    ScopeKindClusterer, DEFAULT_MAX_CELLS_PER_PAGE, DEFAULT_TARGET_PAGE_BYTES, PAGE_FORMAT_VERSION,
 };
 pub use retrieval::{build_context_packet, score_cell, score_cell_debug, RecallRequest, Retriever};
 pub use security::{
@@ -63,5 +63,5 @@ pub use store::{
     DurabilityPolicy, HotCheckpointReport, InitOptions, InspectReport, MemoryEngine,
     RebuildIndexesReport, RememberRequest, SealReport, StatusOverrideReport, StorageConfig,
     StorageConfigUpdate, StorageConfigUpdateReport, Store, StoreStats, ValidationReport,
-    DEFAULT_STORE_DIR,
+    DEFAULT_STORE_DIR, STORE_FORMAT_VERSION,
 };
