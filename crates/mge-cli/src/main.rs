@@ -16,12 +16,11 @@ mod app_service;
 mod tui;
 
 use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{bail, Context, Result};
-use app_service::{doctor_report, AppService};
+use app_service::{doctor_report, AppService, MarkdownImportInput};
 use clap::{Parser, Subcommand};
 use mge_core::{
     CellId, CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine, MemoryKind,
@@ -29,7 +28,6 @@ use mge_core::{
     RecallMode, RecallRequest, RememberRequest, SecurityMode, SensitivityLevel,
     SessionChunkOptions, SessionRememberRequest, SessionTurn, TrustLevel, DEFAULT_STORE_DIR,
 };
-use serde::Serialize;
 
 #[derive(Debug, Parser)]
 #[command(name = "mge", version, about = "Memory Genome Engine CLI")]
@@ -756,16 +754,15 @@ fn main() -> Result<()> {
                 json,
                 passphrase_env,
             } => {
-                let mut engine = open_engine(&cli.store, passphrase_env.as_deref())?;
-                let report = import_markdown(
-                    &mut engine,
-                    &path,
-                    &scope,
-                    &kind,
-                    &trust,
-                    &sensitivity,
-                    &markers,
-                )?;
+                let service = AppService::new(cli.store.clone(), passphrase_env);
+                let report = service.import_markdown(MarkdownImportInput {
+                    path,
+                    scope,
+                    kind,
+                    trust,
+                    sensitivity,
+                    markers,
+                })?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&report)?);
                 } else {
@@ -1033,218 +1030,6 @@ fn parse_maintenance_status(raw: &str) -> Result<MemoryStatus> {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct MarkdownImportReport {
-    files_imported: usize,
-    cells_imported: usize,
-    files_skipped: usize,
-    skipped: Vec<MarkdownImportSkip>,
-    runtime_storage: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-struct MarkdownImportSkip {
-    path: PathBuf,
-    reason: String,
-}
-
-#[derive(Debug)]
-struct MarkdownSection {
-    subject: Option<String>,
-    content: String,
-}
-
-fn import_markdown(
-    engine: &mut MemoryEngine,
-    path: &Path,
-    scope: &str,
-    kind: &str,
-    trust: &str,
-    sensitivity: &str,
-    markers: &[String],
-) -> Result<MarkdownImportReport> {
-    let parsed_kind = MemoryKind::from_str(kind)?;
-    let parsed_trust = TrustLevel::from_str(trust)?;
-    let parsed_sensitivity = SensitivityLevel::from_str(sensitivity)?;
-    let mut report = MarkdownImportReport {
-        files_imported: 0,
-        cells_imported: 0,
-        files_skipped: 0,
-        skipped: Vec::new(),
-        runtime_storage: "binary",
-    };
-
-    let files = collect_markdown_files(path, &mut report)?;
-    if files.is_empty() {
-        bail!("no Markdown files found at {}", path.display());
-    }
-
-    for file in files {
-        let content = fs::read_to_string(&file)
-            .with_context(|| format!("failed to read Markdown file {}", file.display()))?;
-        let sections = parse_markdown_sections(&content, &file);
-        if sections.is_empty() {
-            report.files_skipped += 1;
-            report.skipped.push(MarkdownImportSkip {
-                path: file,
-                reason: "empty Markdown file".to_string(),
-            });
-            continue;
-        }
-
-        for section in sections {
-            let mut request = RememberRequest::new(parsed_kind, MemoryValue::Text(section.content));
-            request.subject = section.subject;
-            request.scope = scope.to_string();
-            request.status = MemoryStatus::Active;
-            request.trust = parsed_trust;
-            request.sensitivity = parsed_sensitivity;
-            request.markers = markdown_import_markers(markers, &file);
-            request.source = Some(MemorySource {
-                source_type: "markdown_import".to_string(),
-                reference: file.display().to_string(),
-            });
-            engine.remember(request)?;
-            report.cells_imported += 1;
-        }
-        report.files_imported += 1;
-    }
-
-    Ok(report)
-}
-
-fn collect_markdown_files(path: &Path, report: &mut MarkdownImportReport) -> Result<Vec<PathBuf>> {
-    let metadata = fs::symlink_metadata(path)
-        .with_context(|| format!("path not found: {}", path.display()))?;
-    if metadata.file_type().is_symlink() {
-        bail!("refusing to import symlink path: {}", path.display());
-    }
-    if metadata.is_file() {
-        if is_markdown_path(path) {
-            return Ok(vec![path.to_path_buf()]);
-        }
-        bail!("input file is not Markdown: {}", path.display());
-    }
-    if !metadata.is_dir() {
-        bail!(
-            "input path is neither file nor directory: {}",
-            path.display()
-        );
-    }
-
-    let mut files = Vec::new();
-    let mut pending = vec![path.to_path_buf()];
-    while let Some(dir) = pending.pop() {
-        for entry in
-            fs::read_dir(&dir).with_context(|| format!("failed to read {}", dir.display()))?
-        {
-            let entry = entry?;
-            let entry_path = entry.path();
-            let file_type = entry.file_type()?;
-            if file_type.is_symlink() {
-                report.files_skipped += 1;
-                report.skipped.push(MarkdownImportSkip {
-                    path: entry_path,
-                    reason: "symlink skipped".to_string(),
-                });
-                continue;
-            }
-            if file_type.is_dir() {
-                pending.push(entry_path);
-            } else if file_type.is_file() && is_markdown_path(&entry_path) {
-                files.push(entry_path);
-            }
-        }
-    }
-    files.sort();
-    Ok(files)
-}
-
-fn is_markdown_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| {
-            matches!(
-                extension.to_ascii_lowercase().as_str(),
-                "md" | "markdown" | "mdown"
-            )
-        })
-        .unwrap_or(false)
-}
-
-fn parse_markdown_sections(content: &str, path: &Path) -> Vec<MarkdownSection> {
-    let content = content.trim_start_matches('\u{feff}');
-    let mut sections = Vec::new();
-    let mut current_subject: Option<String> = None;
-    let mut current_lines = Vec::new();
-
-    for line in content.lines() {
-        if let Some(heading) = markdown_heading(line) {
-            push_markdown_section(
-                &mut sections,
-                current_subject.take(),
-                &mut current_lines,
-                path,
-            );
-            current_subject = Some(heading);
-        } else {
-            current_lines.push(line.to_string());
-        }
-    }
-    push_markdown_section(&mut sections, current_subject, &mut current_lines, path);
-    sections
-}
-
-fn markdown_heading(line: &str) -> Option<String> {
-    let trimmed = line.trim_start();
-    let hashes = trimmed.chars().take_while(|ch| *ch == '#').count();
-    if hashes == 0 || hashes > 6 {
-        return None;
-    }
-    let heading = trimmed[hashes..].trim();
-    if heading.is_empty() {
-        None
-    } else {
-        Some(heading.to_string())
-    }
-}
-
-fn push_markdown_section(
-    sections: &mut Vec<MarkdownSection>,
-    subject: Option<String>,
-    lines: &mut Vec<String>,
-    path: &Path,
-) {
-    let body = lines.join("\n").trim().to_string();
-    lines.clear();
-    let content = if body.is_empty() {
-        subject.clone().unwrap_or_default()
-    } else {
-        body
-    };
-    if content.is_empty() {
-        return;
-    }
-    sections.push(MarkdownSection {
-        subject: subject.or_else(|| {
-            path.file_stem()
-                .and_then(|stem| stem.to_str())
-                .map(|stem| stem.to_string())
-        }),
-        content,
-    });
-}
-
-fn markdown_import_markers(base: &[String], path: &Path) -> Vec<String> {
-    let mut markers = base.to_vec();
-    markers.push("import:markdown".to_string());
-    markers.push("source:markdown".to_string());
-    if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
-        markers.push(format!("file:{stem}"));
-    }
-    markers
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1433,17 +1218,5 @@ mod tests {
         let err = parse_memory_source(Some("issue".to_string()), None).unwrap_err();
 
         assert!(err.to_string().contains("--source-type and --source-ref"));
-    }
-
-    #[test]
-    fn markdown_sections_tolerate_utf8_bom() {
-        let sections = parse_markdown_sections(
-            "\u{feff}# Imported Note\n\nImported body.",
-            Path::new("note.md"),
-        );
-
-        assert_eq!(sections.len(), 1);
-        assert_eq!(sections[0].subject.as_deref(), Some("Imported Note"));
-        assert_eq!(sections[0].content, "Imported body.");
     }
 }

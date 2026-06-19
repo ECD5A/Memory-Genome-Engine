@@ -4,13 +4,13 @@ use ratatui::Frame;
 
 use crate::tui::app::TuiApp;
 use crate::tui::i18n::{tr, TKey};
-use crate::tui::screens::{self, action_line, key_value};
+use crate::tui::screens::{self, action_line, field_line, key_value};
 use crate::tui::theme;
 
 pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(7), Constraint::Min(6)])
+        .constraints([Constraint::Length(9), Constraint::Min(6)])
         .split(area);
 
     let actions = vec![
@@ -18,14 +18,20 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
             app.form_selected == 0,
             tr(app.language, TKey::ExportMarkdown),
         ),
-        action_line(
+        field_line(
             app.form_selected == 1,
+            tr(app.language, TKey::ImportPath),
+            &app.import_path,
+        ),
+        field_line(
+            app.form_selected == 2,
+            tr(app.language, TKey::ImportScope),
+            &app.import_scope,
+        ),
+        action_line(
+            app.form_selected == 3,
             tr(app.language, TKey::ImportMarkdown),
         ),
-        Line::from(Span::styled(
-            tr(app.language, TKey::ImportUnavailable),
-            theme::muted(),
-        )),
         Line::from(Span::styled(
             tr(app.language, TKey::MarkdownPlaintextWarning),
             theme::warning(),
@@ -36,19 +42,23 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
         layout[0],
     );
 
-    let lines = vec![
-        key_value(
-            tr(app.language, TKey::ExportPath),
-            app.export_path
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| tr(app.language, TKey::NoData).to_string()),
-        ),
-        key_value(
-            tr(app.language, TKey::ImportMarkdown),
-            tr(app.language, TKey::ReadOnlyImportNote),
-        ),
-    ];
+    let mut lines = vec![key_value(
+        tr(app.language, TKey::ExportPath),
+        app.export_path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| tr(app.language, TKey::NoData).to_string()),
+    )];
+    if let Some(report) = &app.import_report {
+        lines.push(key_value(
+            tr(app.language, TKey::ImportedFiles),
+            report.files_imported.to_string(),
+        ));
+        lines.push(key_value(
+            tr(app.language, TKey::ImportedCells),
+            report.cells_imported.to_string(),
+        ));
+    }
     frame.render_widget(
         screens::section(lines, tr(app.language, TKey::OperationStatus)),
         layout[1],

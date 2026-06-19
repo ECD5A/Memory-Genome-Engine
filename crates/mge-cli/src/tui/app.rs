@@ -14,7 +14,10 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 
-use crate::app_service::{AppService, DashboardSummary, DoctorReport, RecallInput, RememberInput};
+use crate::app_service::{
+    AppService, DashboardSummary, DoctorReport, MarkdownImportInput, MarkdownImportReport,
+    RecallInput, RememberInput,
+};
 use crate::tui::banner;
 use crate::tui::i18n::{tr, Language, TKey};
 use crate::tui::input;
@@ -43,11 +46,6 @@ pub enum Screen {
 
 #[derive(Clone, Debug)]
 pub struct TuiSettings {
-    pub human_dashboard: bool,
-    pub timing_diagnostics: bool,
-    pub debug_json_output: bool,
-    pub markdown_export: bool,
-    pub experimental_features: bool,
     pub default_recall_mode: RecallMode,
     pub index_kind: IndexKind,
 }
@@ -55,11 +53,6 @@ pub struct TuiSettings {
 impl Default for TuiSettings {
     fn default() -> Self {
         Self {
-            human_dashboard: true,
-            timing_diagnostics: true,
-            debug_json_output: false,
-            markdown_export: true,
-            experimental_features: false,
             default_recall_mode: RecallMode::Focused,
             index_kind: IndexKind::ExactMarkerPage,
         }
@@ -88,6 +81,9 @@ pub struct TuiApp {
     pub seal_confirm: bool,
     pub seal_result: Option<SealReport>,
     pub export_path: Option<PathBuf>,
+    pub import_path: String,
+    pub import_scope: String,
+    pub import_report: Option<MarkdownImportReport>,
     pub settings: TuiSettings,
     pub status_message: Option<StatusMessage>,
 }
@@ -121,6 +117,9 @@ impl TuiApp {
             seal_confirm: false,
             seal_result: None,
             export_path: None,
+            import_path: String::new(),
+            import_scope: "import".to_string(),
+            import_report: None,
             settings,
             status_message: None,
         }
@@ -270,7 +269,7 @@ fn handle_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
-    if input::is_language_key(key) {
+    if input::is_language_key(key) && !text_field_selected(app, key) {
         app.language = app.language.toggle();
         return Ok(true);
     }
@@ -296,6 +295,18 @@ fn handle_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
         Screen::ExportImport => handle_export_key(app, key),
         Screen::Settings => handle_settings_key(app, key),
         Screen::Help => handle_help_key(app, key),
+    }
+}
+
+fn text_field_selected(app: &TuiApp, key: KeyEvent) -> bool {
+    if matches!(key.code, KeyCode::F(1)) {
+        return false;
+    }
+    match app.screen {
+        Screen::Recall => matches!(app.form_selected, 0 | 3 | 4 | 5),
+        Screen::AddMemory => app.form_selected < 8,
+        Screen::ExportImport => matches!(app.form_selected, 1 | 2),
+        _ => false,
     }
 }
 
@@ -569,7 +580,7 @@ fn run_rebuild_indexes(app: &mut TuiApp) {
 }
 
 fn handle_export_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
-    const ROWS: usize = 2;
+    const ROWS: usize = 4;
     match key.code {
         KeyCode::Up => input::move_up(&mut app.form_selected, ROWS),
         KeyCode::Down => input::move_down(&mut app.form_selected, ROWS),
@@ -587,24 +598,54 @@ fn handle_export_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
             }
             Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
         },
-        KeyCode::Enter => {
-            app.set_status(BadgeKind::Warn, tr(app.language, TKey::ReadOnlyImportNote))
+        KeyCode::Enter if app.form_selected == 3 => run_markdown_import(app),
+        _ => {
+            let changed = match app.form_selected {
+                1 => input::edit_text(&mut app.import_path, key),
+                2 => input::edit_text(&mut app.import_scope, key),
+                _ => false,
+            };
+            if changed {
+                app.status_message = None;
+            }
         }
-        _ => {}
     }
     Ok(true)
 }
 
+fn run_markdown_import(app: &mut TuiApp) {
+    let input = MarkdownImportInput {
+        path: PathBuf::from(app.import_path.trim()),
+        scope: app.import_scope.clone(),
+        ..Default::default()
+    };
+    match app.service.import_markdown(input) {
+        Ok(report) => {
+            app.set_status(
+                BadgeKind::Ok,
+                format!(
+                    "{}: {} file(s), {} cell(s)",
+                    tr(app.language, TKey::ImportMarkdown),
+                    report.files_imported,
+                    report.cells_imported
+                ),
+            );
+            app.import_report = Some(report);
+            app.refresh_dashboard();
+        }
+        Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
+    }
+}
+
 fn handle_settings_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
-    const ROWS: usize = 9;
+    const ROWS: usize = 4;
     match key.code {
         KeyCode::Up => input::move_up(&mut app.settings_selected, ROWS),
         KeyCode::Down => input::move_down(&mut app.settings_selected, ROWS),
         KeyCode::Left => change_setting(app, false),
         KeyCode::Right => change_setting(app, true),
-        KeyCode::Char(' ') => toggle_setting(app),
-        KeyCode::Enter if app.settings_selected == 8 => apply_index_kind(app),
-        KeyCode::Enter => toggle_setting(app),
+        KeyCode::Char(' ') | KeyCode::Enter if app.settings_selected == 3 => apply_index_kind(app),
+        KeyCode::Char(' ') | KeyCode::Enter => change_setting(app, true),
         _ => {}
     }
     Ok(true)
@@ -624,19 +665,6 @@ fn change_setting(app: &mut TuiApp, forward: bool) {
                 IndexKind::BinaryFusePage => IndexKind::ExactMarkerPage,
             };
         }
-        _ => toggle_setting(app),
-    }
-}
-
-fn toggle_setting(app: &mut TuiApp) {
-    match app.settings_selected {
-        0 => app.language = app.language.toggle(),
-        3 => app.settings.human_dashboard = !app.settings.human_dashboard,
-        4 => app.settings.timing_diagnostics = !app.settings.timing_diagnostics,
-        5 => app.settings.debug_json_output = !app.settings.debug_json_output,
-        6 => app.settings.markdown_export = !app.settings.markdown_export,
-        7 => app.settings.experimental_features = !app.settings.experimental_features,
-        8 => apply_index_kind(app),
         _ => {}
     }
 }
@@ -696,9 +724,8 @@ mod tests {
     #[test]
     fn settings_default_to_human_safe_values() {
         let settings = TuiSettings::default();
-        assert!(settings.human_dashboard);
-        assert!(settings.markdown_export);
-        assert!(!settings.debug_json_output);
+        assert_eq!(settings.default_recall_mode, RecallMode::Focused);
+        assert_eq!(settings.index_kind, IndexKind::ExactMarkerPage);
     }
 
     #[test]
@@ -759,6 +786,33 @@ mod tests {
 
         assert_eq!(app.form_selected, selected);
         assert_eq!(app.language, language);
+    }
+
+    #[test]
+    fn language_letters_are_entered_in_text_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = TuiApp::new(TuiOptions {
+            store: dir.path().join(".memory-genome"),
+            passphrase_env: None,
+        });
+        app.screen = Screen::AddMemory;
+        app.form_selected = 1;
+
+        for ch in ['l', 'д'] {
+            handle_key(
+                &mut app,
+                KeyEvent {
+                    code: KeyCode::Char(ch),
+                    modifiers: KeyModifiers::NONE,
+                    kind: KeyEventKind::Press,
+                    state: KeyEventState::NONE,
+                },
+            )
+            .unwrap();
+        }
+
+        assert_eq!(app.remember_input.content, "lд");
+        assert_eq!(app.language, Language::En);
     }
 
     #[test]

@@ -1,11 +1,10 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use ratatui::Frame;
 
 use crate::tui::app::TuiApp;
-use crate::tui::i18n::{tr, Language, TKey};
-use crate::tui::screens::{self, action_line, field_line, selected_line};
-use crate::tui::theme;
+use crate::tui::i18n::{tr, TKey};
+use crate::tui::screens::{self, action_line, field_line};
 
 pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     let layout = Layout::default()
@@ -30,48 +29,8 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
             tr(app.language, TKey::IndexKind),
             &settings.index_kind.to_string(),
         ),
-        selected_line(
-            app.settings_selected == 3,
-            toggle_text(
-                app.language,
-                settings.human_dashboard,
-                tr(app.language, TKey::HumanDashboard),
-            ),
-        ),
-        selected_line(
-            app.settings_selected == 4,
-            toggle_text(
-                app.language,
-                settings.timing_diagnostics,
-                tr(app.language, TKey::TimingDiagnostics),
-            ),
-        ),
-        selected_line(
-            app.settings_selected == 5,
-            toggle_text(
-                app.language,
-                settings.debug_json_output,
-                tr(app.language, TKey::DebugJsonOutput),
-            ),
-        ),
-        selected_line(
-            app.settings_selected == 6,
-            toggle_text(
-                app.language,
-                settings.markdown_export,
-                tr(app.language, TKey::MarkdownExport),
-            ),
-        ),
-        selected_line(
-            app.settings_selected == 7,
-            toggle_text(
-                app.language,
-                settings.experimental_features,
-                tr(app.language, TKey::ExperimentalFeatures),
-            ),
-        ),
         action_line(
-            app.settings_selected == 8,
+            app.settings_selected == 3,
             tr(app.language, TKey::ApplyIndexKind),
         ),
         Line::from(""),
@@ -80,47 +39,10 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
             tr(app.language, TKey::StorePath),
             app.service.store_path().display()
         )),
-        Line::from(""),
-        Line::from(Span::styled(settings_note(app.language), theme::muted())),
+        Line::from(tr(app.language, TKey::SettingsPersistenceNote)),
     ];
     frame.render_widget(
         screens::paragraph(lines, tr(app.language, TKey::Settings)),
         layout[0],
     );
-}
-
-fn toggle_text(language: Language, enabled: bool, label: &str) -> String {
-    let state = if enabled {
-        tr(language, TKey::On)
-    } else {
-        tr(language, TKey::Off)
-    };
-    let symbol = if enabled { "●" } else { "○" };
-    format!("[{symbol}] {state:<5} {label}")
-}
-
-fn settings_note(language: Language) -> &'static str {
-    match language {
-        Language::En => {
-            "Index kind is written to the store; language/default mode/view toggles are TUI session options."
-        }
-        Language::Ru => {
-            "Тип индекса записывается в store; язык, default mode и переключатели вида работают в текущей TUI-сессии."
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn toggle_formats_english_and_russian() {
-        assert!(toggle_text(Language::En, true, "Timing").contains("ON"));
-        assert!(toggle_text(Language::Ru, false, "Timing").contains("ВЫКЛ"));
-        assert!(toggle_text(Language::En, true, "Timing").contains("●"));
-        assert!(toggle_text(Language::En, false, "Timing").contains("○"));
-        assert!(settings_note(Language::En).contains("store"));
-        assert!(settings_note(Language::Ru).contains("store"));
-    }
 }
