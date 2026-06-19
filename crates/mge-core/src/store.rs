@@ -13,7 +13,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -64,7 +64,7 @@ const HOT_LOG_FILE: &str = "hot.mgl";
 const PAGE_CATALOG_FILE: &str = "page_index.mgi";
 const EXACT_MARKER_INDEX_FILE: &str = "marker_index.mgi";
 const BINARY_FUSE_INDEX_FILE: &str = "fuse_index.mgi";
-const DECODED_PAGE_CACHE_CAPACITY: usize = 64;
+const DECODED_PAGE_CACHE_CAPACITY: usize = 256;
 const PAGE_PAYLOAD_AAD: &[u8] = b"mge:sealed_page:v1";
 
 pub trait Store {
@@ -85,6 +85,8 @@ pub struct MemoryEngine {
     hot_unsynced_events: u64,
     last_hot_sync: Instant,
     page_cache: RefCell<DecodedPageCache>,
+    page_catalog_cache: RefCell<Option<Arc<PageCatalog>>>,
+    candidate_index_cache: RefCell<Option<Arc<CandidateIndexData>>>,
     session_key: Option<SessionKey>,
 }
 
@@ -459,6 +461,21 @@ impl PageScoringCache {
         }
     }
 
+    fn for_sealed_hot_page(page: &MemoryPage, hot: &HotMemoryLayer) -> Self {
+        let cells = page
+            .cells
+            .iter()
+            .map(|cell| {
+                let slot = OnceLock::new();
+                if let Some(scoring) = hot.scoring(cell.id) {
+                    let _ = slot.set(scoring.clone());
+                }
+                slot
+            })
+            .collect();
+        Self { cells }
+    }
+
     fn cell_with_timing(
         &self,
         cell_index: usize,
@@ -532,6 +549,7 @@ struct RankedCellHandle {
     cell_id: CellId,
     updated_at: i64,
     score: i64,
+    lexical_rank_score: i64,
     score_detail: ContextScoreDebugItem,
 }
 
@@ -539,6 +557,13 @@ struct RankedCellHandle {
 enum RankedCellSource {
     Hot(CellId),
     Sealed { page_id: PageId, cell_index: usize },
+}
+
+#[derive(Clone, Debug)]
+struct LexicalDocStats {
+    ranked_index: usize,
+    matched_terms: Vec<String>,
+    doc_len: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -774,6 +799,8 @@ impl MemoryEngine {
             hot_unsynced_events: 0,
             last_hot_sync: Instant::now(),
             page_cache: RefCell::new(DecodedPageCache::new(DECODED_PAGE_CACHE_CAPACITY)),
+            page_catalog_cache: RefCell::new(None),
+            candidate_index_cache: RefCell::new(None),
             session_key,
         })
     }
@@ -793,6 +820,8 @@ impl MemoryEngine {
             hot_unsynced_events: 0,
             last_hot_sync: Instant::now(),
             page_cache: RefCell::new(DecodedPageCache::new(DECODED_PAGE_CACHE_CAPACITY)),
+            page_catalog_cache: RefCell::new(None),
+            candidate_index_cache: RefCell::new(None),
             session_key: None,
         }
     }
@@ -1076,8 +1105,49 @@ impl MemoryEngine {
             RecallMode::Broad | RecallMode::FullScope => QueryMode::Union,
         };
         let allowed_hot_statuses = allowed_statuses_for_policy(&effective_policy);
+        let mut hot_lexical_scores =
+            if matches!(request.mode, RecallMode::Focused | RecallMode::Broad) {
+                self.hot.lexical_scores(
+                    &query_tokens,
+                    request.scope.as_deref(),
+                    request.kind,
+                    &allowed_hot_statuses,
+                )
+            } else {
+                BTreeMap::new()
+            };
+        hot_lexical_scores.retain(|cell_id, _| {
+            self.hot.cell(*cell_id).is_some_and(|cell| {
+                scoring_context.permits_cell(cell)
+                    && self.effective_policy_permits_cell(cell, &effective_policy)
+            })
+        });
+        let lexical_candidate_limit = match request.mode {
+            RecallMode::Focused => request.max_items.saturating_mul(8).max(64),
+            RecallMode::Broad => request.max_items.max(20).saturating_mul(8).max(128),
+            RecallMode::FullScope => 0,
+        };
+        let mut hot_lexical_candidate_ids = hot_lexical_scores
+            .iter()
+            .map(|(cell_id, score)| (*cell_id, *score))
+            .collect::<Vec<_>>();
+        hot_lexical_candidate_ids
+            .sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+        hot_lexical_candidate_ids.truncate(lexical_candidate_limit);
+        let hot_lexical_candidate_ids = hot_lexical_candidate_ids
+            .into_iter()
+            .map(|(cell_id, _)| cell_id)
+            .collect::<Vec<_>>();
+        let hot_candidate_marker_ids = if hot_lexical_candidate_ids.is_empty() {
+            query_marker_ids.as_slice()
+        } else if request.mode == RecallMode::Focused {
+            query_marker_ids.as_slice()
+        } else {
+            explicit_marker_ids.as_slice()
+        };
         let hot_candidate_ids = self.hot.candidate_ids(HotCandidateQuery {
-            marker_ids: &query_marker_ids,
+            marker_ids: hot_candidate_marker_ids,
+            lexical_candidate_ids: &hot_lexical_candidate_ids,
             marker_mode: hot_query_mode,
             scope: request.scope.as_deref(),
             kind: request.kind,
@@ -1098,7 +1168,7 @@ impl MemoryEngine {
                 cells_evaluated += 1;
                 continue;
             }
-            if let Some(score_detail) = match request.mode {
+            if let Some(mut score_detail) = match request.mode {
                 RecallMode::FullScope => full_scope_cell_debug_with_filter(cell, &filter_context),
                 RecallMode::Focused | RecallMode::Broad => {
                     if let Some(cached) = self.hot.scoring(cell_id) {
@@ -1108,11 +1178,15 @@ impl MemoryEngine {
                     }
                 }
             } {
+                let lexical_rank_score = hot_lexical_scores.get(&cell.id).copied().unwrap_or(0);
+                score_detail.lexical_rank_score = lexical_rank_score;
+                score_detail.score = score_detail.score.saturating_add(lexical_rank_score);
                 ranked.push(RankedCellHandle {
                     source: RankedCellSource::Hot(cell.id),
                     cell_id: cell.id,
                     updated_at: cell.updated_at,
                     score: score_detail.score,
+                    lexical_rank_score,
                     score_detail,
                 });
             }
@@ -1121,9 +1195,9 @@ impl MemoryEngine {
         let mut cell_filtering_micros = elapsed_micros(filtering_started);
 
         let catalog = if self.manifest.next_page_id == 1 {
-            PageCatalog::default()
+            Arc::new(PageCatalog::default())
         } else {
-            self.load_page_catalog()?
+            self.cached_page_catalog()?
         };
 
         let candidate_page_index_started = Instant::now();
@@ -1134,7 +1208,7 @@ impl MemoryEngine {
                 RecallMode::Focused => QueryMode::PreferIntersection,
                 RecallMode::Broad | RecallMode::FullScope => QueryMode::Union,
             };
-            let index = self.load_candidate_index()?;
+            let index = self.cached_candidate_index()?;
             index.query_with_mode_stats(&query_marker_ids, query_mode)?
         };
         let candidate_page_index_lookup_micros = elapsed_micros(candidate_page_index_started);
@@ -1161,6 +1235,7 @@ impl MemoryEngine {
         let mut sealed_cells_skipped_before_token_scoring = 0usize;
         let mut sealed_cells_token_scored = 0usize;
         let mut loaded_pages_by_id = BTreeMap::new();
+        let mut scoring_caches_by_page_id = BTreeMap::new();
         let include_scoring_cache = !matches!(request.mode, RecallMode::FullScope);
         for page_id in &candidate_pages {
             let Some(entry) = entries_by_id.get(page_id) else {
@@ -1190,6 +1265,9 @@ impl MemoryEngine {
             }
             let page = timed_page.page;
             let scoring_cache = timed_page.scoring;
+            if let Some(cache) = &scoring_cache {
+                scoring_caches_by_page_id.insert(page.page_id, Arc::clone(cache));
+            }
             loaded_pages += 1;
             sealed_cells_scanned += page.cells.len();
             cells_decoded += page.cells.len();
@@ -1235,6 +1313,7 @@ impl MemoryEngine {
                         cell_id: cell.id,
                         updated_at: cell.updated_at,
                         score: score_detail.score,
+                        lexical_rank_score: 0,
                         score_detail,
                     });
                 }
@@ -1253,10 +1332,19 @@ impl MemoryEngine {
         let cells_filtered = cells_evaluated.saturating_sub(cells_ranked);
 
         let reranking_started = Instant::now();
+        if matches!(request.mode, RecallMode::Focused | RecallMode::Broad) {
+            self.apply_lexical_rerank_scores(
+                &mut ranked,
+                &query_tokens,
+                &loaded_pages_by_id,
+                &scoring_caches_by_page_id,
+            );
+        }
         ranked.sort_by(|left, right| {
             right
                 .score
                 .cmp(&left.score)
+                .then_with(|| right.lexical_rank_score.cmp(&left.lexical_rank_score))
                 .then_with(|| right.updated_at.cmp(&left.updated_at))
                 .then_with(|| left.cell_id.cmp(&right.cell_id))
         });
@@ -1326,6 +1414,121 @@ impl MemoryEngine {
         packet.debug.total_recall_micros = elapsed_micros(total_recall_started);
 
         Ok(packet)
+    }
+
+    fn apply_lexical_rerank_scores(
+        &self,
+        ranked: &mut [RankedCellHandle],
+        query_tokens: &[String],
+        sealed_pages: &BTreeMap<PageId, Arc<MemoryPage>>,
+        scoring_caches: &BTreeMap<PageId, Arc<PageScoringCache>>,
+    ) {
+        if ranked.is_empty() || query_tokens.is_empty() {
+            return;
+        }
+
+        let query_terms = query_tokens
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        let mut docs = Vec::new();
+        let mut document_frequency = HashMap::<String, usize>::new();
+        let mut total_doc_len = 0usize;
+
+        for (ranked_index, handle) in ranked.iter().enumerate() {
+            if matches!(handle.source, RankedCellSource::Hot(_)) {
+                continue;
+            }
+            let Some(cached) =
+                self.cached_scoring_for_ranked_handle(handle, sealed_pages, scoring_caches)
+            else {
+                continue;
+            };
+
+            let mut matched_terms = BTreeSet::new();
+            for token in cached
+                .subject_tokens
+                .iter()
+                .chain(cached.value_tokens.iter())
+            {
+                if query_terms.contains(token.as_str()) {
+                    matched_terms.insert(token.clone());
+                }
+            }
+            if matched_terms.is_empty() {
+                continue;
+            }
+
+            for token in &matched_terms {
+                *document_frequency.entry(token.clone()).or_insert(0) += 1;
+            }
+            let doc_len = cached.subject_tokens.len() + cached.value_tokens.len();
+            let doc_len = doc_len.max(1);
+            total_doc_len += doc_len;
+            docs.push(LexicalDocStats {
+                ranked_index,
+                matched_terms: matched_terms.into_iter().collect(),
+                doc_len,
+            });
+        }
+
+        if docs.is_empty() {
+            return;
+        }
+
+        let doc_count = docs.len() as f64;
+        let avg_doc_len = total_doc_len as f64 / docs.len() as f64;
+        let query_len = query_terms.len();
+        let k1 = 1.2;
+        let b = 0.75;
+
+        for doc in docs {
+            let mut bm25 = 0.0;
+            for term in &doc.matched_terms {
+                let df = document_frequency.get(term).copied().unwrap_or(0) as f64;
+                let idf = ((doc_count - df + 0.5) / (df + 0.5) + 1.0).ln();
+                let tf = 1.0;
+                let doc_len = doc.doc_len as f64;
+                let normalization = tf + k1 * (1.0 - b + b * doc_len / avg_doc_len.max(1.0));
+                bm25 += idf * (tf * (k1 + 1.0)) / normalization;
+            }
+
+            let mut bonus = (bm25 * 8.0).round() as i64;
+            if doc.matched_terms.len() == query_len {
+                bonus += 4;
+            }
+            if bonus <= 0 {
+                continue;
+            }
+
+            let ranked = &mut ranked[doc.ranked_index];
+            ranked.lexical_rank_score = bonus;
+            ranked.score = ranked.score.saturating_add(bonus);
+            ranked.score_detail.lexical_rank_score = bonus;
+            ranked.score_detail.score = ranked.score_detail.score.saturating_add(bonus);
+        }
+    }
+
+    fn cached_scoring_for_ranked_handle<'a>(
+        &'a self,
+        ranked: &RankedCellHandle,
+        sealed_pages: &'a BTreeMap<PageId, Arc<MemoryPage>>,
+        scoring_caches: &'a BTreeMap<PageId, Arc<PageScoringCache>>,
+    ) -> Option<&'a CachedCellScoringData> {
+        match ranked.source {
+            RankedCellSource::Hot(_) => None,
+            RankedCellSource::Sealed {
+                page_id,
+                cell_index,
+            } => {
+                let page = sealed_pages.get(&page_id)?;
+                let cell = page.cells.get(cell_index)?;
+                scoring_caches
+                    .get(&page_id)?
+                    .cell_with_timing(cell_index, cell)
+                    .map(|(cached, _)| cached)
+            }
+        }
     }
 
     fn build_context_packet_from_ranked_handles(
@@ -1499,6 +1702,14 @@ impl MemoryEngine {
 
         let all_pages = self.load_all_pages()?;
         self.rebuild_candidate_indexes_for_pages(&all_pages)?;
+        {
+            let mut cache = self.page_cache.borrow_mut();
+            let first_cached_page = all_pages.len().saturating_sub(cache.capacity);
+            for page in all_pages.into_iter().skip(first_cached_page) {
+                let scoring = Arc::new(PageScoringCache::for_sealed_hot_page(&page, &self.hot));
+                cache.insert(Arc::new(page), Some(scoring));
+            }
+        }
 
         let archived_hot_log = hot_store.archive_and_clear()?;
         self.hot.clear();
@@ -2033,10 +2244,25 @@ impl MemoryEngine {
         binary::read_messagepack_file(path, FileKind::PageIndex)
     }
 
+    fn cached_page_catalog(&self) -> Result<Arc<PageCatalog>> {
+        if let Some(catalog) = self.page_catalog_cache.borrow().as_ref() {
+            return Ok(Arc::clone(catalog));
+        }
+        let catalog = Arc::new(self.load_page_catalog()?);
+        self.page_catalog_cache
+            .borrow_mut()
+            .replace(Arc::clone(&catalog));
+        Ok(catalog)
+    }
+
     fn save_page_catalog(&self, catalog: &PageCatalog) -> Result<()> {
         let mut catalog = catalog.clone();
         catalog.index_kind = self.manifest.index_kind;
-        binary::write_messagepack_file(self.page_catalog_path(), FileKind::PageIndex, &catalog)
+        binary::write_messagepack_file(self.page_catalog_path(), FileKind::PageIndex, &catalog)?;
+        self.page_catalog_cache
+            .borrow_mut()
+            .replace(Arc::new(catalog));
+        Ok(())
     }
 
     fn load_all_pages(&self) -> Result<Vec<MemoryPage>> {
@@ -2287,6 +2513,17 @@ impl MemoryEngine {
         }
     }
 
+    fn cached_candidate_index(&self) -> Result<Arc<CandidateIndexData>> {
+        if let Some(index) = self.candidate_index_cache.borrow().as_ref() {
+            return Ok(Arc::clone(index));
+        }
+        let index = Arc::new(self.load_candidate_index()?);
+        self.candidate_index_cache
+            .borrow_mut()
+            .replace(Arc::clone(&index));
+        Ok(index)
+    }
+
     fn rebuild_candidate_indexes_for_pages(
         &self,
         pages: &[MemoryPage],
@@ -2294,14 +2531,18 @@ impl MemoryEngine {
         let exact = ExactMarkerPageIndex::build(pages)?;
         exact.save_to_path(self.marker_index_path())?;
 
-        match self.manifest.index_kind {
-            IndexKind::ExactMarkerPage => Ok(CandidateIndexData::ExactMarkerPage(exact)),
+        let active = match self.manifest.index_kind {
+            IndexKind::ExactMarkerPage => CandidateIndexData::ExactMarkerPage(exact),
             IndexKind::BinaryFusePage => {
                 let binary = BinaryFusePageIndex::build(pages)?;
                 binary.save_to_path(self.binary_fuse_index_path())?;
-                Ok(CandidateIndexData::BinaryFusePage(binary))
+                CandidateIndexData::BinaryFusePage(binary)
             }
-        }
+        };
+        self.candidate_index_cache
+            .borrow_mut()
+            .replace(Arc::new(active.clone()));
+        Ok(active)
     }
 
     fn validate_page(
@@ -2398,7 +2639,6 @@ impl MemoryEngine {
             &enum_summary(page.cells.iter().map(|cell| cell.trust)),
             report,
         );
-
         let computed_marker_summary = marker_summary_for_cells(&page.cells);
         if computed_marker_summary != page.marker_summary {
             report.error(format!(

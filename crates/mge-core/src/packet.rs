@@ -157,6 +157,8 @@ pub struct ContextScoreDebugItem {
     pub value_overlap: i64,
     pub value_overlap_score: i64,
     #[serde(default)]
+    pub lexical_rank_score: i64,
+    #[serde(default)]
     pub exact_value_match: bool,
     #[serde(default)]
     pub exact_value_score: i64,

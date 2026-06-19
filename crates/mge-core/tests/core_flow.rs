@@ -227,6 +227,7 @@ fn old_vec_marker_cells_remain_indexable_in_hot_ram() {
     let allowed_statuses = vec![MemoryStatus::Active];
     let candidates = layer.candidate_ids(HotCandidateQuery {
         marker_ids: &[10],
+        lexical_candidate_ids: &[],
         marker_mode: QueryMode::Union,
         scope: None,
         kind: None,
@@ -1145,6 +1146,36 @@ fn focused_recall_returns_top_relevant_items() {
 }
 
 #[test]
+fn lexical_rerank_prefers_precise_text_over_noisy_candidate() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "global",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "api token rotation drift backup window dashboard schedule owners incident history",
+        &["tag:api".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "global",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "api token rotation",
+        &["tag:api".to_string()],
+    );
+
+    let mut request = RecallRequest::new("api token rotation");
+    request.max_items = 2;
+    let packet = engine.recall(request).unwrap();
+
+    assert_eq!(packet.relevant_memory.len(), 2);
+    assert_eq!(packet.relevant_memory[0].content, "api token rotation");
+    assert!(packet.debug.score_details[0].lexical_rank_score > 0);
+}
+
+#[test]
 fn broad_recall_returns_more_relevant_items_than_focused() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
@@ -1478,6 +1509,11 @@ fn recall_from_sealed_pages() {
     assert_eq!(packet.debug.hot_cells_scanned, 0);
     assert_eq!(packet.debug.candidate_pages.len(), 1);
     assert_eq!(packet.debug.sealed_cells_scanned, 1);
+    assert_eq!(packet.debug.decoded_page_cache_hits, 1);
+    assert_eq!(packet.debug.decoded_page_cache_misses, 0);
+    assert_eq!(packet.debug.scoring_cache_hits, 1);
+    assert_eq!(packet.debug.scoring_cache_misses, 0);
+    assert_eq!(packet.debug.scoring_cache_build_micros, 0);
 }
 
 #[test]
@@ -1506,6 +1542,30 @@ fn sealed_recall_context_output_is_stable_after_cache_hit() {
     assert_eq!(first.debug.score_details, third.debug.score_details);
     assert_eq!(third.debug.scoring_cache_hits, 1);
     assert_eq!(third.debug.scoring_cache_misses, 0);
+}
+
+#[test]
+fn sealed_scoring_cache_is_runtime_only_after_reopen() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+    drop(engine);
+
+    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    let request = RecallRequest::new("How should the agent answer technical questions?");
+    let cold = reopened.recall(request.clone()).unwrap();
+    let repeated = reopened.recall(request).unwrap();
+
+    assert_eq!(cold.relevant_memory, repeated.relevant_memory);
+    assert_eq!(cold.debug.decoded_page_cache_hits, 0);
+    assert_eq!(cold.debug.decoded_page_cache_misses, 1);
+    assert_eq!(cold.debug.scoring_cache_hits, 0);
+    assert_eq!(cold.debug.scoring_cache_misses, 1);
+    assert_eq!(repeated.debug.decoded_page_cache_hits, 1);
+    assert_eq!(repeated.debug.decoded_page_cache_misses, 0);
+    assert_eq!(repeated.debug.scoring_cache_hits, 1);
+    assert_eq!(repeated.debug.scoring_cache_misses, 0);
 }
 
 #[test]

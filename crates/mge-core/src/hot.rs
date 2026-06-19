@@ -40,6 +40,8 @@ const HOT_SNAPSHOT_AAD: &[u8] = b"mge:hot_snapshot:v1";
 pub struct HotMemoryLayer {
     pub cells_by_id: BTreeMap<CellId, MemoryCell>,
     scoring_by_id: BTreeMap<CellId, CachedCellScoringData>,
+    token_to_cells: BTreeMap<String, Vec<CellId>>,
+    token_count_by_cell: BTreeMap<CellId, usize>,
     pub marker_to_cells: BTreeMap<MarkerId, Vec<CellId>>,
     pub scope_to_cells: BTreeMap<ScopeId, Vec<CellId>>,
     pub kind_to_cells: BTreeMap<KindId, Vec<CellId>>,
@@ -49,6 +51,7 @@ pub struct HotMemoryLayer {
 #[derive(Clone, Copy, Debug)]
 pub struct HotCandidateQuery<'a> {
     pub marker_ids: &'a [MarkerId],
+    pub lexical_candidate_ids: &'a [CellId],
     pub marker_mode: QueryMode,
     pub scope: Option<&'a str>,
     pub kind: Option<MemoryKind>,
@@ -82,8 +85,12 @@ impl HotMemoryLayer {
     pub fn insert(&mut self, cell: MemoryCell) {
         let scoring = CachedCellScoringData::from_cell(&cell);
         if let Some(previous) = self.cells_by_id.insert(cell.id, cell.clone()) {
+            if let Some(previous_scoring) = self.scoring_by_id.remove(&previous.id) {
+                self.remove_from_text_index(previous.id, &previous_scoring);
+            }
             self.remove_from_indexes(&previous);
         }
+        self.add_to_text_index(cell.id, &scoring);
         self.scoring_by_id.insert(cell.id, scoring);
         self.add_to_indexes(&cell);
     }
@@ -91,6 +98,8 @@ impl HotMemoryLayer {
     pub fn clear(&mut self) {
         self.cells_by_id.clear();
         self.scoring_by_id.clear();
+        self.token_to_cells.clear();
+        self.token_count_by_cell.clear();
         self.marker_to_cells.clear();
         self.scope_to_cells.clear();
         self.kind_to_cells.clear();
@@ -119,6 +128,12 @@ impl HotMemoryLayer {
 
     pub fn candidate_ids(&self, query: HotCandidateQuery<'_>) -> Vec<CellId> {
         let mut candidates = self.marker_candidates(query.marker_ids, query.marker_mode);
+        let lexical_candidates = if query.lexical_candidate_ids.is_empty() {
+            None
+        } else {
+            Some(query.lexical_candidate_ids.iter().copied().collect())
+        };
+        candidates = combine_candidate_ids(candidates, lexical_candidates, query.marker_mode);
 
         if let Some(scope) = query.scope {
             let scope = canonicalize_marker_value(scope);
@@ -136,6 +151,106 @@ impl HotMemoryLayer {
             .unwrap_or_else(|| self.cells_by_id.keys().copied().collect())
             .into_iter()
             .collect()
+    }
+
+    pub(crate) fn lexical_scores(
+        &self,
+        query_tokens: &[String],
+        scope: Option<&str>,
+        kind: Option<MemoryKind>,
+        allowed_statuses: &[MemoryStatus],
+    ) -> BTreeMap<CellId, i64> {
+        if query_tokens.is_empty() || self.cells_by_id.is_empty() {
+            return BTreeMap::new();
+        }
+
+        let mut allowed = None;
+        if let Some(scope) = scope {
+            let scope = canonicalize_marker_value(scope);
+            allowed = intersect_candidate_ids(allowed, self.scope_to_cells.get(&scope));
+        }
+        if let Some(kind) = kind {
+            allowed = intersect_candidate_ids(allowed, self.kind_to_cells.get(&kind));
+        }
+        allowed = intersect_with_statuses(allowed, &self.status_to_cells, allowed_statuses);
+        let allowed = allowed.unwrap_or_default();
+        if allowed.is_empty() {
+            return BTreeMap::new();
+        }
+
+        let document_count = allowed.len() as f64;
+        let allowed_token_count = allowed
+            .iter()
+            .map(|cell_id| self.token_count_by_cell.get(cell_id).copied().unwrap_or(0))
+            .sum::<usize>();
+        let average_document_length = allowed_token_count as f64 / allowed.len().max(1) as f64;
+        let mut raw_scores = BTreeMap::<CellId, f64>::new();
+        let mut matched_terms = BTreeMap::<CellId, usize>::new();
+
+        let query_terms = query_tokens
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        for token in &query_terms {
+            let Some(cell_ids) = self.token_to_cells.get(*token) else {
+                continue;
+            };
+            let document_frequency = cell_ids
+                .iter()
+                .filter(|cell_id| allowed.contains(cell_id))
+                .count();
+            if document_frequency == 0 {
+                continue;
+            }
+            let document_frequency = document_frequency as f64;
+            let idf = ((document_count - document_frequency + 0.5) / (document_frequency + 0.5)
+                + 1.0)
+                .ln();
+            for cell_id in cell_ids.iter().copied() {
+                if !allowed.contains(&cell_id) {
+                    continue;
+                }
+                let document_length = self
+                    .token_count_by_cell
+                    .get(&cell_id)
+                    .copied()
+                    .unwrap_or(1)
+                    .max(1) as f64;
+                let k1 = 1.2;
+                let b = 0.75;
+                let normalization =
+                    1.0 + k1 * (1.0 - b + b * document_length / average_document_length.max(1.0));
+                *raw_scores.entry(cell_id).or_insert(0.0) += idf * (k1 + 1.0) / normalization;
+                *matched_terms.entry(cell_id).or_insert(0) += 1;
+            }
+        }
+
+        raw_scores
+            .into_iter()
+            .map(|(cell_id, score)| {
+                let mut score = (score * 8.0).round() as i64;
+                if matched_terms.get(&cell_id).copied().unwrap_or(0) == query_terms.len() {
+                    score += 4;
+                }
+                (cell_id, score)
+            })
+            .collect()
+    }
+
+    fn add_to_text_index(&mut self, cell_id: CellId, scoring: &CachedCellScoringData) {
+        let tokens = scoring_tokens(scoring);
+        self.token_count_by_cell.insert(cell_id, tokens.len());
+        for token in tokens {
+            push_unique(self.token_to_cells.entry(token).or_default(), cell_id);
+        }
+    }
+
+    fn remove_from_text_index(&mut self, cell_id: CellId, scoring: &CachedCellScoringData) {
+        let tokens = scoring_tokens(scoring);
+        self.token_count_by_cell.remove(&cell_id);
+        for token in tokens {
+            remove_cell_id_from_index(&mut self.token_to_cells, token, cell_id);
+        }
     }
 
     fn add_to_indexes(&mut self, cell: &MemoryCell) {
@@ -286,6 +401,42 @@ fn intersect_candidate_ids(
         Some(candidates) => candidates.intersection(&indexed_ids).copied().collect(),
         None => indexed_ids,
     })
+}
+
+fn combine_candidate_ids(
+    candidates: Option<BTreeSet<CellId>>,
+    additional: Option<BTreeSet<CellId>>,
+    mode: QueryMode,
+) -> Option<BTreeSet<CellId>> {
+    match (candidates, additional) {
+        (Some(candidates), Some(additional)) => match mode {
+            QueryMode::Intersection => {
+                Some(candidates.intersection(&additional).copied().collect())
+            }
+            QueryMode::PreferIntersection => {
+                // Focused recall uses lexical evidence to narrow marker matches. Falling back to
+                // the marker union here can surface a different cell on one generic text token.
+                Some(candidates.intersection(&additional).copied().collect())
+            }
+            QueryMode::Union => {
+                let mut union = candidates;
+                union.extend(additional);
+                Some(union)
+            }
+        },
+        (Some(candidates), None) => Some(candidates),
+        (None, Some(additional)) => Some(additional),
+        (None, None) => None,
+    }
+}
+
+fn scoring_tokens(scoring: &CachedCellScoringData) -> BTreeSet<String> {
+    scoring
+        .subject_tokens
+        .iter()
+        .chain(scoring.value_tokens.iter())
+        .cloned()
+        .collect()
 }
 
 fn push_unique(ids: &mut Vec<CellId>, cell_id: CellId) {
@@ -706,5 +857,42 @@ mod tests {
         layer.clear();
         assert!(layer.scoring(1).is_none());
         assert!(layer.is_empty());
+    }
+
+    #[test]
+    fn hot_layer_indexes_text_tokens_and_scores_candidates() {
+        let cell = MemoryCell::new(
+            7,
+            MemoryKind::ProjectFact,
+            Some("deployment policy".to_string()),
+            MemoryValue::Text("rotate api credentials weekly".to_string()),
+            "project".to_string(),
+            MemoryStatus::Active,
+            TrustLevel::ToolObserved,
+            SensitivityLevel::Public,
+            vec![11],
+            None,
+            Vec::new(),
+        );
+        let mut layer = HotMemoryLayer::from_cells(vec![cell]);
+        let allowed_statuses = vec![MemoryStatus::Active];
+        let query_tokens = vec!["credentials".to_string(), "weekly".to_string()];
+
+        let candidates = layer.candidate_ids(HotCandidateQuery {
+            marker_ids: &[],
+            lexical_candidate_ids: &[7],
+            marker_mode: QueryMode::Union,
+            scope: Some("project"),
+            kind: None,
+            allowed_statuses: &allowed_statuses,
+        });
+        let scores = layer.lexical_scores(&query_tokens, Some("project"), None, &allowed_statuses);
+
+        assert_eq!(candidates, vec![7]);
+        assert!(scores.get(&7).copied().unwrap_or(0) > 0);
+        layer.clear();
+        assert!(layer
+            .lexical_scores(&query_tokens, Some("project"), None, &allowed_statuses)
+            .is_empty());
     }
 }

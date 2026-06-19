@@ -344,6 +344,7 @@ fn score_permitted_cell_debug(
         exact_subject_score,
         value_overlap,
         value_overlap_score,
+        lexical_rank_score: 0,
         exact_value_match,
         exact_value_score,
         trust_bonus,
