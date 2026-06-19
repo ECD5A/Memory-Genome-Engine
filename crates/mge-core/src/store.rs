@@ -86,6 +86,7 @@ pub struct MemoryEngine {
     dictionary: MarkerDictionary,
     hot: HotMemoryLayer,
     pending_hot_cells: Vec<MemoryCell>,
+    pending_hot_appended: usize,
     hot_metadata_dirty: bool,
     hot_unsynced_events: u64,
     last_hot_sync: Instant,
@@ -854,6 +855,7 @@ impl MemoryEngine {
             dictionary,
             hot,
             pending_hot_cells: Vec::new(),
+            pending_hot_appended: 0,
             hot_metadata_dirty: false,
             hot_unsynced_events: 0,
             last_hot_sync: Instant::now(),
@@ -877,6 +879,7 @@ impl MemoryEngine {
             dictionary,
             hot: HotMemoryLayer::default(),
             pending_hot_cells: Vec::new(),
+            pending_hot_appended: 0,
             hot_metadata_dirty: false,
             hot_unsynced_events: 0,
             last_hot_sync: Instant::now(),
@@ -2322,15 +2325,16 @@ impl MemoryEngine {
         self.dictionary.save_to_path(self.markers_path())?;
 
         let hot_store = HotStore::new(self.hot_cells_path());
-        let pending = std::mem::take(&mut self.pending_hot_cells);
-        for (index, cell) in pending.iter().enumerate() {
-            if let Err(err) = hot_store.append_cell_with_key(cell, false, self.session_key.as_ref())
-            {
-                self.pending_hot_cells = pending[index..].to_vec();
-                return Err(err);
-            }
+        while self.pending_hot_appended < self.pending_hot_cells.len() {
+            let append_result = {
+                let cell = &self.pending_hot_cells[self.pending_hot_appended];
+                hot_store.append_cell_with_key(cell, false, self.session_key.as_ref())
+            };
+            append_result?;
+            self.pending_hot_appended += 1;
         }
 
+        let pending_len = self.pending_hot_cells.len();
         let should_sync = force_sync
             || matches!(
                 self.manifest.durability,
@@ -2343,8 +2347,10 @@ impl MemoryEngine {
         } else {
             self.hot_unsynced_events = self
                 .hot_unsynced_events
-                .saturating_add(u64::try_from(pending.len()).unwrap_or(u64::MAX));
+                .saturating_add(u64::try_from(pending_len).unwrap_or(u64::MAX));
         }
+        self.pending_hot_cells.clear();
+        self.pending_hot_appended = 0;
         self.hot_metadata_dirty = false;
         Ok(())
     }

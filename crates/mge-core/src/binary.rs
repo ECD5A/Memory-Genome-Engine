@@ -276,7 +276,10 @@ pub fn atomic_write_bytes(path: impl AsRef<Path>, bytes: &[u8]) -> Result<()> {
         file.sync_all()?;
     }
 
-    replace_with_temp(&temp_path, path)?;
+    if let Err(err) = replace_with_temp(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err);
+    }
     sync_parent_dir(path)?;
     Ok(())
 }
@@ -296,10 +299,31 @@ fn unique_temp_path(path: &Path) -> PathBuf {
 
 #[cfg(windows)]
 fn replace_with_temp(temp_path: &Path, final_path: &Path) -> Result<()> {
-    if final_path.exists() {
-        fs::remove_file(final_path)?;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let temp_wide = temp_path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let final_wide = final_path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            temp_wide.as_ptr(),
+            final_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        return Err(std::io::Error::last_os_error().into());
     }
-    fs::rename(temp_path, final_path)?;
     Ok(())
 }
 
@@ -325,4 +349,25 @@ fn sync_parent_dir(path: &Path) -> Result<()> {
 
 fn storage_error(message: impl Into<String>) -> MgeError {
     MgeError::StorageFormat(message.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn atomic_write_replaces_existing_file_without_temp_artifacts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.mgm");
+
+        atomic_write_bytes(&path, b"first").unwrap();
+        atomic_write_bytes(&path, b"second").unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"second");
+        let files = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(files, vec![path.file_name().unwrap().to_os_string()]);
+    }
 }

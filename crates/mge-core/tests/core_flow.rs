@@ -1154,6 +1154,47 @@ fn durability_modes_control_when_hot_records_reach_disk() {
 }
 
 #[test]
+fn failed_hot_append_keeps_pending_memory_for_checkpoint_retry() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_with_options(
+        dir.path(),
+        InitOptions {
+            durability: DurabilityPolicy::Fast,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    remember_text_cell(
+        &mut engine,
+        "durability-retry",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "pending memory survives an append failure",
+        &["tag:retry".to_string()],
+    );
+
+    let hot_path = dir.path().join("hot").join("hot.mgl");
+    fs::remove_file(&hot_path).unwrap();
+    fs::create_dir(&hot_path).unwrap();
+    assert!(engine.checkpoint().is_err());
+
+    fs::remove_dir(&hot_path).unwrap();
+    HotStore::new(&hot_path).ensure_exists().unwrap();
+    engine.checkpoint().unwrap();
+    drop(engine);
+
+    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    let mut request = RecallRequest::new("append failure");
+    request.scope = Some("durability-retry".to_string());
+    let packet = reopened.recall(request).unwrap();
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert_eq!(
+        packet.relevant_memory[0].content,
+        "pending memory survives an append failure"
+    );
+}
+
+#[test]
 fn checkpoint_snapshot_replays_hot_log_after_snapshot_offset() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
