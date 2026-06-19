@@ -44,6 +44,18 @@ fn keyword_tokenization_normalizes_ascii_without_duplicates() {
 }
 
 #[test]
+fn marker_canonicalization_and_keyword_tokenization_preserve_unicode() {
+    assert_eq!(
+        canonicalize_marker("Scope: Проект Альфа").unwrap(),
+        "scope:проект_альфа"
+    );
+    assert_eq!(
+        tokenize_keywords("Локальная память и память агента"),
+        vec!["локальная", "память", "агента"]
+    );
+}
+
+#[test]
 fn marker_dictionary_id_assignment_is_stable() {
     let mut dictionary = mge_core::MarkerDictionary::new();
     let first = dictionary.get_or_insert("kind:user_preference").unwrap();
@@ -720,6 +732,29 @@ fn recall_from_hot_memory() {
     assert_eq!(packet.debug.score_details.len(), 1);
     assert_eq!(packet.debug.score_details[0].trust_bonus, 5);
     assert_eq!(packet.debug.score_details[0].status_bonus, 5);
+}
+
+#[test]
+fn unicode_recall_works_in_hot_and_sealed_memory() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let mut remember = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text("Агент использует локальную память проекта".to_string()),
+    );
+    remember.scope = "Проект Альфа".to_string();
+    remember.subject = Some("Архитектура памяти".to_string());
+    engine.remember(remember).unwrap();
+
+    let mut recall = RecallRequest::new("локальная память агента");
+    recall.scope = Some("Проект Альфа".to_string());
+    let hot = engine.recall(recall.clone()).unwrap();
+    assert_eq!(hot.relevant_memory.len(), 1);
+
+    engine.seal().unwrap();
+    let sealed = engine.recall(recall).unwrap();
+    assert_eq!(sealed.relevant_memory.len(), 1);
+    assert_eq!(hot.relevant_memory, sealed.relevant_memory);
 }
 
 #[test]

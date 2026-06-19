@@ -234,7 +234,7 @@ fn canonicalize_marker_value_unicode(trimmed: &str) -> String {
     let mut previous_was_separator = false;
 
     for ch in trimmed.chars().flat_map(char::to_lowercase) {
-        if ch.is_ascii_alphanumeric() {
+        if ch.is_alphanumeric() {
             out.push(ch);
             previous_was_separator = false;
         } else if !out.is_empty() && !previous_was_separator {
@@ -369,7 +369,7 @@ fn tokenize_keywords_unicode(text: &str) -> Vec<String> {
     let mut current = String::new();
 
     for ch in text.chars().flat_map(char::to_lowercase) {
-        if ch.is_ascii_alphanumeric() {
+        if ch.is_alphanumeric() {
             current.push(ch);
         } else {
             push_normalized_token(&mut tokens, &mut seen, &current);
@@ -391,19 +391,27 @@ fn push_ascii_token(tokens: &mut Vec<String>, seen: &mut HashSet<String>, raw: &
 }
 
 fn push_normalized_token(tokens: &mut Vec<String>, seen: &mut HashSet<String>, raw: &str) {
-    if raw.len() < 2 || is_stopword(raw) {
+    if token_is_too_short(raw) || is_stopword(raw) {
         return;
     }
 
     let token = singularize(raw);
     let token = token.as_ref();
-    if token.len() < 2 || is_stopword(token) || seen.contains(token) {
+    if token_is_too_short(token) || is_stopword(token) || seen.contains(token) {
         return;
     }
 
     let token = token.to_string();
     seen.insert(token.clone());
     tokens.push(token);
+}
+
+fn token_is_too_short(value: &str) -> bool {
+    if value.is_ascii() {
+        value.len() < 2
+    } else {
+        value.chars().take(2).count() < 2
+    }
 }
 
 fn singularize(raw: &str) -> Cow<'_, str> {
