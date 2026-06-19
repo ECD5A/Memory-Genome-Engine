@@ -34,6 +34,10 @@ struct Args {
     #[arg(long, value_enum, default_value_t = InputFormat::Auto)]
     input_format: InputFormat,
 
+    /// How conversation datasets are converted into memory records.
+    #[arg(long, value_enum, default_value_t = IngestMode::RawTurn)]
+    ingest_mode: IngestMode,
+
     /// Generated dataset profile.
     #[arg(long, value_enum, default_value_t = GeneratedProfile::Small)]
     profile: GeneratedProfile,
@@ -57,6 +61,10 @@ struct Args {
     /// Which recall modes to evaluate.
     #[arg(long, value_enum, default_value_t = ModeSelection::FocusedBroad)]
     modes: ModeSelection,
+
+    /// Which non-MGE retrieval baselines to run.
+    #[arg(long, value_enum, default_value_t = BaselineSelection::Both)]
+    baselines: BaselineSelection,
 
     /// Output format.
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
@@ -92,6 +100,32 @@ enum InputFormat {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum IngestMode {
+    #[value(name = "raw-turn")]
+    RawTurn,
+    #[value(name = "session-doc")]
+    SessionDoc,
+    #[value(name = "session-chunk")]
+    SessionChunk,
+    #[value(name = "session-plus-turn")]
+    SessionPlusTurn,
+    #[value(name = "key-fact")]
+    KeyFact,
+}
+
+impl IngestMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            IngestMode::RawTurn => "raw-turn",
+            IngestMode::SessionDoc => "session-doc",
+            IngestMode::SessionChunk => "session-chunk",
+            IngestMode::SessionPlusTurn => "session-plus-turn",
+            IngestMode::KeyFact => "key-fact",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum GeneratedProfile {
     Tiny,
     Small,
@@ -110,6 +144,19 @@ enum ModeSelection {
     Focused,
     Broad,
     FocusedBroad,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum BaselineSelection {
+    Keyword,
+    Bm25,
+    #[value(name = "text-index")]
+    TextIndex,
+    #[value(name = "page-token")]
+    PageToken,
+    All,
+    Both,
+    None,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -191,13 +238,33 @@ struct RunSummary {
     p95_latency_micros: u64,
     avg_context_bytes: usize,
     avg_returned_items: f64,
+    avg_hot_candidates: f64,
+    avg_pages_loaded: f64,
+    avg_pages_pruned: f64,
+    avg_cells_scanned: f64,
+    avg_page_read_micros: u64,
+    avg_page_decode_micros: u64,
+    avg_scoring_cache_build_micros: u64,
+    avg_cell_filtering_micros: u64,
+    avg_reranking_micros: u64,
+    avg_context_packet_build_micros: u64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct QueryResult {
     returned_ids: Vec<String>,
     latency_micros: u64,
     context_bytes: usize,
+    hot_candidates: usize,
+    pages_loaded: usize,
+    pages_pruned: usize,
+    cells_scanned: usize,
+    page_read_micros: u64,
+    page_decode_micros: u64,
+    scoring_cache_build_micros: u64,
+    cell_filtering_micros: u64,
+    reranking_micros: u64,
+    context_packet_build_micros: u64,
 }
 
 fn main() -> Result<()> {
@@ -253,6 +320,7 @@ fn load_dataset(args: &Args) -> Result<EvalDataset> {
                 input.display().to_string(),
                 args.max_memories,
                 args.max_queries,
+                args.ingest_mode,
             )?,
             InputFormat::Locomo => convert_locomo(
                 &serde_json::from_slice(&bytes)?,
@@ -374,6 +442,7 @@ fn convert_longmemeval(
     source: String,
     max_memories: Option<usize>,
     max_queries: Option<usize>,
+    ingest_mode: IngestMode,
 ) -> Result<EvalDataset> {
     let instances = value
         .as_array()
@@ -413,6 +482,9 @@ fn convert_longmemeval(
             .unwrap_or_default();
 
         let mut session_turn_ids: HashMap<String, Vec<String>> = HashMap::new();
+        let mut session_memory_ids: HashMap<String, String> = HashMap::new();
+        let mut session_chunk_ids: HashMap<String, Vec<String>> = HashMap::new();
+        let mut session_fact_ids: HashMap<String, Vec<String>> = HashMap::new();
         let mut relevant_ids = Vec::new();
         let scope = format!("longmemeval:{question_id}");
 
@@ -424,6 +496,11 @@ fn convert_longmemeval(
             let Some(turns) = session.as_array() else {
                 continue;
             };
+            let session_memory_id = format!("{question_id}:s{session_index}:{session_id}:session");
+            let mut session_lines = Vec::new();
+            let mut session_has_answer = answer_session_ids.contains(&session_id);
+            let mut converted_turns = Vec::new();
+
             for (turn_index, turn) in turns.iter().enumerate() {
                 let content = string_field(turn, &["content", "text", "message"])
                     .or_else(|| turn.as_str().map(str::to_string));
@@ -436,26 +513,45 @@ fn convert_longmemeval(
                 let role =
                     string_field(turn, &["role", "speaker"]).unwrap_or_else(|| "turn".to_string());
                 let id = format!("{question_id}:s{session_index}:{session_id}:turn-{turn_index}");
-                if turn
+                let has_answer = turn
                     .get("has_answer")
                     .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                {
-                    relevant_ids.push(id.clone());
-                }
+                    .unwrap_or(false);
+                session_has_answer |= has_answer;
+                session_lines.push(format!("{role}: {content}"));
+                converted_turns.push(LongMemEvalTurn {
+                    id: id.clone(),
+                    role: role.clone(),
+                    content: content.clone(),
+                    has_answer,
+                });
                 session_turn_ids
                     .entry(session_id.clone())
                     .or_default()
-                    .push(id.clone());
+                    .push(id);
+            }
+
+            if converted_turns.is_empty() {
+                continue;
+            }
+
+            if matches!(
+                ingest_mode,
+                IngestMode::SessionDoc | IngestMode::SessionPlusTurn
+            ) {
+                session_memory_ids.insert(session_id.clone(), session_memory_id.clone());
+                if session_has_answer {
+                    relevant_ids.push(session_memory_id.clone());
+                }
                 memories.push(EvalMemory {
-                    id,
+                    id: session_memory_id,
                     scope: scope.clone(),
-                    subject: Some(format!("{question_type} {role} {session_id}")),
-                    text: content,
+                    subject: Some(format!("{question_type} session {session_id}")),
+                    text: session_lines.join("\n"),
                     markers: vec![
                         format!("benchmark:longmemeval"),
                         format!("question_type:{}", safe_marker_value(&question_type)),
-                        format!("role:{}", safe_marker_value(&role)),
+                        "memory_granularity:session".to_string(),
                         format!("session:{}", safe_marker_value(&session_id)),
                     ],
                     kind: "project_fact".to_string(),
@@ -464,12 +560,133 @@ fn convert_longmemeval(
                     sensitivity: "private".to_string(),
                 });
             }
+
+            if ingest_mode == IngestMode::SessionChunk {
+                for (chunk_index, chunk) in chunk_session_turns(&converted_turns)
+                    .into_iter()
+                    .enumerate()
+                {
+                    let id =
+                        format!("{question_id}:s{session_index}:{session_id}:chunk-{chunk_index}");
+                    if chunk.has_answer {
+                        relevant_ids.push(id.clone());
+                    }
+                    session_chunk_ids
+                        .entry(session_id.clone())
+                        .or_default()
+                        .push(id.clone());
+                    memories.push(EvalMemory {
+                        id,
+                        scope: scope.clone(),
+                        subject: Some(format!("{question_type} context block {session_id}")),
+                        text: chunk.text,
+                        markers: vec![
+                            "benchmark:longmemeval".to_string(),
+                            format!("question_type:{}", safe_marker_value(&question_type)),
+                            "memory_granularity:session_chunk".to_string(),
+                            format!("session:{}", safe_marker_value(&session_id)),
+                        ],
+                        kind: "project_fact".to_string(),
+                        status: "active".to_string(),
+                        trust: "user_confirmed".to_string(),
+                        sensitivity: "private".to_string(),
+                    });
+                }
+            }
+
+            if ingest_mode == IngestMode::KeyFact {
+                for converted in &converted_turns {
+                    for (fact_index, fact) in
+                        split_key_facts(&converted.content).into_iter().enumerate()
+                    {
+                        let id = format!("{}:fact-{fact_index}", converted.id);
+                        if converted.has_answer {
+                            relevant_ids.push(id.clone());
+                        }
+                        session_fact_ids
+                            .entry(session_id.clone())
+                            .or_default()
+                            .push(id.clone());
+                        memories.push(EvalMemory {
+                            id,
+                            scope: scope.clone(),
+                            subject: Some(format!(
+                                "{question_type} key fact {} {session_id}",
+                                converted.role
+                            )),
+                            text: fact,
+                            markers: vec![
+                                format!("benchmark:longmemeval"),
+                                format!("question_type:{}", safe_marker_value(&question_type)),
+                                "memory_granularity:key_fact".to_string(),
+                                format!("role:{}", safe_marker_value(&converted.role)),
+                                format!("session:{}", safe_marker_value(&session_id)),
+                            ],
+                            kind: "project_fact".to_string(),
+                            status: "active".to_string(),
+                            trust: "user_confirmed".to_string(),
+                            sensitivity: "private".to_string(),
+                        });
+                    }
+                }
+            }
+
+            if matches!(
+                ingest_mode,
+                IngestMode::RawTurn | IngestMode::SessionPlusTurn
+            ) {
+                for converted in converted_turns {
+                    if converted.has_answer {
+                        relevant_ids.push(converted.id.clone());
+                    }
+                    memories.push(EvalMemory {
+                        id: converted.id,
+                        scope: scope.clone(),
+                        subject: Some(format!("{question_type} {} {session_id}", converted.role)),
+                        text: converted.content,
+                        markers: vec![
+                            format!("benchmark:longmemeval"),
+                            format!("question_type:{}", safe_marker_value(&question_type)),
+                            "memory_granularity:turn".to_string(),
+                            format!("role:{}", safe_marker_value(&converted.role)),
+                            format!("session:{}", safe_marker_value(&session_id)),
+                        ],
+                        kind: "project_fact".to_string(),
+                        status: "active".to_string(),
+                        trust: "user_confirmed".to_string(),
+                        sensitivity: "private".to_string(),
+                    });
+                }
+            }
         }
 
         if relevant_ids.is_empty() {
             for answer_session_id in &answer_session_ids {
-                if let Some(turn_ids) = session_turn_ids.get(answer_session_id) {
-                    relevant_ids.extend(turn_ids.iter().cloned());
+                if matches!(
+                    ingest_mode,
+                    IngestMode::SessionDoc | IngestMode::SessionPlusTurn
+                ) {
+                    if let Some(session_memory_id) = session_memory_ids.get(answer_session_id) {
+                        relevant_ids.push(session_memory_id.clone());
+                    }
+                }
+                if matches!(
+                    ingest_mode,
+                    IngestMode::RawTurn | IngestMode::SessionPlusTurn
+                ) {
+                    if let Some(turn_ids) = session_turn_ids.get(answer_session_id) {
+                        relevant_ids.extend(turn_ids.iter().cloned());
+                    }
+                }
+                if ingest_mode == IngestMode::KeyFact {
+                    if let Some(fact_ids) = session_fact_ids.get(answer_session_id) {
+                        relevant_ids.extend(fact_ids.iter().cloned());
+                    }
+                }
+                if ingest_mode == IngestMode::SessionChunk {
+                    if let Some(chunk_ids) = session_chunk_ids.get(answer_session_id) {
+                        relevant_ids.extend(chunk_ids.iter().cloned());
+                    }
                 }
             }
         }
@@ -497,11 +714,62 @@ fn convert_longmemeval(
     }
 
     Ok(EvalDataset {
-        name: "longmemeval_converted".to_string(),
-        source: format!("{source}; skipped queries without evidence: {skipped_without_evidence}"),
+        name: format!("longmemeval_{}", ingest_mode.as_str().replace('-', "_")),
+        source: format!(
+            "{source}; ingest_mode: {}; skipped queries without evidence: {skipped_without_evidence}",
+            ingest_mode.as_str()
+        ),
         memories,
         queries,
     })
+}
+
+#[derive(Clone, Debug)]
+struct LongMemEvalTurn {
+    id: String,
+    role: String,
+    content: String,
+    has_answer: bool,
+}
+
+#[derive(Clone, Debug)]
+struct LongMemEvalChunk {
+    text: String,
+    has_answer: bool,
+}
+
+fn chunk_session_turns(turns: &[LongMemEvalTurn]) -> Vec<LongMemEvalChunk> {
+    const MAX_TURNS: usize = 8;
+    const MAX_BYTES: usize = 4 * 1024;
+
+    let mut chunks = Vec::new();
+    let mut lines = Vec::new();
+    let mut bytes = 0usize;
+    let mut has_answer = false;
+
+    for turn in turns {
+        let line = format!("{}: {}", turn.role, turn.content);
+        if !lines.is_empty() && (lines.len() >= MAX_TURNS || bytes + line.len() > MAX_BYTES) {
+            chunks.push(LongMemEvalChunk {
+                text: lines.join("\n"),
+                has_answer,
+            });
+            lines.clear();
+            bytes = 0;
+            has_answer = false;
+        }
+        bytes += line.len();
+        has_answer |= turn.has_answer;
+        lines.push(line);
+    }
+
+    if !lines.is_empty() {
+        chunks.push(LongMemEvalChunk {
+            text: lines.join("\n"),
+            has_answer,
+        });
+    }
+    chunks
 }
 
 fn convert_locomo(
@@ -759,6 +1027,37 @@ fn is_safe_memory_text(input: &str) -> bool {
     true
 }
 
+fn split_key_facts(input: &str) -> Vec<String> {
+    let mut facts = Vec::new();
+    for part in input.split(['\n', '.', '!', '?', ';']) {
+        if facts.len() >= 3 {
+            break;
+        }
+        let fact = part.trim();
+        if fact.len() < 16 || !is_safe_memory_text(fact) {
+            continue;
+        }
+        let fact = if fact.len() > 360 {
+            let boundary = fact
+                .char_indices()
+                .take_while(|(index, _)| *index <= 360)
+                .last()
+                .map(|(index, ch)| index + ch.len_utf8())
+                .unwrap_or(360);
+            fact[..boundary].trim().to_string()
+        } else {
+            fact.to_string()
+        };
+        if !facts.iter().any(|existing| existing == &fact) {
+            facts.push(fact);
+        }
+    }
+    if facts.is_empty() && is_safe_memory_text(input) {
+        facts.push(input.trim().to_string());
+    }
+    facts
+}
+
 fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
     let summary = summarize_dataset(&dataset);
     let mut runs = Vec::new();
@@ -811,10 +1110,39 @@ fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
                 *mode,
                 args.top_k,
                 args.repeats,
-                "sealed",
+                "sealed_after_seal",
                 index_kind,
             )?);
         }
+
+        drop(engine);
+        for mode in &modes {
+            runs.push(evaluate_mge_cold(
+                &store_root,
+                &dataset,
+                &cell_to_eval_id,
+                *mode,
+                args.top_k,
+                args.repeats,
+                index_kind,
+            )?);
+        }
+
+        let reopened = MemoryEngine::open_at(&store_root)?;
+        for mode in &modes {
+            warm_mge_queries(&reopened, &dataset, *mode, args.top_k)?;
+            runs.push(evaluate_mge(
+                &reopened,
+                &dataset,
+                &cell_to_eval_id,
+                *mode,
+                args.top_k,
+                args.repeats,
+                "sealed_repeated",
+                index_kind,
+            )?);
+        }
+        drop(reopened);
 
         if !args.keep_store {
             let _ = fs::remove_dir_all(&store_root);
@@ -822,12 +1150,22 @@ fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
     }
 
     for mode in modes {
-        runs.push(evaluate_scan_baseline(
-            &dataset,
-            mode,
-            args.top_k,
-            args.repeats,
-        ));
+        for baseline in selected_baselines(args.baselines) {
+            runs.push(match baseline {
+                BaselineKind::Keyword => {
+                    evaluate_keyword_baseline(&dataset, mode, args.top_k, args.repeats)
+                }
+                BaselineKind::Bm25 => {
+                    evaluate_bm25_baseline(&dataset, mode, args.top_k, args.repeats)
+                }
+                BaselineKind::TextIndex => {
+                    evaluate_text_index_baseline(&dataset, mode, args.top_k, args.repeats)
+                }
+                BaselineKind::PageToken => {
+                    evaluate_page_token_baseline(&dataset, mode, args.top_k, args.repeats)
+                }
+            });
+        }
     }
 
     if !args.keep_store && args.store_root.is_none() {
@@ -842,6 +1180,7 @@ fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
                 .to_string(),
             "LongMemEval and best-effort LoCoMo-style JSON adapters are local-only; no datasets are committed or downloaded by the tool.".to_string(),
             "This measures retrieval behavior, not final LLM answer quality.".to_string(),
+            "scoring cache build time is measured inside cell filtering time; those columns are not additive.".to_string(),
         ],
     })
 }
@@ -886,29 +1225,13 @@ fn evaluate_mge(
     let mut results = Vec::new();
     for query in &dataset.queries {
         for _ in 0..repeats {
-            let mut request = RecallRequest::new(query.query.clone());
-            request.mode = mode;
-            request.scope = query.scope.clone();
-            request.max_items = top_k;
-            let started = Instant::now();
-            let packet = engine.recall(request)?;
-            let latency_micros = elapsed_micros(started);
-            let mut returned_ids = Vec::new();
-            for score in packet
-                .debug
-                .score_details
-                .iter()
-                .take(packet.relevant_memory.len())
-            {
-                if let Some(eval_id) = cell_to_eval_id.get(&score.cell_id) {
-                    returned_ids.push(eval_id.clone());
-                }
-            }
-            results.push(QueryResult {
-                returned_ids,
-                latency_micros,
-                context_bytes: packet.to_prompt_text().len(),
-            });
+            results.push(evaluate_mge_query(
+                engine,
+                query,
+                cell_to_eval_id,
+                mode,
+                top_k,
+            )?);
         }
     }
 
@@ -924,7 +1247,100 @@ fn evaluate_mge(
     ))
 }
 
-fn evaluate_scan_baseline(
+fn evaluate_mge_cold(
+    store_root: &std::path::Path,
+    dataset: &EvalDataset,
+    cell_to_eval_id: &HashMap<u64, String>,
+    mode: RecallMode,
+    top_k: usize,
+    repeats: usize,
+    index_kind: IndexKind,
+) -> Result<RunSummary> {
+    let mut results = Vec::new();
+    for query in &dataset.queries {
+        for _ in 0..repeats {
+            let engine = MemoryEngine::open_at(store_root)?;
+            results.push(evaluate_mge_query(
+                &engine,
+                query,
+                cell_to_eval_id,
+                mode,
+                top_k,
+            )?);
+        }
+    }
+
+    Ok(summarize_run(
+        format!("mge_{}", index_kind.as_str()),
+        "sealed_cold".to_string(),
+        index_kind.as_str().to_string(),
+        mode.as_str().to_string(),
+        top_k,
+        repeats,
+        &dataset.queries,
+        &results,
+    ))
+}
+
+fn warm_mge_queries(
+    engine: &MemoryEngine,
+    dataset: &EvalDataset,
+    mode: RecallMode,
+    top_k: usize,
+) -> Result<()> {
+    for query in &dataset.queries {
+        let mut request = RecallRequest::new(query.query.clone());
+        request.mode = mode;
+        request.scope = query.scope.clone();
+        request.max_items = top_k;
+        engine.recall(request)?;
+    }
+    Ok(())
+}
+
+fn evaluate_mge_query(
+    engine: &MemoryEngine,
+    query: &EvalQuery,
+    cell_to_eval_id: &HashMap<u64, String>,
+    mode: RecallMode,
+    top_k: usize,
+) -> Result<QueryResult> {
+    let mut request = RecallRequest::new(query.query.clone());
+    request.mode = mode;
+    request.scope = query.scope.clone();
+    request.max_items = top_k;
+    let started = Instant::now();
+    let packet = engine.recall(request)?;
+    let latency_micros = elapsed_micros(started);
+    let mut returned_ids = Vec::new();
+    for score in packet
+        .debug
+        .score_details
+        .iter()
+        .take(packet.relevant_memory.len())
+    {
+        if let Some(eval_id) = cell_to_eval_id.get(&score.cell_id) {
+            returned_ids.push(eval_id.clone());
+        }
+    }
+    Ok(QueryResult {
+        returned_ids,
+        latency_micros,
+        context_bytes: packet.to_prompt_text().len(),
+        hot_candidates: packet.debug.hot_candidate_cells,
+        pages_loaded: packet.debug.loaded_pages,
+        pages_pruned: packet.debug.pages_pruned_by_metadata,
+        cells_scanned: packet.debug.cells_scanned,
+        page_read_micros: packet.debug.page_file_read_load_micros,
+        page_decode_micros: packet.debug.page_decode_micros,
+        scoring_cache_build_micros: packet.debug.scoring_cache_build_micros,
+        cell_filtering_micros: packet.debug.cell_filtering_micros,
+        reranking_micros: packet.debug.reranking_micros,
+        context_packet_build_micros: packet.debug.context_packet_build_micros,
+    })
+}
+
+fn evaluate_keyword_baseline(
     dataset: &EvalDataset,
     mode: RecallMode,
     top_k: usize,
@@ -944,6 +1360,11 @@ fn evaluate_scan_baseline(
                 returned_ids,
                 latency_micros: elapsed_micros(started),
                 context_bytes,
+                hot_candidates: 0,
+                pages_loaded: 0,
+                pages_pruned: 0,
+                cells_scanned: dataset.memories.len(),
+                ..QueryResult::default()
             });
         }
     }
@@ -951,6 +1372,132 @@ fn evaluate_scan_baseline(
     summarize_run(
         "scan_keyword_baseline".to_string(),
         "full_scan".to_string(),
+        "none".to_string(),
+        mode.as_str().to_string(),
+        top_k,
+        repeats,
+        &dataset.queries,
+        &results,
+    )
+}
+
+fn evaluate_bm25_baseline(
+    dataset: &EvalDataset,
+    mode: RecallMode,
+    top_k: usize,
+    repeats: usize,
+) -> RunSummary {
+    let index = Bm25Index::build(dataset);
+    let mut results = Vec::new();
+    for query in &dataset.queries {
+        for _ in 0..repeats {
+            let started = Instant::now();
+            let returned_ids = index.search(query, top_k, mode);
+            let context_bytes = returned_ids
+                .iter()
+                .filter_map(|id| dataset.memories.iter().find(|memory| memory.id == *id))
+                .map(|memory| memory.text.len())
+                .sum::<usize>();
+            results.push(QueryResult {
+                returned_ids,
+                latency_micros: elapsed_micros(started),
+                context_bytes,
+                hot_candidates: 0,
+                pages_loaded: 0,
+                pages_pruned: 0,
+                cells_scanned: dataset.memories.len(),
+                ..QueryResult::default()
+            });
+        }
+    }
+
+    summarize_run(
+        "bm25_baseline".to_string(),
+        "inverted_index".to_string(),
+        "none".to_string(),
+        mode.as_str().to_string(),
+        top_k,
+        repeats,
+        &dataset.queries,
+        &results,
+    )
+}
+
+fn evaluate_text_index_baseline(
+    dataset: &EvalDataset,
+    mode: RecallMode,
+    top_k: usize,
+    repeats: usize,
+) -> RunSummary {
+    let index = TextCandidateIndex::build(dataset);
+    let mut results = Vec::new();
+    for query in &dataset.queries {
+        for _ in 0..repeats {
+            let started = Instant::now();
+            let returned_ids = index.search(query, top_k, mode);
+            let context_bytes = returned_ids
+                .iter()
+                .filter_map(|id| dataset.memories.iter().find(|memory| memory.id == *id))
+                .map(|memory| memory.text.len())
+                .sum::<usize>();
+            results.push(QueryResult {
+                returned_ids,
+                latency_micros: elapsed_micros(started),
+                context_bytes,
+                hot_candidates: 0,
+                pages_loaded: 0,
+                pages_pruned: 0,
+                cells_scanned: 0,
+                ..QueryResult::default()
+            });
+        }
+    }
+
+    summarize_run(
+        "text_candidate_index".to_string(),
+        "inverted_index".to_string(),
+        "none".to_string(),
+        mode.as_str().to_string(),
+        top_k,
+        repeats,
+        &dataset.queries,
+        &results,
+    )
+}
+
+fn evaluate_page_token_baseline(
+    dataset: &EvalDataset,
+    mode: RecallMode,
+    top_k: usize,
+    repeats: usize,
+) -> RunSummary {
+    let index = PageTokenIndex::build(dataset, 64);
+    let mut results = Vec::new();
+    for query in &dataset.queries {
+        for _ in 0..repeats {
+            let started = Instant::now();
+            let returned_ids = index.search(query, top_k, mode);
+            let context_bytes = returned_ids
+                .iter()
+                .filter_map(|id| dataset.memories.iter().find(|memory| memory.id == *id))
+                .map(|memory| memory.text.len())
+                .sum::<usize>();
+            results.push(QueryResult {
+                returned_ids,
+                latency_micros: elapsed_micros(started),
+                context_bytes,
+                hot_candidates: 0,
+                pages_loaded: 0,
+                pages_pruned: 0,
+                cells_scanned: 0,
+                ..QueryResult::default()
+            });
+        }
+    }
+
+    summarize_run(
+        "page_token_summary".to_string(),
+        "page_prefilter".to_string(),
         "none".to_string(),
         mode.as_str().to_string(),
         top_k,
@@ -1003,6 +1550,329 @@ fn scan_baseline(
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BaselineKind {
+    Keyword,
+    Bm25,
+    TextIndex,
+    PageToken,
+}
+
+fn selected_baselines(selection: BaselineSelection) -> Vec<BaselineKind> {
+    match selection {
+        BaselineSelection::Keyword => vec![BaselineKind::Keyword],
+        BaselineSelection::Bm25 => vec![BaselineKind::Bm25],
+        BaselineSelection::TextIndex => vec![BaselineKind::TextIndex],
+        BaselineSelection::PageToken => vec![BaselineKind::PageToken],
+        BaselineSelection::Both => vec![BaselineKind::Keyword, BaselineKind::Bm25],
+        BaselineSelection::All => vec![
+            BaselineKind::Keyword,
+            BaselineKind::Bm25,
+            BaselineKind::TextIndex,
+            BaselineKind::PageToken,
+        ],
+        BaselineSelection::None => Vec::new(),
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Bm25Index {
+    docs: Vec<Bm25Doc>,
+    document_frequency: HashMap<String, usize>,
+    avg_doc_len: f64,
+}
+
+#[derive(Clone, Debug)]
+struct Bm25Doc {
+    id: String,
+    scope: String,
+    length: usize,
+    term_frequency: HashMap<String, usize>,
+}
+
+impl Bm25Index {
+    fn build(dataset: &EvalDataset) -> Self {
+        let mut docs = Vec::with_capacity(dataset.memories.len());
+        let mut document_frequency = HashMap::<String, usize>::new();
+        let mut total_doc_len = 0usize;
+
+        for memory in &dataset.memories {
+            let tokens = memory_tokens(memory);
+            let mut term_frequency = HashMap::<String, usize>::new();
+            for token in tokens {
+                *term_frequency.entry(token).or_insert(0) += 1;
+            }
+            for token in term_frequency.keys() {
+                *document_frequency.entry(token.clone()).or_insert(0) += 1;
+            }
+            let length = term_frequency.values().sum::<usize>();
+            total_doc_len += length;
+            docs.push(Bm25Doc {
+                id: memory.id.clone(),
+                scope: memory.scope.clone(),
+                length,
+                term_frequency,
+            });
+        }
+
+        let avg_doc_len = if docs.is_empty() {
+            0.0
+        } else {
+            total_doc_len as f64 / docs.len() as f64
+        };
+        Self {
+            docs,
+            document_frequency,
+            avg_doc_len,
+        }
+    }
+
+    fn search(&self, query: &EvalQuery, top_k: usize, mode: RecallMode) -> Vec<String> {
+        let query_terms = tokenize(&query.query);
+        let mut scored = Vec::new();
+        for doc in &self.docs {
+            if let Some(scope) = &query.scope {
+                if doc.scope != *scope {
+                    continue;
+                }
+            }
+            let score = self.score_doc(doc, &query_terms);
+            if score > 0.0 || matches!(mode, RecallMode::Broad) {
+                scored.push((doc.id.clone(), score, doc.length));
+            }
+        }
+        scored.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.2.cmp(&b.2))
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        scored
+            .into_iter()
+            .take(match mode {
+                RecallMode::Broad => top_k.max(20),
+                _ => top_k,
+            })
+            .map(|(id, _, _)| id)
+            .collect()
+    }
+
+    fn score_doc(&self, doc: &Bm25Doc, query_terms: &BTreeSet<String>) -> f64 {
+        let doc_count = self.docs.len() as f64;
+        let mut score = 0.0;
+        for term in query_terms {
+            let Some(tf) = doc.term_frequency.get(term).copied() else {
+                continue;
+            };
+            let df = self.document_frequency.get(term).copied().unwrap_or(0) as f64;
+            score += bm25_term_score(doc_count, df, tf, doc.length, self.avg_doc_len);
+        }
+        score
+    }
+}
+
+#[derive(Clone, Debug)]
+struct TextCandidateIndex {
+    docs: Vec<Bm25Doc>,
+    postings: HashMap<String, Vec<(usize, usize)>>,
+    document_frequency: HashMap<String, usize>,
+    avg_doc_len: f64,
+}
+
+impl TextCandidateIndex {
+    fn build(dataset: &EvalDataset) -> Self {
+        let mut docs = Vec::with_capacity(dataset.memories.len());
+        let mut postings = HashMap::<String, Vec<(usize, usize)>>::new();
+        let mut document_frequency = HashMap::<String, usize>::new();
+        let mut total_doc_len = 0usize;
+
+        for memory in &dataset.memories {
+            let mut term_frequency = HashMap::<String, usize>::new();
+            for token in memory_tokens(memory) {
+                *term_frequency.entry(token).or_insert(0) += 1;
+            }
+            let doc_index = docs.len();
+            for (token, frequency) in &term_frequency {
+                postings
+                    .entry(token.clone())
+                    .or_default()
+                    .push((doc_index, *frequency));
+                *document_frequency.entry(token.clone()).or_insert(0) += 1;
+            }
+            let length = term_frequency.values().sum::<usize>().max(1);
+            total_doc_len += length;
+            docs.push(Bm25Doc {
+                id: memory.id.clone(),
+                scope: memory.scope.clone(),
+                length,
+                term_frequency,
+            });
+        }
+
+        let avg_doc_len = if docs.is_empty() {
+            0.0
+        } else {
+            total_doc_len as f64 / docs.len() as f64
+        };
+        Self {
+            docs,
+            postings,
+            document_frequency,
+            avg_doc_len,
+        }
+    }
+
+    fn search(&self, query: &EvalQuery, top_k: usize, mode: RecallMode) -> Vec<String> {
+        let query_terms = tokenize(&query.query);
+        let mut scores = HashMap::<usize, f64>::new();
+        let doc_count = self.docs.len() as f64;
+        for term in &query_terms {
+            let Some(postings) = self.postings.get(term) else {
+                continue;
+            };
+            let df = self.document_frequency.get(term).copied().unwrap_or(0) as f64;
+            for (doc_index, tf) in postings {
+                let doc = &self.docs[*doc_index];
+                if let Some(scope) = &query.scope {
+                    if doc.scope != *scope {
+                        continue;
+                    }
+                }
+                *scores.entry(*doc_index).or_insert(0.0) +=
+                    bm25_term_score(doc_count, df, *tf, doc.length, self.avg_doc_len);
+            }
+        }
+
+        let mut scored = scores
+            .into_iter()
+            .filter_map(|(doc_index, score)| {
+                let doc = self.docs.get(doc_index)?;
+                Some((doc.id.clone(), score, doc.length))
+            })
+            .collect::<Vec<_>>();
+        scored.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.2.cmp(&b.2))
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        scored
+            .into_iter()
+            .take(match mode {
+                RecallMode::Broad => top_k.max(20),
+                _ => top_k,
+            })
+            .map(|(id, _, _)| id)
+            .collect()
+    }
+
+    fn score_doc(&self, doc: &Bm25Doc, query_terms: &BTreeSet<String>) -> f64 {
+        let doc_count = self.docs.len() as f64;
+        let mut score = 0.0;
+        for term in query_terms {
+            let Some(tf) = doc.term_frequency.get(term).copied() else {
+                continue;
+            };
+            let df = self.document_frequency.get(term).copied().unwrap_or(0) as f64;
+            score += bm25_term_score(doc_count, df, tf, doc.length, self.avg_doc_len);
+        }
+        score
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PageTokenIndex {
+    text_index: TextCandidateIndex,
+    pages: Vec<PageTokenSummary>,
+}
+
+#[derive(Clone, Debug)]
+struct PageTokenSummary {
+    doc_indexes: Vec<usize>,
+    tokens: BTreeSet<String>,
+}
+
+impl PageTokenIndex {
+    fn build(dataset: &EvalDataset, page_size: usize) -> Self {
+        let text_index = TextCandidateIndex::build(dataset);
+        let mut pages = Vec::new();
+        for chunk in (0..text_index.docs.len()).step_by(page_size.max(1)) {
+            let end = (chunk + page_size.max(1)).min(text_index.docs.len());
+            let doc_indexes = (chunk..end).collect::<Vec<_>>();
+            let mut tokens = BTreeSet::new();
+            for doc_index in &doc_indexes {
+                tokens.extend(text_index.docs[*doc_index].term_frequency.keys().cloned());
+            }
+            pages.push(PageTokenSummary {
+                doc_indexes,
+                tokens,
+            });
+        }
+        Self { text_index, pages }
+    }
+
+    fn search(&self, query: &EvalQuery, top_k: usize, mode: RecallMode) -> Vec<String> {
+        let query_terms = tokenize(&query.query);
+        let mut scored = Vec::new();
+        for page in &self.pages {
+            if !query_terms.iter().any(|term| page.tokens.contains(term)) {
+                continue;
+            }
+            for doc_index in &page.doc_indexes {
+                let doc = &self.text_index.docs[*doc_index];
+                if let Some(scope) = &query.scope {
+                    if doc.scope != *scope {
+                        continue;
+                    }
+                }
+                let score = self.text_index.score_doc(doc, &query_terms);
+                if score > 0.0 {
+                    scored.push((doc.id.clone(), score, doc.length));
+                }
+            }
+        }
+        scored.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.2.cmp(&b.2))
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        scored
+            .into_iter()
+            .take(match mode {
+                RecallMode::Broad => top_k.max(20),
+                _ => top_k,
+            })
+            .map(|(id, _, _)| id)
+            .collect()
+    }
+}
+
+fn memory_tokens(memory: &EvalMemory) -> Vec<String> {
+    tokenize_vec(&format!(
+        "{} {} {}",
+        memory.subject.as_deref().unwrap_or_default(),
+        memory.text,
+        memory.markers.join(" ")
+    ))
+}
+
+fn bm25_term_score(
+    doc_count: f64,
+    document_frequency: f64,
+    term_frequency: usize,
+    doc_len: usize,
+    avg_doc_len: f64,
+) -> f64 {
+    let k1 = 1.2;
+    let b = 0.75;
+    let idf = ((doc_count - document_frequency + 0.5) / (document_frequency + 0.5) + 1.0).ln();
+    let tf = term_frequency as f64;
+    let doc_len = doc_len.max(1) as f64;
+    let normalization = tf + k1 * (1.0 - b + b * doc_len / avg_doc_len.max(1.0));
+    idf * (tf * (k1 + 1.0)) / normalization
+}
+
 fn summarize_run(
     system: String,
     layer: String,
@@ -1018,6 +1888,16 @@ fn summarize_run(
     let mut precision_sum = 0.0;
     let mut context_bytes_sum = 0usize;
     let mut returned_items_sum = 0usize;
+    let mut hot_candidates_sum = 0usize;
+    let mut pages_loaded_sum = 0usize;
+    let mut pages_pruned_sum = 0usize;
+    let mut cells_scanned_sum = 0usize;
+    let mut page_read_micros_sum = 0u64;
+    let mut page_decode_micros_sum = 0u64;
+    let mut scoring_cache_build_micros_sum = 0u64;
+    let mut cell_filtering_micros_sum = 0u64;
+    let mut reranking_micros_sum = 0u64;
+    let mut context_packet_build_micros_sum = 0u64;
     let mut latencies = Vec::with_capacity(results.len());
 
     for (query_index, query) in queries.iter().enumerate() {
@@ -1052,6 +1932,20 @@ fn summarize_run(
             };
             context_bytes_sum += result.context_bytes;
             returned_items_sum += result.returned_ids.len();
+            hot_candidates_sum += result.hot_candidates;
+            pages_loaded_sum += result.pages_loaded;
+            pages_pruned_sum += result.pages_pruned;
+            cells_scanned_sum += result.cells_scanned;
+            page_read_micros_sum = page_read_micros_sum.saturating_add(result.page_read_micros);
+            page_decode_micros_sum =
+                page_decode_micros_sum.saturating_add(result.page_decode_micros);
+            scoring_cache_build_micros_sum = scoring_cache_build_micros_sum
+                .saturating_add(result.scoring_cache_build_micros);
+            cell_filtering_micros_sum =
+                cell_filtering_micros_sum.saturating_add(result.cell_filtering_micros);
+            reranking_micros_sum = reranking_micros_sum.saturating_add(result.reranking_micros);
+            context_packet_build_micros_sum = context_packet_build_micros_sum
+                .saturating_add(result.context_packet_build_micros);
             latencies.push(result.latency_micros);
         }
     }
@@ -1073,6 +1967,16 @@ fn summarize_run(
         p95_latency_micros: percentile(&latencies, 95.0),
         avg_context_bytes: context_bytes_sum / samples,
         avg_returned_items: returned_items_sum as f64 / samples as f64,
+        avg_hot_candidates: hot_candidates_sum as f64 / samples as f64,
+        avg_pages_loaded: pages_loaded_sum as f64 / samples as f64,
+        avg_pages_pruned: pages_pruned_sum as f64 / samples as f64,
+        avg_cells_scanned: cells_scanned_sum as f64 / samples as f64,
+        avg_page_read_micros: page_read_micros_sum / samples as u64,
+        avg_page_decode_micros: page_decode_micros_sum / samples as u64,
+        avg_scoring_cache_build_micros: scoring_cache_build_micros_sum / samples as u64,
+        avg_cell_filtering_micros: cell_filtering_micros_sum / samples as u64,
+        avg_reranking_micros: reranking_micros_sum / samples as u64,
+        avg_context_packet_build_micros: context_packet_build_micros_sum / samples as u64,
     }
 }
 
@@ -1219,7 +2123,7 @@ fn text_report(report: &EvalReport) -> String {
     ));
     output.push_str("\n\n");
     output.push_str(&format!(
-        "{:<28} {:<8} {:<18} {:<8} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8} {:>9} {:>8}",
+        "{:<28} {:<18} {:<18} {:<8} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8} {:>9} {:>8}",
         "system",
         "layer",
         "index",
@@ -1234,11 +2138,11 @@ fn text_report(report: &EvalReport) -> String {
         "items"
     ));
     output.push('\n');
-    output.push_str(&"-".repeat(134));
+    output.push_str(&"-".repeat(144));
     output.push('\n');
     for run in &report.runs {
         output.push_str(&format!(
-            "{:<28} {:<8} {:<18} {:<8} {:>7.3} {:>7.3} {:>7.3} {:>8} {:>8} {:>8} {:>9} {:>8.2}",
+            "{:<28} {:<18} {:<18} {:<8} {:>7.3} {:>7.3} {:>7.3} {:>8} {:>8} {:>8} {:>9} {:>8.2}",
             run.system,
             run.layer,
             run.index_kind,
@@ -1253,6 +2157,46 @@ fn text_report(report: &EvalReport) -> String {
             run.avg_returned_items
         ));
         output.push('\n');
+    }
+    output.push_str("\nwork counters (averages):\n");
+    output.push_str(&format!(
+        "{:<28} {:<18} {:<8} {:>10} {:>10} {:>10} {:>12}\n",
+        "system", "layer", "mode", "hot_cand", "pages", "pruned", "cells_scan"
+    ));
+    output.push_str(&"-".repeat(106));
+    output.push('\n');
+    for run in &report.runs {
+        output.push_str(&format!(
+            "{:<28} {:<18} {:<8} {:>10.1} {:>10.1} {:>10.1} {:>12.1}\n",
+            run.system,
+            run.layer,
+            run.mode,
+            run.avg_hot_candidates,
+            run.avg_pages_loaded,
+            run.avg_pages_pruned,
+            run.avg_cells_scanned
+        ));
+    }
+    output.push_str("\ntiming breakdown (averages, microseconds):\n");
+    output.push_str(&format!(
+        "{:<28} {:<18} {:<8} {:>8} {:>8} {:>10} {:>10} {:>8} {:>10}\n",
+        "system", "layer", "mode", "read", "decode", "score_build", "filter", "rerank", "packet"
+    ));
+    output.push_str(&"-".repeat(116));
+    output.push('\n');
+    for run in &report.runs {
+        output.push_str(&format!(
+            "{:<28} {:<18} {:<8} {:>8} {:>8} {:>10} {:>10} {:>8} {:>10}\n",
+            run.system,
+            run.layer,
+            run.mode,
+            run.avg_page_read_micros,
+            run.avg_page_decode_micros,
+            run.avg_scoring_cache_build_micros,
+            run.avg_cell_filtering_micros,
+            run.avg_reranking_micros,
+            run.avg_context_packet_build_micros
+        ));
     }
     output.push_str("\nnotes:\n");
     for note in &report.notes {
@@ -1300,6 +2244,10 @@ fn default_store_root() -> PathBuf {
 }
 
 fn tokenize(input: &str) -> BTreeSet<String> {
+    tokenize_vec(input).into_iter().collect()
+}
+
+fn tokenize_vec(input: &str) -> Vec<String> {
     input
         .split(|ch: char| !ch.is_ascii_alphanumeric())
         .filter(|part| part.len() > 1)
@@ -1378,11 +2326,106 @@ mod tests {
                 ]]
             }
         ]);
-        let dataset = convert_longmemeval(&value, "test".to_string(), None, None).expect("convert");
+        let dataset =
+            convert_longmemeval(&value, "test".to_string(), None, None, IngestMode::RawTurn)
+                .expect("convert");
         validate_dataset(&dataset).unwrap();
         assert_eq!(dataset.memories.len(), 2);
         assert_eq!(dataset.queries.len(), 1);
         assert_eq!(dataset.queries[0].relevant_ids.len(), 1);
+    }
+
+    #[test]
+    fn converts_longmemeval_session_level_evidence() {
+        let value = serde_json::json!([
+            {
+                "question_id": "q1",
+                "question_type": "single-session-user",
+                "question": "What color is the notebook?",
+                "haystack_session_ids": ["s1", "s2"],
+                "answer_session_ids": ["s1"],
+                "haystack_sessions": [
+                    [
+                        {"role": "user", "content": "The notebook is blue."},
+                        {"role": "assistant", "content": "Got it."}
+                    ],
+                    [
+                        {"role": "user", "content": "The folder is red."}
+                    ]
+                ]
+            }
+        ]);
+        let dataset = convert_longmemeval(
+            &value,
+            "test".to_string(),
+            None,
+            None,
+            IngestMode::SessionDoc,
+        )
+        .expect("convert");
+        validate_dataset(&dataset).unwrap();
+        assert_eq!(dataset.memories.len(), 2);
+        assert_eq!(dataset.queries[0].relevant_ids.len(), 1);
+        assert!(dataset.queries[0].relevant_ids[0].ends_with(":session"));
+    }
+
+    #[test]
+    fn converts_longmemeval_session_chunks_with_evidence() {
+        let turns = (0..10)
+            .map(|index| {
+                serde_json::json!({
+                    "role": "user",
+                    "content": format!("Context statement number {index} with useful detail."),
+                    "has_answer": index == 9
+                })
+            })
+            .collect::<Vec<_>>();
+        let value = serde_json::json!([{
+            "question_id": "q1",
+            "question_type": "single-session-user",
+            "question": "Which statement has the answer?",
+            "haystack_session_ids": ["s1"],
+            "answer_session_ids": ["s1"],
+            "haystack_sessions": [turns]
+        }]);
+        let dataset = convert_longmemeval(
+            &value,
+            "test".to_string(),
+            None,
+            None,
+            IngestMode::SessionChunk,
+        )
+        .expect("convert");
+
+        validate_dataset(&dataset).unwrap();
+        assert_eq!(dataset.memories.len(), 2);
+        assert_eq!(dataset.queries[0].relevant_ids.len(), 1);
+        assert!(dataset.queries[0].relevant_ids[0].ends_with("chunk-1"));
+    }
+
+    #[test]
+    fn converts_longmemeval_key_fact_evidence() {
+        let value = serde_json::json!([
+            {
+                "question_id": "q1",
+                "question_type": "single-session-user",
+                "question": "What color is the notebook?",
+                "haystack_session_ids": ["s1"],
+                "answer_session_ids": ["s1"],
+                "haystack_sessions": [[
+                    {"role": "user", "content": "The notebook is blue. The folder is red.", "has_answer": true}
+                ]]
+            }
+        ]);
+        let dataset =
+            convert_longmemeval(&value, "test".to_string(), None, None, IngestMode::KeyFact)
+                .expect("convert");
+        validate_dataset(&dataset).unwrap();
+        assert_eq!(dataset.memories.len(), 2);
+        assert!(dataset.queries[0]
+            .relevant_ids
+            .iter()
+            .all(|id| id.contains(":fact-")));
     }
 
     #[test]
@@ -1415,6 +2458,33 @@ mod tests {
     }
 
     #[test]
+    fn bm25_baseline_finds_generated_relevant_memory() {
+        let dataset = generate_dataset(GeneratedProfile::Tiny);
+        let query = &dataset.queries[0];
+        let index = Bm25Index::build(&dataset);
+        let returned = index.search(query, 5, RecallMode::Focused);
+        assert!(returned.contains(&query.relevant_ids[0]));
+    }
+
+    #[test]
+    fn text_candidate_index_finds_generated_relevant_memory() {
+        let dataset = generate_dataset(GeneratedProfile::Tiny);
+        let query = &dataset.queries[0];
+        let index = TextCandidateIndex::build(&dataset);
+        let returned = index.search(query, 5, RecallMode::Focused);
+        assert!(returned.contains(&query.relevant_ids[0]));
+    }
+
+    #[test]
+    fn page_token_index_finds_generated_relevant_memory() {
+        let dataset = generate_dataset(GeneratedProfile::Tiny);
+        let query = &dataset.queries[0];
+        let index = PageTokenIndex::build(&dataset, 8);
+        let returned = index.search(query, 5, RecallMode::Focused);
+        assert!(returned.contains(&query.relevant_ids[0]));
+    }
+
+    #[test]
     fn run_summary_metrics_are_bounded() {
         let queries = vec![EvalQuery {
             id: "q1".to_string(),
@@ -1427,6 +2497,11 @@ mod tests {
             returned_ids: vec!["m1".to_string(), "m2".to_string()],
             latency_micros: 10,
             context_bytes: 100,
+            hot_candidates: 2,
+            pages_loaded: 0,
+            pages_pruned: 0,
+            cells_scanned: 2,
+            ..QueryResult::default()
         }];
         let summary = summarize_run(
             "test".to_string(),
@@ -1441,5 +2516,14 @@ mod tests {
         assert_eq!(summary.hit_at_k, 1.0);
         assert_eq!(summary.recall_at_k, 1.0);
         assert_eq!(summary.precision_at_k, 0.5);
+
+        let report = EvalReport {
+            dataset: summarize_dataset(&generate_dataset(GeneratedProfile::Tiny)),
+            runs: vec![summary],
+            notes: Vec::new(),
+        };
+        let rendered = text_report(&report);
+        assert!(rendered.contains("timing breakdown (averages, microseconds):"));
+        assert!(rendered.contains("score_build"));
     }
 }
