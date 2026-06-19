@@ -51,7 +51,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 ## Platform Verification
 
 - Windows PowerShell scripts are locally verified on the current Windows host.
-- Linux shell scripts have a prior WSL Ubuntu verification baseline. The current MCP-smoke revision was not rerun locally because no WSL distribution is currently registered; CI runs the POSIX smoke on Ubuntu.
+- Linux shell scripts, including the standard MCP smoke revision, are locally verified through WSL2 Ubuntu with Rust 1.96.0 and Bash 5.3.9.
 - macOS uses the same POSIX smoke in CI, but no local macOS host verification is claimed.
 
 ## Install From Source
