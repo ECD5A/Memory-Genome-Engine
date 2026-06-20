@@ -15,7 +15,7 @@ Current implementation status:
 - Encrypted init without passphrase is still allowed as a locked marker/config state, but payload operations remain locked until key metadata exists.
 - Encrypted-mode payload operations do not silently fall back to plaintext; they fail locked/authenticated instead.
 - `mge config security` reads safe manifest-level security status without opening payloads.
-- Indexes, marker dictionary, page catalog summaries, Markdown export, and selected manifest metadata are not encrypted in this pass.
+- Indexes, marker dictionary, page catalog summaries, Markdown export, and selected manifest metadata are not encrypted in the current security model.
 - JSON remains protocol/debug report output only, not runtime storage.
 
 ## Core Flow
@@ -70,7 +70,7 @@ Encrypted when initialized with key metadata:
 - sealed page payloads in `pages/*.mgp`;
 - the key-check block inside manifest security metadata.
 
-Still plaintext by design in this pass:
+Plaintext by design in the current security model:
 
 - binary frame headers: magic, file kind, version, codec id, payload length, checksum;
 - manifest safe metadata, security mode, KDF salt/parameters, AEAD scheme/version;
@@ -80,7 +80,7 @@ Still plaintext by design in this pass:
 - Markdown export: `exports/memory.md`;
 - process memory while the store is unlocked.
 
-Encrypted indexes, blind marker tokens, and encrypted export are separate future packages. Index/catalog metadata remains plaintext for deterministic search, pruning, validation, and rebuild.
+Encrypted indexes, blind marker tokens, and encrypted export are separate future work. Index/catalog metadata remains plaintext for deterministic search, pruning, validation, and rebuild.
 
 ## Encrypted Metadata And Index Risk Model
 

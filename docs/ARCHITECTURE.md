@@ -310,7 +310,7 @@ The page pipeline is structured for:
 encode page -> compress page -> encrypt page -> write page
 ```
 
-Current security status: unencrypted stores still use `NoSecurity` as an honest pass-through implementation. Encrypted stores with key metadata authenticate and encrypt hot payloads in `hot/hot.mgl`, checkpoint payloads in `hot/snapshot.mgs`, and sealed page payloads in `pages/*.mgp`. Page frame headers, marker dictionary, candidate indexes, page catalog summaries, and Markdown export remain plaintext by design in this package. The threat model and implementation status live in [Security model](SECURITY.md).
+Unencrypted stores use `NoSecurity` as an explicit pass-through implementation. Encrypted stores with key metadata authenticate and encrypt hot payloads in `hot/hot.mgl`, checkpoint payloads in `hot/snapshot.mgs`, and sealed page payloads in `pages/*.mgp`. Page frame headers, marker dictionary, candidate indexes, page catalog summaries, and Markdown export remain plaintext by design. The threat model and implementation status live in [Security model](SECURITY.md).
 
 Future security layers:
 

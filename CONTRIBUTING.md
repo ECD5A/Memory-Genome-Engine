@@ -38,9 +38,9 @@ Keep Markdown consolidated:
 - short product entry: `README.md` / `README.ru.md`;
 - quick commands: `QUICKSTART.md`;
 - architecture, security, integration, and release details under `docs/`;
-- keep Russian public documentation limited to `README.ru.md` unless a new mirror is explicitly approved.
+- package-specific notes in the SDK-local README files.
 
-Do not recreate removed long-form docs such as `docs/MCP.md`, `docs/SDK.md`, `docs/BENCHMARKS.md`, `docs/ROADMAP.md`, `examples/basic_usage.md`, or `examples/agent_workflow.md`.
+Before adding a Markdown file, prefer extending the existing canonical document when the topic already has a clear home. Keep translated entry pages synchronized in meaning without duplicating long reference sections.
 
 ## Pull Request Style
 

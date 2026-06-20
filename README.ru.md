@@ -12,38 +12,38 @@
   <sub><a href="https://github.com/ECD5A/Memory-Genome-Engine/blob/main/README.md">English version</a></sub>
 </p>
 
-Memory Genome Engine - local-first движок структурированной памяти для AI-агентов. Он хранит типизированные `MemoryCell`, описывает их через `MarkerGenome`, переносит холодную память в sealed binary pages и возвращает task-relevant `ContextPacket` для agent workflows.
+Memory Genome Engine — локальный движок структурированной памяти для ИИ-агентов. Он хранит типизированные записи `MemoryCell`, описывает их через `MarkerGenome`, переносит неактивную память в запечатанные бинарные страницы и формирует `ContextPacket` с контекстом для текущей задачи.
 
 <p align="center">
   <img src="assets/mge-console-demo-ru.gif" alt="Терминальная панель Memory Genome Engine" width="100%">
 </p>
 
-## Что Он Делает
+## Возможности
 
-- Запоминает facts, decisions, preferences, notes и agent observations.
-- Держит свежую память в быстром L1 Hot RAM с durable binary persistence.
-- Запечатывает старую память в immutable binary pages с candidate indexes.
-- Поддерживает focused, broad и full-scope recall.
-- Импортирует существующие Markdown-заметки как разовый migration input и поддерживает мягкое обслуживание статусов памяти.
-- Даёт CLI, TUI, MCP-compatible stdio server, Python SDK и TypeScript SDK.
-- Поддерживает opt-in encrypted stores для hot payloads, snapshots и sealed page payloads.
-- Использует binary runtime storage; JSON только protocol/debug report output.
+- Сохраняет факты, решения, пользовательские предпочтения, заметки и результаты работы агентов.
+- Держит активную память в быстром слое L1 Hot RAM и сохраняет её в бинарный журнал.
+- Переносит накопленную память в неизменяемые запечатанные страницы с индексами кандидатов.
+- Поддерживает режимы поиска `focused`, `broad` и `full-scope`.
+- Импортирует существующие Markdown-заметки и позволяет безопасно менять статус записей.
+- Предоставляет CLI, TUI, локальный MCP-совместимый stdio-сервер, Python SDK и TypeScript SDK.
+- Поддерживает создаваемые по запросу зашифрованные хранилища для активных записей, снимков и содержимого запечатанных страниц.
+- Использует только бинарные форматы во время работы; JSON применяется для протокола и отладочных отчётов.
 
-## Измеренный Baseline
+## Измеренная производительность
 
-Воспроизводимый generated workload в release mode показывает инженерный baseline для default Exact index path:
+Воспроизводимый синтетический сценарий в оптимизированной сборке показывает базовые характеристики стандартного точного индекса:
 
 | Метрика | Результат |
 |---|---:|
-| Workload | 1 280 memories / 80 queries |
-| Focused Hit@5 / Recall@5 | 1.00 / 1.00 |
-| Hot focused recall, avg / p95 | 0.49 / 0.57 ms |
-| Repeated sealed focused recall, avg / p95 | 0.28 / 0.39 ms |
-| Cold store open + focused recall, avg | 2.39 ms |
+| Набор данных | 1 280 записей / 80 запросов |
+| Точность `focused`, Hit@5 / Recall@5 | 1.00 / 1.00 |
+| Поиск в Hot RAM, среднее / p95 | 0.49 / 0.57 мс |
+| Повторный поиск по запечатанным страницам, среднее / p95 | 0.28 / 0.39 мс |
+| Холодное открытие хранилища и поиск, среднее | 2.39 мс |
 
-Измерено на Intel Core i7-9750H, Windows 10 x64, Rust 1.95.0, commit `14da83b`, с пятью timing repeats. Это synthetic correctness/performance baseline, а не сравнение с конкурентами и не benchmark качества финального ответа LLM. Методика и ограничения описаны в [release-документации](docs/RELEASE.md#measured-engineering-baseline).
+Измерения выполнены на Intel Core i7-9750H под Windows 10 x64, Rust 1.95.0, commit `14da83b`, с пятью повторами. Это проверка корректности и скорости движка на синтетическом наборе, а не сравнение с конкурентами и не оценка качества ответа языковой модели. Методика и ограничения приведены в [документации по выпуску](docs/RELEASE.md#measured-engineering-baseline).
 
-## Быстрый Старт
+## Быстрый старт
 
 ```bash
 cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server
@@ -54,14 +54,14 @@ cargo run -p mge-cli -- seal
 cargo run -p mge-cli -- validate --deep
 ```
 
-Terminal UI:
+Терминальный интерфейс:
 
 ```bash
 cargo run -p mge-cli -- tui
 cargo run -p mge-cli -- setup --help
 ```
 
-## Encrypted Store
+## Зашифрованное хранилище
 
 ```bash
 export MGE_PASSPHRASE="use-a-real-secret"
@@ -72,9 +72,9 @@ cargo run -p mge-cli -- seal --passphrase-env MGE_PASSPHRASE
 cargo run -p mge-cli -- validate --deep --passphrase-env MGE_PASSPHRASE
 ```
 
-Payload encryption защищает hot records, snapshots и sealed page payloads. Metadata вроде marker dictionary, indexes, catalog summaries, Markdown export и process memory while unlocked остаётся plaintext by design. Подробнее: [Security](docs/SECURITY.md).
+Шифрование содержимого защищает активные записи, снимки и содержимое запечатанных страниц. Словарь маркеров, индексы, сводные данные каталога, экспорт Markdown и память процесса после разблокировки остаются открытыми по принятой модели безопасности. Подробнее см. в разделе [«Модель безопасности»](docs/SECURITY.md).
 
-## Agent Integration
+## Интеграция с агентами
 
 CLI:
 
@@ -82,13 +82,13 @@ CLI:
 cargo run -p mge-cli -- recall "project context" --mode broad --scope my_project
 ```
 
-MCP stdio server:
+MCP-совместимый stdio-сервер:
 
 ```bash
 cargo run -p mge-cli --bin mge-mcp-server
 ```
 
-SDK examples:
+Примеры SDK:
 
 ```bash
 python examples/python_agent_host.py
@@ -97,21 +97,21 @@ node examples/typescript_agent_host.ts
 
 ## Документация
 
-- [Quickstart](QUICKSTART.md)
+- [Быстрый старт](QUICKSTART.md)
 - [Архитектура](docs/ARCHITECTURE.md)
-- [Security model](docs/SECURITY.md)
+- [Модель безопасности](docs/SECURITY.md)
 - [Интеграция / MCP / SDK](docs/INTEGRATION.md)
-- [Release checks](docs/RELEASE.md)
+- [Сборка и выпуск](docs/RELEASE.md)
 
-## Community
+## Сообщество
 
-- [License](LICENSE)
-- [Notice](NOTICE)
-- [Security policy](SECURITY.md)
-- [Contributing](CONTRIBUTING.md)
-- [Code of conduct](CODE_OF_CONDUCT.md)
+- [Лицензия](LICENSE)
+- [Уведомление об авторских правах](NOTICE)
+- [Политика безопасности](SECURITY.md)
+- [Правила участия](CONTRIBUTING.md)
+- [Кодекс поведения](CODE_OF_CONDUCT.md)
 
-## Donate
+## Поддержать проект
 
 Если Memory Genome Engine полезен для вашей работы, проект можно поддержать здесь:
 
@@ -120,7 +120,7 @@ node examples/typescript_agent_host.ts
 
 ## Контакты
 
-По вопросам коммерческой интеграции, поддержки, сотрудничества и партнёрства:
+Открыт к обсуждению коммерческой интеграции, поддержки, сотрудничества и партнёрства:
 
 <p>
   <a href="mailto:stelmak159@gmail.com" aria-label="Email"><img alt="Email" height="24" src="https://cdn.simpleicons.org/gmail/EA4335"></a>
