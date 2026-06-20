@@ -196,6 +196,55 @@ cargo run --release --manifest-path tools/agent-memory-eval/Cargo.toml -- \
 
 Generated fixtures are deterministic but synthetic. Local LongMemEval/LoCoMo adapters require user-supplied datasets; results measure retrieval, not final LLM answer quality, and must not be presented as cross-project claims without identical corpora and settings.
 
+## Measured Engineering Baseline
+
+The public baseline was measured from commit `14da83b` on:
+
+- Intel Core i7-9750H, 6 cores / 12 logical processors;
+- Windows 10 x64 (`10.0.19045`);
+- Rust 1.95.0;
+- optimized release builds;
+- five timing repeats per query.
+
+Reproduce the deterministic generated retrieval run:
+
+```bash
+cargo run --locked --release --manifest-path tools/agent-memory-eval/Cargo.toml -- \
+  --profile medium --ingest-mode session-chunk --top-k 5 --repeats 5 \
+  --index both --modes focused-broad --baselines all --output json \
+  --report target/eval-public-baseline.json
+```
+
+Default Exact index results:
+
+| Metric | Result |
+|---|---:|
+| Memories / queries | 1,280 / 80 |
+| Focused Hit@5 / Recall@5 | 1.00 / 1.00 |
+| Hot focused recall, avg / p50 / p95 | 0.491 / 0.479 / 0.570 ms |
+| Repeated sealed focused recall, avg / p50 / p95 | 0.278 / 0.287 / 0.386 ms |
+| Cold focused recall excluding open, avg | 1.783 ms |
+| Cold store open + focused recall, avg | 2.388 ms |
+
+A second run used the repository's tracked text/source files as a local corpus performance workload:
+
+```bash
+cargo run --locked --release -p mge-cli --bin mge-corpus-bench -- \
+  --corpus . --store-root <TEMP_DIR_OUTSIDE_REPOSITORY> \
+  --max-files 300 --max-bytes 52428800 --chunk-lines 40 --repeats 5 --seed 1
+```
+
+That run imported 1,068,576 bytes into 985 chunks and 46 sealed pages. The Exact store occupied 3,402,654 bytes. Hot focused recall averaged 0.356 ms, repeated sealed focused recall 0.092 ms, cold sealed focused recall 1.838 ms, and repeated locality reduced focused recall latency by 94%.
+
+Interpretation limits:
+
+- The generated workload has deterministic, identifiable relevant records; it verifies retrieval correctness and engine behavior, not open-domain reasoning.
+- The repository corpus run is a performance workload. Its generated marker-targeted queries are not a real-world retrieval-quality score.
+- LongMemEval and LoCoMo adapters are implemented, but their full datasets were not installed for this run, so no full-dataset result is claimed.
+- Timing changes with hardware, filesystem state, background load, corpus shape, and ingestion settings.
+- BM25, keyword, text-candidate, and page-token rows emitted by the eval harness are algorithmic diagnostics, not complete competing memory products.
+- JSON reports under `target/` are generated development artifacts and are not runtime storage or committed release assets.
+
 ## Benchmark Smoke
 
 Run benchmark smoke only when benchmark output or performance-related code changes:

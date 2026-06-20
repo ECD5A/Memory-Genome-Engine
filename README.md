@@ -29,6 +29,20 @@ Memory Genome Engine is a local-first structured memory engine for AI agents. It
 - Supports opt-in encrypted stores for hot payloads, snapshots, and sealed page payloads.
 - Uses binary runtime storage; JSON is protocol/debug report output only.
 
+## Measured Baseline
+
+A deterministic release-mode workload provides a reproducible engineering baseline for the default Exact index path:
+
+| Metric | Result |
+|---|---:|
+| Workload | 1,280 memories / 80 queries |
+| Focused Hit@5 / Recall@5 | 1.00 / 1.00 |
+| Hot focused recall, avg / p95 | 0.49 / 0.57 ms |
+| Repeated sealed focused recall, avg / p95 | 0.28 / 0.39 ms |
+| Cold store open + focused recall, avg | 2.39 ms |
+
+Measured on an Intel Core i7-9750H, Windows 10 x64, Rust 1.95.0, commit `14da83b`, with five timing repeats. This is a synthetic correctness/performance baseline, not a competitor comparison or final LLM-answer benchmark. See the [method and limitations](docs/RELEASE.md#measured-engineering-baseline).
+
 ## Quick Start
 
 ```bash

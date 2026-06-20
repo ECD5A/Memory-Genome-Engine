@@ -29,10 +29,24 @@ Memory Genome Engine - local-first движок структурированно
 - Поддерживает opt-in encrypted stores для hot payloads, snapshots и sealed page payloads.
 - Использует binary runtime storage; JSON только protocol/debug report output.
 
+## Измеренный Baseline
+
+Воспроизводимый generated workload в release mode показывает инженерный baseline для default Exact index path:
+
+| Метрика | Результат |
+|---|---:|
+| Workload | 1 280 memories / 80 queries |
+| Focused Hit@5 / Recall@5 | 1.00 / 1.00 |
+| Hot focused recall, avg / p95 | 0.49 / 0.57 ms |
+| Repeated sealed focused recall, avg / p95 | 0.28 / 0.39 ms |
+| Cold store open + focused recall, avg | 2.39 ms |
+
+Измерено на Intel Core i7-9750H, Windows 10 x64, Rust 1.95.0, commit `14da83b`, с пятью timing repeats. Это synthetic correctness/performance baseline, а не сравнение с конкурентами и не benchmark качества финального ответа LLM. Методика и ограничения описаны в [release-документации](docs/RELEASE.md#measured-engineering-baseline).
+
 ## Быстрый Старт
 
 ```bash
-cargo build
+cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server
 cargo run -p mge-cli -- setup
 cargo run -p mge-cli -- remember "User prefers concise technical answers" --kind user_preference --scope global --trust user_confirmed
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
