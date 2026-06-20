@@ -8,6 +8,22 @@ use serde_json::{json, Value};
 use tempfile::tempdir;
 
 #[test]
+fn product_package_versions_are_synchronized() {
+    let root = repo_root();
+    let cli_version = env!("CARGO_PKG_VERSION");
+    let core_manifest = fs::read_to_string(root.join("crates/mge-core/Cargo.toml")).unwrap();
+    let python_manifest = fs::read_to_string(root.join("sdk/python/pyproject.toml")).unwrap();
+    let typescript_manifest: Value = serde_json::from_str(
+        &fs::read_to_string(root.join("sdk/typescript/package.json")).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(toml_package_version(&core_manifest), Some(cli_version));
+    assert_eq!(toml_package_version(&python_manifest), Some(cli_version));
+    assert_eq!(typescript_manifest["version"], cli_version);
+}
+
+#[test]
 fn cli_milestone_flow_outputs_context_stats_and_validation_json() {
     let dir = tempdir().unwrap();
     let store = dir.path().join(".memory-genome");
@@ -326,6 +342,17 @@ fn cli_fast_profile_initializes_compact_storage_defaults() {
     assert_eq!(stats["current_page_clusterer"], "scope_kind");
     assert_eq!(stats["current_durability"], "balanced");
     assert_eq!(stats["current_security_mode"], "unencrypted");
+
+    let repeated = run_mge(&store, &["init"]);
+    let repeated_stdout = String::from_utf8_lossy(&repeated.stdout);
+    assert!(repeated_stdout.contains("already initialized"));
+    assert!(repeated_stdout.contains("profile=existing"));
+    assert!(repeated_stdout.contains("compression=zstd"));
+
+    let mismatch = run_mge_failure(&store, &["init", "--encrypted"]);
+    assert!(
+        String::from_utf8_lossy(&mismatch.stderr).contains("init does not migrate existing stores")
+    );
 }
 
 #[test]
@@ -372,7 +399,13 @@ fn cli_setup_help_and_safe_first_run_workflow_are_available() {
     assert!(store.join("manifest.mgm").is_file());
 
     let second = run_mge(&store, &["setup"]);
-    assert!(String::from_utf8_lossy(&second.stdout).contains("already initialized"));
+    let second_stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(second_stdout.contains("already initialized"));
+    assert!(second_stdout.contains("profile: existing"));
+
+    let mismatch = run_mge_failure(&store, &["setup", "--encrypted"]);
+    assert!(String::from_utf8_lossy(&mismatch.stderr)
+        .contains("setup does not migrate existing stores"));
 }
 
 #[test]
@@ -2607,6 +2640,23 @@ fn command_available(command: &str) -> bool {
 
 fn json_safe_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+fn toml_package_version(manifest: &str) -> Option<&str> {
+    let mut in_package_section = false;
+    for line in manifest.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_package_section = matches!(line, "[package]" | "[project]");
+            continue;
+        }
+        if in_package_section {
+            if let Some(value) = line.strip_prefix("version = ") {
+                return value.strip_prefix('"')?.strip_suffix('"');
+            }
+        }
+    }
+    None
 }
 
 fn file_contains_bytes(path: &Path, needle: &[u8]) -> bool {

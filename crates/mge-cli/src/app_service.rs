@@ -38,12 +38,22 @@ impl AppService {
 
     pub fn setup_fast(&self, encrypted: bool) -> Result<SetupReport> {
         if self.store.join("manifest.mgm").exists() {
+            let security = MemoryEngine::security_config_at(&self.store).with_context(|| {
+                format!("failed to inspect existing store {}", self.store.display())
+            })?;
+            let store_is_encrypted = security.mode.is_encrypted();
+            if encrypted && !store_is_encrypted {
+                bail!(
+                    "store {} is already initialized without encryption; setup does not migrate existing stores",
+                    self.store.display()
+                );
+            }
             return Ok(SetupReport {
                 store_path: self.store.clone(),
                 already_initialized: true,
-                encrypted,
+                encrypted: store_is_encrypted,
                 passphrase_env: self.passphrase_env.clone(),
-                profile: "fast".to_string(),
+                profile: "existing".to_string(),
             });
         }
 
@@ -950,6 +960,36 @@ mod tests {
 
         let second = service.setup_fast(false).unwrap();
         assert!(second.already_initialized);
+        assert!(!second.encrypted);
+        assert_eq!(second.profile, "existing");
+    }
+
+    #[test]
+    fn setup_fast_reports_existing_encrypted_store_from_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join(".memory-genome");
+        let env_name = "MGE_APP_SERVICE_SETUP_EXISTING_PASSPHRASE";
+        std::env::set_var(env_name, "existing encrypted setup passphrase");
+        let service = AppService::new(&store, Some(env_name.to_string()));
+        service.setup_fast(true).unwrap();
+        std::env::remove_var(env_name);
+        let report = AppService::new(&store, None).setup_fast(false).unwrap();
+
+        assert!(report.already_initialized);
+        assert!(report.encrypted);
+        assert_eq!(report.profile, "existing");
+    }
+
+    #[test]
+    fn setup_fast_does_not_claim_to_encrypt_existing_plaintext_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join(".memory-genome");
+        let service = AppService::new(&store, None);
+        service.setup_fast(false).unwrap();
+
+        let err = service.setup_fast(true).unwrap_err();
+
+        assert!(err.to_string().contains("does not migrate existing stores"));
     }
 
     #[test]

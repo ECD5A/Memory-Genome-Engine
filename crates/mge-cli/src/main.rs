@@ -362,6 +362,7 @@ fn main() -> Result<()> {
             encrypted,
             passphrase_env,
         } => {
+            let already_initialized = cli.store.join("manifest.mgm").exists();
             let options = init_options_from_args(
                 &profile,
                 page_codec.as_deref(),
@@ -379,16 +380,34 @@ fn main() -> Result<()> {
             )
             .with_context(|| format!("failed to initialize {}", cli.store.display()))?;
             let security = engine.security_config();
+            if already_initialized && encrypted && !security.mode.is_encrypted() {
+                bail!(
+                    "store {} is already initialized without encryption; init does not migrate existing stores",
+                    cli.store.display()
+                );
+            }
+            let storage = engine.storage_config();
+            let state = if already_initialized {
+                "Memory Genome store already initialized"
+            } else {
+                "Initialized Memory Genome store"
+            };
+            let profile = if already_initialized {
+                "existing"
+            } else {
+                profile.as_str()
+            };
             println!(
-                "Initialized Memory Genome store at {} (profile={}, security_mode={}, page_codec={}, compression={}, page_clusterer={}, index_kind={}, durability={})",
+                "{} at {} (profile={}, security_mode={}, page_codec={}, compression={}, page_clusterer={}, index_kind={}, durability={})",
+                state,
                 engine.root().display(),
                 profile,
                 security.mode,
-                options.page_codec,
-                options.compression,
-                options.page_clusterer,
-                options.index_kind,
-                options.durability
+                storage.page_codec,
+                storage.compression,
+                storage.page_clusterer,
+                storage.index_kind,
+                storage.durability
             );
         }
         Commands::Remember {
