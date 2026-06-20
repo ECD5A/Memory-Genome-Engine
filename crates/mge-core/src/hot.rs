@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -501,8 +501,7 @@ impl HotStore {
             None => (CodecId::MessagePack, plaintext),
         };
         let record = binary::encode_frame(FileKind::HotRecord, codec, &payload)?;
-        let header = fs::read(&self.path)?;
-        binary::decode_frame_at(&header, 0, FileKind::HotLog)?;
+        self.validate_log_header()?;
 
         let mut file = OpenOptions::new().append(true).open(&self.path)?;
         file.write_all(&record)?;
@@ -510,6 +509,14 @@ impl HotStore {
             file.flush()?;
             file.sync_all()?;
         }
+        Ok(())
+    }
+
+    fn validate_log_header(&self) -> Result<()> {
+        let mut header = [0u8; binary::HEADER_LEN];
+        let mut file = OpenOptions::new().read(true).open(&self.path)?;
+        file.read_exact(&mut header)?;
+        binary::decode_frame(&header, FileKind::HotLog)?;
         Ok(())
     }
 
@@ -673,7 +680,14 @@ fn decode_hot_records_from(
         let (record, next_offset) =
             match binary::decode_frame_at(content, offset, FileKind::HotRecord) {
                 Ok(decoded) => decoded,
-                Err(_) => {
+                Err(err) => {
+                    if binary::valid_frame_exists_after(
+                        content,
+                        offset.saturating_add(1),
+                        FileKind::HotRecord,
+                    ) {
+                        return Err(err);
+                    }
                     return Ok(HotRecovery {
                         cells,
                         valid_log_offset: offset,
@@ -894,5 +908,57 @@ mod tests {
         assert!(layer
             .lexical_scores(&query_tokens, Some("project"), None, &allowed_statuses)
             .is_empty());
+    }
+
+    #[test]
+    fn hot_log_header_validation_ignores_trailing_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hot.mgl");
+        let store = HotStore::new(&path);
+        store.ensure_exists().unwrap();
+
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(&vec![0xff; 1024 * 1024]).unwrap();
+        drop(file);
+
+        store.validate_log_header().unwrap();
+    }
+
+    #[test]
+    fn hot_recovery_does_not_silently_discard_records_after_middle_corruption() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hot.mgl");
+        let store = HotStore::new(&path);
+        store.ensure_exists().unwrap();
+        for id in 1..=3 {
+            let cell = MemoryCell::new(
+                id,
+                MemoryKind::ProjectFact,
+                None,
+                MemoryValue::Text(format!("memory {id}")),
+                "global".to_string(),
+                MemoryStatus::Active,
+                TrustLevel::ToolObserved,
+                SensitivityLevel::Public,
+                Vec::new(),
+                None,
+                Vec::new(),
+            );
+            store.append_cell(&cell, false).unwrap();
+        }
+
+        let mut bytes = fs::read(&path).unwrap();
+        let (_, first_record) = binary::decode_frame_at(&bytes, 0, FileKind::HotLog).unwrap();
+        let (_, second_record) =
+            binary::decode_frame_at(&bytes, first_record, FileKind::HotRecord).unwrap();
+        let (_, third_record) =
+            binary::decode_frame_at(&bytes, second_record, FileKind::HotRecord).unwrap();
+        bytes[third_record - 1] ^= 0xff;
+        fs::write(&path, bytes).unwrap();
+
+        let err = store.load_recovering().unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("corrupted hot_record payload checksum"));
     }
 }

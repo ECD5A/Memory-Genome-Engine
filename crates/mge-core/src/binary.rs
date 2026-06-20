@@ -28,7 +28,7 @@ use crate::errors::{MgeError, Result};
 const MAGIC: [u8; 8] = *b"MGEFILE\0";
 const FORMAT_VERSION: u16 = 1;
 const CHECKSUM_LEN: usize = 32;
-const HEADER_LEN: usize = MAGIC.len() + 1 + 2 + 1 + 8 + CHECKSUM_LEN;
+pub(crate) const HEADER_LEN: usize = MAGIC.len() + 1 + 2 + 1 + 8 + CHECKSUM_LEN;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FileKind {
@@ -230,6 +230,21 @@ pub fn decode_frame_at(
         },
         next_offset,
     ))
+}
+
+pub(crate) fn valid_frame_exists_after(
+    bytes: &[u8],
+    offset: usize,
+    expected_kind: FileKind,
+) -> bool {
+    if bytes.len().saturating_sub(offset) < HEADER_LEN {
+        return false;
+    }
+    let last_start = bytes.len() - HEADER_LEN;
+    (offset..=last_start).any(|candidate| {
+        bytes[candidate..].starts_with(&MAGIC)
+            && decode_frame_at(bytes, candidate, expected_kind).is_ok()
+    })
 }
 
 pub fn write_messagepack_file<T: Serialize>(
