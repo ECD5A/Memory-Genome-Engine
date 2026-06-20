@@ -58,7 +58,11 @@ $Os = if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Sys
 } else {
     "linux"
 }
-$Arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+$Arch = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()) {
+    "x64" { "x86_64" }
+    "arm64" { "aarch64" }
+    default { $_ }
+}
 $LayoutDir = Join-Path $TargetRoot (Join-Path "mge-release" "$Os-$Arch")
 $LayoutBinDir = Join-Path $LayoutDir "bin"
 $LayoutDocsDir = Join-Path $LayoutDir "docs"

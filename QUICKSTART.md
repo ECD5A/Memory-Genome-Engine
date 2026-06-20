@@ -4,7 +4,7 @@ This guide shows the shortest path to a working local Memory Genome store.
 
 ## Use A Release Binary
 
-For the public preview release, download the archive for your platform from:
+Download the latest release archive for your platform from:
 
 ```text
 https://github.com/ECD5A/Memory-Genome-Engine/releases

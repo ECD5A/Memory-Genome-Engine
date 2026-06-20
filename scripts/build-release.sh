@@ -52,7 +52,24 @@ for name in "${product_bins[@]}"; do
   find_bin "$name" >/dev/null
 done
 
-platform="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | tr '[:upper:]' '[:lower:]')"
+case "$(uname -s)" in
+  Linux*) os="linux" ;;
+  Darwin*) os="macos" ;;
+  MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+  *)
+    echo "unsupported release platform: $(uname -s)" >&2
+    exit 1
+    ;;
+esac
+case "$(uname -m)" in
+  x86_64|amd64) arch="x86_64" ;;
+  arm64|aarch64) arch="aarch64" ;;
+  *)
+    echo "unsupported release architecture: $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+platform="$os-$arch"
 layout_dir="$target_root/mge-release/$platform"
 layout_bin_dir="$layout_dir/bin"
 layout_docs_dir="$layout_dir/docs"

@@ -264,6 +264,7 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 - `cargo fmt --check` passes.
 - `cargo test --locked` passes.
 - `cargo clippy --locked --workspace --all-targets -- -D warnings` passes.
+- `cargo audit` reports no known vulnerable runtime dependencies.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps` passes.
 - `cargo check --locked -p mge-cli --bins` passes.
 - `cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server --release` passes.
@@ -294,7 +295,7 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 
 ## Tag Release Workflow
 
-`.github/workflows/release.yml` runs only for `v*` tags. It first verifies format, workspace tests, and strict clippy with the locked dependency graph. It then builds checksummed product archives for Windows x86-64, Linux x86-64, macOS Apple Silicon, and macOS Intel, uploads them as workflow artifacts, and creates or updates a **draft** GitHub Release. The workflow includes only `mge` and `mge-mcp-server`; SDK packages and development benchmark binaries are not published. A maintainer must review checksums, notes, and every platform result before publishing the draft.
+`.github/workflows/release.yml` runs only for `v*` tags. It verifies format, workspace and eval tests, strict clippy, rustdoc, and Rust 1.95 compatibility with the locked dependency graph. It then builds checksummed product archives for Windows x86-64, Linux x86-64, macOS Apple Silicon, and macOS Intel, uploads them as workflow artifacts, and creates or updates a **draft** GitHub Release with one combined `SHA256SUMS`. The workflow includes only `mge` and `mge-mcp-server`; SDK packages and development benchmark binaries are not published. A maintainer must review checksums, notes, and every platform result before publishing the draft.
 
 Rust crates and both repository-local SDK manifests use version `0.1.0`. Integration schema versioning is independent from package versioning.
 
@@ -312,14 +313,16 @@ Do not publish packages from this repository until release ownership, versioning
 
 Current recommendation: GitHub release assets are enough for the public preview. Package-manager publishing should wait until Windows, Linux, and macOS preview users have exercised the archives.
 
-## GitHub Preview Release
+## GitHub v0.1 Release
 
-For a first public preview, create a draft release from a clean `main` commit after the checklist above passes.
+Create the first public `v0.1.0` release from a clean `main` commit after the checklist above passes. Use `v0.1.0-rc.1` first to exercise the complete private tag workflow and exact release archives.
 
 Recommended assets:
 
-- Windows archive from `scripts/build-release.ps1`;
-- Linux archive from `scripts/build-release.sh`;
+- `mge-windows-x86_64.zip`;
+- `mge-linux-x86_64.tar.gz`;
+- `mge-macos-aarch64.tar.gz`;
+- `mge-macos-x86_64.tar.gz`;
 - combined `SHA256SUMS`.
 
 Keep the release product-focused:
@@ -329,15 +332,11 @@ Keep the release product-focused:
 - do not upload generated stores, logs, passphrases, private corpus data, or `target/` directories;
 - state that macOS is a supported CI/release target but was not executed locally on this Windows development host.
 
-Draft release command shape:
+Tag command shape:
 
 ```bash
-gh release create v0.1.0-preview --draft \
-  --title "v0.1.0-preview" \
-  --notes-file release-notes.md \
-  target/mge-release/archives/mge-windows-x64.zip \
-  target/mge-release/archives/mge-linux-x86_64.tar.gz \
-  target/mge-release/archives/SHA256SUMS
+git tag -a v0.1.0 -m "Memory Genome Engine v0.1.0"
+git push origin v0.1.0
 ```
 
-Do not publish the draft until the uploaded assets and checksums are reviewed.
+The tag workflow creates the draft and uploads all platform archives. Do not publish it until the downloaded assets, checksums, release notes, and platform jobs are reviewed.

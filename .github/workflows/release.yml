@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -29,10 +29,34 @@ jobs:
           cargo fmt --check
           cargo test --locked --workspace
           cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo fmt --manifest-path tools/agent-memory-eval/Cargo.toml -- --check
+          cargo test --manifest-path tools/agent-memory-eval/Cargo.toml
+          cargo clippy --manifest-path tools/agent-memory-eval/Cargo.toml --all-targets -- -D warnings
+          RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps
+
+  msrv:
+    name: Verify Rust 1.95 MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust 1.95
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-msrv-1.95
+
+      - name: Check workspace on MSRV
+        run: cargo check --locked --workspace --all-targets
 
   build:
     name: Build ${{ matrix.target }}
-    needs: verify
+    needs: [verify, msrv]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -53,7 +77,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -97,7 +121,7 @@ jobs:
           "$hash  ${{ matrix.archive }}" | Set-Content -Encoding ascii "dist/${{ matrix.archive }}.sha256"
 
       - name: Upload archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
           path: |
@@ -111,17 +135,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
 
+      - name: Prepare checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat dist/*.sha256 | sort > dist/SHA256SUMS
+          rm dist/*.sha256
+
       - name: Create or update draft release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
+          set -euo pipefail
+          assets=(dist/*.tar.gz dist/*.zip dist/SHA256SUMS)
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+            gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" dist/* --draft --generate-notes --title "${GITHUB_REF_NAME}"
+            gh release create "${GITHUB_REF_NAME}" "${assets[@]}" --draft --generate-notes --title "${GITHUB_REF_NAME}"
           fi

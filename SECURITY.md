@@ -4,7 +4,7 @@ Memory Genome Engine has a full security and threat-model document in [docs/SECU
 
 ## Supported Versions
 
-Security fixes target the current `main` branch and the latest GitHub release candidate when one exists.
+Security fixes target the current `main` branch and the latest supported GitHub release.
 
 ## Reporting A Vulnerability
 
