@@ -32,7 +32,7 @@ Memory Genome Engine is a local-first structured memory engine for AI agents. It
 ## Quick Start
 
 ```bash
-cargo build
+cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server
 cargo run -p mge-cli -- setup
 cargo run -p mge-cli -- remember "User prefers concise technical answers" --kind user_preference --scope global --trust user_confirmed
 cargo run -p mge-cli -- recall "How should the agent answer technical questions?"

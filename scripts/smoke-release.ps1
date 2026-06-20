@@ -130,9 +130,35 @@ try {
             arguments = @{ store_path = $PlainStore }
         }
     } | ConvertTo-Json -Compress -Depth 6
-    $Response = @($InitializeRequest, $InitializedNotification, $ToolsRequest, $StatsRequest) | & $Mcp
+    $RememberRequest = @{
+        jsonrpc = "2.0"
+        id = 4
+        method = "tools/call"
+        params = @{
+            name = "mge_remember"
+            arguments = @{
+                store_path = $PlainStore
+                content = "packaged MCP release memory"
+                scope = "release-mcp"
+            }
+        }
+    } | ConvertTo-Json -Compress -Depth 6
+    $RecallRequest = @{
+        jsonrpc = "2.0"
+        id = 5
+        method = "tools/call"
+        params = @{
+            name = "mge_recall"
+            arguments = @{
+                store_path = $PlainStore
+                query = "packaged MCP release memory"
+                scope = "release-mcp"
+            }
+        }
+    } | ConvertTo-Json -Compress -Depth 6
+    $Response = @($InitializeRequest, $InitializedNotification, $ToolsRequest, $StatsRequest, $RememberRequest, $RecallRequest) | & $Mcp
     $ResponseText = $Response -join "`n"
-    if ($LASTEXITCODE -ne 0 -or ($Response.Count -ne 3) -or ($ResponseText -notmatch '"protocolVersion":"2025-06-18"') -or ($ResponseText -notmatch '"name":"mge_recall"') -or ($ResponseText -notmatch '"structuredContent"') -or ($ResponseText -notmatch '"tool":"mge_stats"')) {
+    if ($LASTEXITCODE -ne 0 -or ($Response.Count -ne 5) -or ($ResponseText -notmatch '"protocolVersion":"2025-06-18"') -or ($ResponseText -notmatch '"name":"mge_recall"') -or ($ResponseText -notmatch '"structuredContent"') -or ($ResponseText -notmatch '"tool":"mge_stats"') -or ($ResponseText -notmatch '"tool":"mge_remember"') -or ($ResponseText -notmatch '"tool":"mge_recall"') -or ($ResponseText -notmatch 'packaged MCP release memory')) {
         throw "MCP smoke failed: $ResponseText"
     }
 
@@ -147,9 +173,14 @@ try {
     if (Test-CommandAvailable "node") {
         Write-Host "TypeScript SDK smoke..."
         $env:MGE_BIN = $Mge
-        & node examples/typescript_basic_usage.ts
+        $TypeScriptOutput = & node examples/typescript_basic_usage.ts 2>&1
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "Node runtime could not run TypeScript example; skipping optional TypeScript SDK smoke"
+            $TypeScriptText = $TypeScriptOutput -join "`n"
+            if ($TypeScriptText -match "ERR_UNKNOWN_FILE_EXTENSION|Unknown file extension|TypeScript stripping") {
+                Write-Host "Node runtime does not support TypeScript stripping; skipping optional TypeScript SDK smoke"
+            } else {
+                throw "TypeScript SDK smoke failed: $TypeScriptText"
+            }
         }
     } else {
         Write-Host "Node not found; skipping optional TypeScript SDK smoke"

@@ -37,7 +37,7 @@ mge
 ```bash
 git clone https://github.com/ECD5A/Memory-Genome-Engine.git
 cd Memory-Genome-Engine
-cargo build
+cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server
 ```
 
 The main CLI binary is `mge`:
@@ -62,6 +62,7 @@ cargo run -p mge-cli -- setup --encrypted --passphrase-env MGE_PASSPHRASE
 ```
 
 Encrypted setup reads the passphrase from the environment variable name passed to `--passphrase-env`; the passphrase itself is not typed into the TUI or printed.
+Encryption is a store-creation choice. Re-running `setup --encrypted` or `init --encrypted` never silently converts an existing plaintext store.
 
 ## Create A Store
 

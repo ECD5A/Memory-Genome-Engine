@@ -74,10 +74,11 @@ jobs:
         run: |
           set -euo pipefail
           stage="dist/mge-${{ matrix.target }}"
-          mkdir -p "$stage/bin"
+          mkdir -p "$stage/bin" "$stage/docs"
           cp "target/${{ matrix.target }}/release/mge" "$stage/bin/"
           cp "target/${{ matrix.target }}/release/mge-mcp-server" "$stage/bin/"
           cp LICENSE NOTICE README.md QUICKSTART.md SECURITY.md "$stage/"
+          cp docs/ARCHITECTURE.md docs/INTEGRATION.md docs/RELEASE.md docs/SECURITY.md "$stage/docs/"
           tar -czf "dist/${{ matrix.archive }}" -C dist "mge-${{ matrix.target }}"
           shasum -a 256 "dist/${{ matrix.archive }}" > "dist/${{ matrix.archive }}.sha256"
 
@@ -86,10 +87,11 @@ jobs:
         shell: pwsh
         run: |
           $stage = "dist/mge-${{ matrix.target }}"
-          New-Item -ItemType Directory -Force "$stage/bin" | Out-Null
+          New-Item -ItemType Directory -Force "$stage/bin", "$stage/docs" | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/mge.exe" "$stage/bin/"
           Copy-Item "target/${{ matrix.target }}/release/mge-mcp-server.exe" "$stage/bin/"
           Copy-Item LICENSE,NOTICE,README.md,QUICKSTART.md,SECURITY.md $stage
+          Copy-Item docs/ARCHITECTURE.md,docs/INTEGRATION.md,docs/RELEASE.md,docs/SECURITY.md "$stage/docs/"
           Compress-Archive -Path $stage -DestinationPath "dist/${{ matrix.archive }}"
           $hash = (Get-FileHash "dist/${{ matrix.archive }}" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  ${{ matrix.archive }}" | Set-Content -Encoding ascii "dist/${{ matrix.archive }}.sha256"

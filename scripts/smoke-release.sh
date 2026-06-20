@@ -90,14 +90,17 @@ export MGE_RELEASE_SMOKE_PASSPHRASE="${MGE_RELEASE_SMOKE_PASSPHRASE:-local-relea
 "$mge_bin" --store "$encrypted_store" validate --deep --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE >/dev/null
 
 echo "MCP smoke..."
-printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mge-release-smoke","version":"0.1.0"}}}\n{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mge_stats","arguments":{"store_path":"%s"}}}\n' "$plain_store" \
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mge-release-smoke","version":"0.1.0"}}}\n{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mge_stats","arguments":{"store_path":"%s"}}}\n{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"mge_remember","arguments":{"store_path":"%s","content":"packaged MCP release memory","scope":"release-mcp"}}}\n{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"mge_recall","arguments":{"store_path":"%s","query":"packaged MCP release memory","scope":"release-mcp"}}}\n' "$plain_store" "$plain_store" "$plain_store" \
   | "$mcp_bin" \
   | tee "$tmp_root/mcp-response.jsonl" >/dev/null
-test "$(wc -l < "$tmp_root/mcp-response.jsonl" | tr -d ' ')" = "3"
+test "$(wc -l < "$tmp_root/mcp-response.jsonl" | tr -d ' ')" = "5"
 grep -q '"protocolVersion":"2025-06-18"' "$tmp_root/mcp-response.jsonl"
 grep -q '"name":"mge_recall"' "$tmp_root/mcp-response.jsonl"
 grep -q '"structuredContent"' "$tmp_root/mcp-response.jsonl"
 grep -q '"tool":"mge_stats"' "$tmp_root/mcp-response.jsonl"
+grep -q '"tool":"mge_remember"' "$tmp_root/mcp-response.jsonl"
+grep -q '"tool":"mge_recall"' "$tmp_root/mcp-response.jsonl"
+grep -q 'packaged MCP release memory' "$tmp_root/mcp-response.jsonl"
 
 if command -v python >/dev/null 2>&1; then
   echo "Python SDK smoke..."
@@ -108,8 +111,14 @@ fi
 
 if command -v node >/dev/null 2>&1; then
   echo "TypeScript SDK smoke..."
-  if ! MGE_BIN="$mge_bin" node examples/typescript_basic_usage.ts >/dev/null; then
-    echo "Node runtime could not run TypeScript example; skipping optional TypeScript SDK smoke"
+  if typescript_output="$(MGE_BIN="$mge_bin" node examples/typescript_basic_usage.ts 2>&1)"; then
+    :
+  elif printf '%s' "$typescript_output" | grep -Eq 'ERR_UNKNOWN_FILE_EXTENSION|Unknown file extension|TypeScript stripping'; then
+    echo "Node runtime does not support TypeScript stripping; skipping optional TypeScript SDK smoke"
+  else
+    printf '%s\n' "$typescript_output" >&2
+    echo "TypeScript SDK smoke failed" >&2
+    exit 1
   fi
 else
   echo "Node not found; skipping optional TypeScript SDK smoke"

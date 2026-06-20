@@ -83,7 +83,7 @@ for path in LICENSE NOTICE README.md README.ru.md QUICKSTART.md SECURITY.md CONT
   fi
 done
 
-for path in docs/RELEASE.md docs/SECURITY.md docs/INTEGRATION.md; do
+for path in docs/ARCHITECTURE.md docs/RELEASE.md docs/SECURITY.md docs/INTEGRATION.md; do
   if [[ -f "$path" ]]; then
     cp -f "$path" "$layout_docs_dir/$(basename "$path")"
   fi

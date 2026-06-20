@@ -50,6 +50,10 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo test --manifest-path tools/agent-memory-eval/Cargo.toml
 
+      - name: Eval format
+        if: runner.os == 'Linux'
+        run: cargo fmt --manifest-path tools/agent-memory-eval/Cargo.toml -- --check
+
       - name: Eval clippy
         if: runner.os == 'Linux'
         run: cargo clippy --manifest-path tools/agent-memory-eval/Cargo.toml --all-targets -- -D warnings

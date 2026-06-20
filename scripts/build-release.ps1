@@ -93,7 +93,7 @@ foreach ($Path in @("LICENSE", "NOTICE", "README.md", "README.ru.md", "QUICKSTAR
     }
 }
 
-foreach ($Path in @("docs\RELEASE.md", "docs\SECURITY.md", "docs\INTEGRATION.md")) {
+foreach ($Path in @("docs\ARCHITECTURE.md", "docs\RELEASE.md", "docs\SECURITY.md", "docs\INTEGRATION.md")) {
     if (Test-Path $Path) {
         Copy-Item -Force -Path $Path -Destination (Join-Path $LayoutDocsDir (Split-Path -Leaf $Path))
     }
