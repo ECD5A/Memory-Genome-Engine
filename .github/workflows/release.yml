@@ -104,7 +104,10 @@ jobs:
           cp LICENSE NOTICE README.md QUICKSTART.md SECURITY.md "$stage/"
           cp docs/ARCHITECTURE.md docs/INTEGRATION.md docs/RELEASE.md docs/SECURITY.md "$stage/docs/"
           tar -czf "dist/${{ matrix.archive }}" -C dist "mge-${{ matrix.target }}"
-          shasum -a 256 "dist/${{ matrix.archive }}" > "dist/${{ matrix.archive }}.sha256"
+          (
+            cd dist
+            shasum -a 256 "${{ matrix.archive }}" > "${{ matrix.archive }}.sha256"
+          )
 
       - name: Package Windows archive
         if: runner.os == 'Windows'
