@@ -11,7 +11,7 @@ use crossterm::terminal::{
 use mge_core::{ContextPacket, IndexKind, RecallMode, SealReport};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{Frame, Terminal};
 
 use crate::app_service::{
@@ -225,17 +225,18 @@ fn draw(frame: &mut Frame<'_>, app: &TuiApp) {
         return;
     }
 
+    let banner_height = banner::render_height(area.width);
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(banner::BANNER_RENDER_HEIGHT),
+            Constraint::Length(banner_height),
             Constraint::Min(10),
             Constraint::Length(1),
             Constraint::Length(1),
         ])
         .split(area);
 
-    let header = Paragraph::new(banner::banner_lines(app.language)).wrap(Wrap { trim: false });
+    let header = Paragraph::new(banner::banner_lines(app.language, area.width));
     frame.render_widget(header, layout[0]);
     draw_screen_content(frame, app, layout[1]);
     screens::render_status(frame, app, layout[2]);

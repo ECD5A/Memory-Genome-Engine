@@ -4,7 +4,9 @@ use ratatui::text::{Line, Span};
 use crate::tui::i18n::{tr, Language, TKey};
 
 const BANNER_LEFT_PAD: &str = "    ";
-pub const BANNER_RENDER_HEIGHT: u16 = 9;
+const COMPACT_TITLE: &str = "MEMORY GENOME ENGINE";
+const FULL_BANNER_RENDER_HEIGHT: u16 = 9;
+const COMPACT_BANNER_RENDER_HEIGHT: u16 = 5;
 
 pub const BANNER_LINES: &[&str] = &[
     "______  ___                                         _________                                       __________              _____",
@@ -15,7 +17,32 @@ pub const BANNER_LINES: &[&str] = &[
     "                                       /____/                                                                       /____/",
 ];
 
-pub fn banner_lines(language: Language) -> Vec<Line<'static>> {
+pub fn banner_lines(language: Language, available_width: u16) -> Vec<Line<'static>> {
+    if available_width >= full_banner_min_width() {
+        full_banner_lines(language)
+    } else {
+        compact_banner_lines(language, available_width)
+    }
+}
+
+pub fn render_height(available_width: u16) -> u16 {
+    if available_width >= full_banner_min_width() {
+        FULL_BANNER_RENDER_HEIGHT
+    } else {
+        COMPACT_BANNER_RENDER_HEIGHT
+    }
+}
+
+pub fn full_banner_min_width() -> u16 {
+    let banner_width = BANNER_LINES
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or_default();
+    (BANNER_LEFT_PAD.chars().count() + banner_width) as u16
+}
+
+fn full_banner_lines(language: Language) -> Vec<Line<'static>> {
     let banner_width = BANNER_LINES
         .iter()
         .map(|line| line.chars().count())
@@ -26,12 +53,31 @@ pub fn banner_lines(language: Language) -> Vec<Line<'static>> {
         .map(|line| Line::from(rainbow_banner_spans(line, banner_width)))
         .collect::<Vec<_>>();
     lines.push(Line::from(""));
-    lines.push(Line::from(subtitle_spans(language, banner_width)));
+    lines.push(Line::from(subtitle_spans(
+        language,
+        banner_width,
+        BANNER_LEFT_PAD.len(),
+    )));
     lines.push(Line::from(""));
     lines
 }
 
-fn subtitle_spans(language: Language, banner_width: usize) -> Vec<Span<'static>> {
+fn compact_banner_lines(language: Language, available_width: u16) -> Vec<Line<'static>> {
+    let width = available_width as usize;
+    vec![
+        Line::from(""),
+        Line::from(centered_rainbow_spans(COMPACT_TITLE, width)),
+        Line::from(""),
+        Line::from(subtitle_spans(language, width, 0)),
+        Line::from(""),
+    ]
+}
+
+fn subtitle_spans(
+    language: Language,
+    content_width: usize,
+    left_offset: usize,
+) -> Vec<Span<'static>> {
     let raw = tr(language, TKey::Subtitle);
     let main = raw
         .strip_suffix(" by ECD5A")
@@ -40,8 +86,7 @@ fn subtitle_spans(language: Language, banner_width: usize) -> Vec<Span<'static>>
     let separator = "  ::  ";
     let brand = "BY ECD5A";
     let subtitle_width = main.chars().count() + separator.chars().count() + brand.chars().count();
-    let subtitle_offset =
-        BANNER_LEFT_PAD.chars().count() + banner_width.saturating_sub(subtitle_width) / 2;
+    let subtitle_offset = left_offset + content_width.saturating_sub(subtitle_width) / 2;
 
     vec![
         Span::raw(" ".repeat(subtitle_offset)),
@@ -64,6 +109,22 @@ fn subtitle_spans(language: Language, banner_width: usize) -> Vec<Span<'static>>
                 .add_modifier(Modifier::BOLD),
         ),
     ]
+}
+
+fn centered_rainbow_spans(text: &str, available_width: usize) -> Vec<Span<'static>> {
+    let text_width = text.chars().count();
+    let mut spans = vec![Span::raw(
+        " ".repeat(available_width.saturating_sub(text_width) / 2),
+    )];
+    spans.extend(text.chars().enumerate().map(|(column, ch)| {
+        Span::styled(
+            ch.to_string(),
+            Style::default()
+                .fg(rainbow_color(column, text_width))
+                .add_modifier(Modifier::BOLD),
+        )
+    }));
+    spans
 }
 
 fn rainbow_banner_spans(line: &str, banner_width: usize) -> Vec<Span<'static>> {
@@ -121,18 +182,18 @@ mod tests {
 
     #[test]
     fn banner_has_left_padding_and_centered_signature() {
-        let lines = banner_lines(Language::En);
+        let lines = banner_lines(Language::En, full_banner_min_width());
         assert!(lines[0].spans[0].content.starts_with(BANNER_LEFT_PAD));
         assert!(lines
             .iter()
             .flat_map(|line| line.spans.iter())
             .any(|span| span.content.contains("ECD5A")));
-        assert_eq!(lines.len(), BANNER_RENDER_HEIGHT as usize);
+        assert_eq!(lines.len(), FULL_BANNER_RENDER_HEIGHT as usize);
     }
 
     #[test]
     fn subtitle_uses_product_tagline_styling() {
-        let spans = subtitle_spans(Language::En, 142);
+        let spans = subtitle_spans(Language::En, 142, BANNER_LEFT_PAD.len());
         assert!(spans
             .iter()
             .any(|span| span.content.contains("LOCAL-FIRST MEMORY ENGINE")));
@@ -146,7 +207,7 @@ mod tests {
 
     #[test]
     fn banner_uses_rgb_gradient_colors() {
-        let lines = banner_lines(Language::En);
+        let lines = banner_lines(Language::En, full_banner_min_width());
         let first_colored = lines[0]
             .spans
             .iter()
@@ -157,9 +218,39 @@ mod tests {
 
     #[test]
     fn banner_bottom_uses_same_horizontal_gradient_as_top() {
-        let lines = banner_lines(Language::En);
+        let lines = banner_lines(Language::En, full_banner_min_width());
         let top_color = lines[0].spans[5].style.fg;
         let bottom_color = lines[5].spans[5].style.fg;
         assert_eq!(top_color, bottom_color);
+    }
+
+    #[test]
+    fn full_banner_width_matches_its_longest_rendered_line() {
+        let lines = banner_lines(Language::En, full_banner_min_width());
+        assert!(lines
+            .iter()
+            .all(|line| line.width() <= full_banner_min_width() as usize));
+        assert_eq!(full_banner_min_width(), 146);
+    }
+
+    #[test]
+    fn compact_banner_fits_standard_eighty_column_terminal() {
+        let lines = banner_lines(Language::En, 80);
+        assert_eq!(lines.len(), COMPACT_BANNER_RENDER_HEIGHT as usize);
+        assert!(lines.iter().all(|line| line.width() <= 80));
+        assert!(lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .any(|span| span.content.contains("MEMORY")));
+        assert!(lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .any(|span| span.content.contains("ECD5A")));
+    }
+
+    #[test]
+    fn banner_height_switches_at_full_banner_width() {
+        assert_eq!(render_height(full_banner_min_width() - 1), 5);
+        assert_eq!(render_height(full_banner_min_width()), 9);
     }
 }
