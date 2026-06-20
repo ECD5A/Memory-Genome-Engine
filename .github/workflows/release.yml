@@ -97,7 +97,7 @@ jobs:
           "$hash  ${{ matrix.archive }}" | Set-Content -Encoding ascii "dist/${{ matrix.archive }}.sha256"
 
       - name: Upload archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
           path: |
