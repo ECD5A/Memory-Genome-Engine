@@ -12,7 +12,7 @@
   <sub><a href="https://github.com/ECD5A/Memory-Genome-Engine/blob/main/README.ru.md">Русская версия</a></sub>
 </p>
 
-Memory Genome Engine is a local-first structured memory engine for AI agents. It stores typed `MemoryCell` records, describes them with `MarkerGenome`, moves cold memory into sealed binary pages, and returns task-relevant `ContextPacket` output for agent workflows.
+Memory Genome Engine gives local AI agents durable project memory they can recall across sessions without requiring a cloud service or vector database. It stores typed `MemoryCell` records, describes them with `MarkerGenome`, moves cold memory into sealed binary pages, and returns task-relevant `ContextPacket` output.
 
 <p align="center">
   <img src="assets/mge-console-demo-en.gif" alt="Memory Genome Engine terminal dashboard" width="100%">
@@ -45,31 +45,33 @@ Measured on an Intel Core i7-9750H, Windows 10 x64, Rust 1.95.0, commit `14da83b
 
 ## Quick Start
 
+Install a checksummed release using the [Quickstart](QUICKSTART.md), then initialize a store and optionally connect a local agent host:
+
 ```bash
-cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server
-cargo run -p mge-cli -- setup
-cargo run -p mge-cli -- remember "User prefers concise technical answers" --kind user_preference --scope global --trust user_confirmed
-cargo run -p mge-cli -- recall "How should the agent answer technical questions?"
-cargo run -p mge-cli -- seal
-cargo run -p mge-cli -- validate --deep
+mge setup
+mge setup codex
+mge remember "User prefers concise technical answers" --kind user_preference --scope global --trust user_confirmed
+mge recall "How should the agent answer technical questions?"
+mge seal
+mge validate --deep
 ```
 
 Terminal UI:
 
 ```bash
-cargo run -p mge-cli -- tui
-cargo run -p mge-cli -- setup --help
+mge tui
+mge setup --help
 ```
 
 ## Encrypted Store
 
 ```bash
 export MGE_PASSPHRASE="use-a-real-secret"
-cargo run -p mge-cli -- init --encrypted --passphrase-env MGE_PASSPHRASE
-cargo run -p mge-cli -- remember "private memory" --passphrase-env MGE_PASSPHRASE
-cargo run -p mge-cli -- recall "private memory" --passphrase-env MGE_PASSPHRASE
-cargo run -p mge-cli -- seal --passphrase-env MGE_PASSPHRASE
-cargo run -p mge-cli -- validate --deep --passphrase-env MGE_PASSPHRASE
+mge init --encrypted --passphrase-env MGE_PASSPHRASE
+mge remember "private memory" --passphrase-env MGE_PASSPHRASE
+mge recall "private memory" --passphrase-env MGE_PASSPHRASE
+mge seal --passphrase-env MGE_PASSPHRASE
+mge validate --deep --passphrase-env MGE_PASSPHRASE
 ```
 
 Payload encryption protects hot records, snapshots, and sealed page payloads. Metadata such as marker dictionary, indexes, catalog summaries, Markdown export, and process memory while unlocked remains plaintext by design. See [Security](docs/SECURITY.md).
@@ -79,14 +81,16 @@ Payload encryption protects hot records, snapshots, and sealed page payloads. Me
 CLI:
 
 ```bash
-cargo run -p mge-cli -- recall "project context" --mode broad --scope my_project
+mge recall "project context" --mode broad --scope my_project
 ```
 
 MCP stdio server:
 
 ```bash
-cargo run -p mge-cli --bin mge-mcp-server
+mge-mcp-server --store .memory-genome
 ```
+
+`mge setup codex`, `mge setup claude-code`, and `mge setup cursor` register that server automatically. `mge setup generic-mcp` prints a portable host configuration. See [Integration](docs/INTEGRATION.md).
 
 SDK examples:
 

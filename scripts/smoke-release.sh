@@ -79,6 +79,9 @@ printf '# Imported release note\n\nValidate the imported memory before publishin
 "$mge_bin" doctor --store "$plain_store" --deep >/dev/null
 "$mge_bin" --store "$plain_store" validate --deep >/dev/null
 
+echo "Agent host setup smoke..."
+"$mge_bin" --store "$plain_store" setup generic-mcp --mcp-server "$mcp_bin" --json >/dev/null
+
 echo "Encrypted smoke..."
 export MGE_RELEASE_SMOKE_PASSPHRASE="${MGE_RELEASE_SMOKE_PASSPHRASE:-local-release-smoke-passphrase}"
 "$mge_bin" --store "$encrypted_store" init --encrypted --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE
@@ -90,8 +93,8 @@ export MGE_RELEASE_SMOKE_PASSPHRASE="${MGE_RELEASE_SMOKE_PASSPHRASE:-local-relea
 "$mge_bin" --store "$encrypted_store" validate --deep --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE >/dev/null
 
 echo "MCP smoke..."
-printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mge-release-smoke","version":"0.1.0"}}}\n{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mge_stats","arguments":{"store_path":"%s"}}}\n{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"mge_remember","arguments":{"store_path":"%s","content":"packaged MCP release memory","scope":"release-mcp"}}}\n{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"mge_recall","arguments":{"store_path":"%s","query":"packaged MCP release memory","scope":"release-mcp"}}}\n' "$plain_store" "$plain_store" "$plain_store" \
-  | "$mcp_bin" \
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mge-release-smoke","version":"0.1.0"}}}\n{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mge_stats","arguments":{}}}\n{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"mge_remember","arguments":{"content":"packaged MCP release memory","scope":"release-mcp"}}}\n{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"mge_recall","arguments":{"query":"packaged MCP release memory","scope":"release-mcp"}}}\n' \
+  | "$mcp_bin" --store "$plain_store" \
   | tee "$tmp_root/mcp-response.jsonl" >/dev/null
 test "$(wc -l < "$tmp_root/mcp-response.jsonl" | tr -d ' ')" = "5"
 grep -q '"protocolVersion":"2025-06-18"' "$tmp_root/mcp-response.jsonl"

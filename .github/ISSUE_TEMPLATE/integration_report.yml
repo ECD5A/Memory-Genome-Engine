@@ -1,0 +1,68 @@
+name: Agent host integration report
+description: Report a successful or failed local agent-host integration.
+title: "integration: "
+labels:
+  - integration
+body:
+  - type: dropdown
+    id: host
+    attributes:
+      label: Agent host
+      options:
+        - Codex CLI / IDE
+        - Claude Code
+        - Cursor
+        - Generic MCP host
+        - Python SDK
+        - TypeScript SDK
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Working
+        - Partially working
+        - Failed
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: MGE version / commit
+      placeholder: "mge 0.1.1 or commit hash"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Host version and operating system
+      placeholder: "Codex CLI ..., Windows 11 x64"
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Setup and workflow
+      description: Include the setup command and the recall/remember flow you tested.
+      placeholder: |
+        mge setup codex
+        recall -> local work -> remember -> checkpoint
+    validations:
+      required: true
+  - type: textarea
+    id: observations
+    attributes:
+      label: Observed behavior
+      description: Include errors or useful compatibility details. Remove store contents, secrets, passphrases, and private paths.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed passphrases, secrets, private memory, and private corpus content from this report.
+          required: true

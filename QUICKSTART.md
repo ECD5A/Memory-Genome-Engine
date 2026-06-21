@@ -234,7 +234,7 @@ Local encrypted demo workflow:
 powershell -ExecutionPolicy Bypass -File scripts/demo-local-memory.ps1
 ```
 
-The demo uses a passphrase environment variable and prints the store path. It does not call external APIs.
+The demo runs two independent CLI sessions against one encrypted store: the first records and seals a decision, and the second reopens and recalls it. It calls no external APIs and removes the temporary store by default. Set `KEEP_MGE_DEMO=1` to retain the store for inspection.
 
 ## Storage Defaults
 

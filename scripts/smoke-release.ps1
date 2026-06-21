@@ -87,6 +87,9 @@ try {
     Invoke-Required $Mge doctor --store $PlainStore --deep
     Invoke-Required $Mge --store $PlainStore validate --deep
 
+    Write-Host "Agent host setup smoke..."
+    Invoke-Required $Mge --store $PlainStore setup generic-mcp --mcp-server $Mcp --json
+
     Write-Host "Encrypted smoke..."
     if (-not $env:MGE_RELEASE_SMOKE_PASSPHRASE) {
         $env:MGE_RELEASE_SMOKE_PASSPHRASE = "local-release-smoke-passphrase"
@@ -127,7 +130,7 @@ try {
         method = "tools/call"
         params = @{
             name = "mge_stats"
-            arguments = @{ store_path = $PlainStore }
+            arguments = @{}
         }
     } | ConvertTo-Json -Compress -Depth 6
     $RememberRequest = @{
@@ -137,7 +140,6 @@ try {
         params = @{
             name = "mge_remember"
             arguments = @{
-                store_path = $PlainStore
                 content = "packaged MCP release memory"
                 scope = "release-mcp"
             }
@@ -150,13 +152,12 @@ try {
         params = @{
             name = "mge_recall"
             arguments = @{
-                store_path = $PlainStore
                 query = "packaged MCP release memory"
                 scope = "release-mcp"
             }
         }
     } | ConvertTo-Json -Compress -Depth 6
-    $Response = @($InitializeRequest, $InitializedNotification, $ToolsRequest, $StatsRequest, $RememberRequest, $RecallRequest) | & $Mcp
+    $Response = @($InitializeRequest, $InitializedNotification, $ToolsRequest, $StatsRequest, $RememberRequest, $RecallRequest) | & $Mcp --store $PlainStore
     $ResponseText = $Response -join "`n"
     if ($LASTEXITCODE -ne 0 -or ($Response.Count -ne 5) -or ($ResponseText -notmatch '"protocolVersion":"2025-06-18"') -or ($ResponseText -notmatch '"name":"mge_recall"') -or ($ResponseText -notmatch '"structuredContent"') -or ($ResponseText -notmatch '"tool":"mge_stats"') -or ($ResponseText -notmatch '"tool":"mge_remember"') -or ($ResponseText -notmatch '"tool":"mge_recall"') -or ($ResponseText -notmatch 'packaged MCP release memory')) {
         throw "MCP smoke failed: $ResponseText"

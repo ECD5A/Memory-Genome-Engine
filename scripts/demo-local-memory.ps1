@@ -1,36 +1,60 @@
+param([string]$MgeBin = $env:MGE_BIN)
+
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
-cargo build -p mge-cli --bin mge | Out-Null
-
-$BinDir = Join-Path $RepoRoot "target\debug"
-$Mge = Join-Path $BinDir "mge.exe"
-if (-not (Test-Path $Mge)) {
-    $Mge = Join-Path $BinDir "mge"
+if (-not $MgeBin) {
+    cargo build --locked -p mge-cli --bin mge --bin mge-mcp-server | Out-Null
+    $MgeBin = Join-Path $RepoRoot "target\debug\mge.exe"
+    if (-not (Test-Path $MgeBin)) {
+        $MgeBin = Join-Path $RepoRoot "target\debug\mge"
+    }
 }
-if (-not (Test-Path $Mge)) {
-    throw "missing mge debug binary"
+if (-not (Test-Path $MgeBin -PathType Leaf)) {
+    throw "missing mge binary: $MgeBin"
+}
+$Mge = (Resolve-Path $MgeBin).Path
+
+function Invoke-Mge {
+    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
+    & $Mge @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "mge command failed: $Arguments"
+    }
 }
 
 $TmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("mge-demo-local-" + [System.Guid]::NewGuid().ToString("N"))
 $Store = Join-Path $TmpRoot ".memory-genome"
-if (-not $env:MGE_DEMO_PASSPHRASE) {
+$OwnPassphrase = -not $env:MGE_DEMO_PASSPHRASE
+if ($OwnPassphrase) {
     $env:MGE_DEMO_PASSPHRASE = "local-demo-passphrase"
 }
 
-Write-Host "Creating encrypted local demo store at $Store"
-& $Mge --store $Store init --profile fast --encrypted --passphrase-env MGE_DEMO_PASSPHRASE
-& $Mge --store $Store remember "Agent should recall project context before local work." --kind procedure --scope demo --trust user_confirmed --marker topic:demo --passphrase-env MGE_DEMO_PASSPHRASE
-& $Mge --store $Store recall "project context" --mode focused --scope demo --passphrase-env MGE_DEMO_PASSPHRASE
-& $Mge --store $Store remember "Fake local agent work result: demo workflow completed." --kind tool_result --scope demo --trust tool_observed --marker topic:demo --passphrase-env MGE_DEMO_PASSPHRASE
-& $Mge --store $Store checkpoint --passphrase-env MGE_DEMO_PASSPHRASE
-& $Mge --store $Store seal --passphrase-env MGE_DEMO_PASSPHRASE | Out-Null
-& $Mge --store $Store recall "demo workflow completed" --mode broad --scope demo --passphrase-env MGE_DEMO_PASSPHRASE
-& $Mge doctor --store $Store --deep --passphrase-env MGE_DEMO_PASSPHRASE
-& $Mge --store $Store validate --deep --passphrase-env MGE_DEMO_PASSPHRASE
-& $Mge --store $Store export --passphrase-env MGE_DEMO_PASSPHRASE
+try {
+    Write-Host "Session 1: record and seal durable project memory"
+    Invoke-Mge --store $Store init --profile fast --encrypted --passphrase-env MGE_DEMO_PASSPHRASE
+    Invoke-Mge --store $Store remember-session --session-id demo-planning --scope demo --turn "user=Prepare the release plan" --turn "assistant=Use a staged rollout" --turn "user=Keep a tested rollback path" --passphrase-env MGE_DEMO_PASSPHRASE
+    Invoke-Mge --store $Store checkpoint --passphrase-env MGE_DEMO_PASSPHRASE
+    Invoke-Mge --store $Store seal --passphrase-env MGE_DEMO_PASSPHRASE | Out-Null
 
-Write-Host "Markdown export is plaintext by design: $Store\exports\memory.md"
-Write-Host "Demo store: $Store"
+    Write-Host "Session 2: reopen, recall the decision, and store the result"
+    Invoke-Mge --store $Store recall "What release and rollback approach was chosen?" --mode focused --scope demo --passphrase-env MGE_DEMO_PASSPHRASE
+    Invoke-Mge --store $Store remember "Release candidate passed the local verification gate." --kind tool_result --scope demo --trust tool_observed --marker topic:release --passphrase-env MGE_DEMO_PASSPHRASE
+    Invoke-Mge --store $Store checkpoint --passphrase-env MGE_DEMO_PASSPHRASE
+    Invoke-Mge doctor --store $Store --deep --passphrase-env MGE_DEMO_PASSPHRASE
+    Invoke-Mge --store $Store validate --deep --passphrase-env MGE_DEMO_PASSPHRASE
+
+    Write-Host "Two-session local memory demo passed."
+    if ($env:KEEP_MGE_DEMO -eq "1") {
+        Write-Host "Keeping demo store: $Store"
+    }
+} finally {
+    if ($OwnPassphrase) {
+        Remove-Item Env:MGE_DEMO_PASSPHRASE -ErrorAction SilentlyContinue
+    }
+    if ($env:KEEP_MGE_DEMO -ne "1") {
+        Remove-Item -LiteralPath $TmpRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
