@@ -4,13 +4,27 @@ This guide shows the shortest path to a working local Memory Genome store.
 
 ## Use A Release Binary
 
-Download the latest release archive for your platform from:
+Download and verify the latest release into a user-local bin directory:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/ECD5A/Memory-Genome-Engine/main/scripts/install-release.ps1 -OutFile install-release.ps1
+powershell -ExecutionPolicy Bypass -File .\install-release.ps1
+```
+
+```bash
+curl --fail --location --remote-name https://raw.githubusercontent.com/ECD5A/Memory-Genome-Engine/main/scripts/install-release.sh
+bash install-release.sh
+```
+
+The installers verify the selected archive against the release `SHA256SUMS` before extracting `mge` and `mge-mcp-server`. They do not require admin/root privileges or modify shell profiles. A fixed release can be selected with `-Version v0.1.1` or `--version v0.1.1`.
+
+Archives can also be downloaded manually from:
 
 ```text
 https://github.com/ECD5A/Memory-Genome-Engine/releases
 ```
 
-Unpack it into a user-writable directory, then run the binary from `bin/`:
+After installation, run:
 
 ```bash
 mge --help

@@ -54,7 +54,31 @@ powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 - Linux shell scripts, including the standard MCP smoke revision, are locally verified through WSL2 Ubuntu with Rust 1.96.0 and Bash 5.3.9.
 - macOS remains a supported release target and runs the same POSIX build/smoke path on the GitHub-hosted macOS runner. No local macOS execution is claimed because this development machine does not run macOS.
 
-## Install From Source
+## Install
+
+For normal users, install a published release with mandatory archive checksum verification:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/install-release.ps1
+powershell -ExecutionPolicy Bypass -File scripts/install-release.ps1 -Version v0.1.1
+```
+
+```bash
+./scripts/install-release.sh
+./scripts/install-release.sh --version v0.1.1
+```
+
+The release installers:
+
+- detect the supported host archive;
+- download the archive and combined `SHA256SUMS` from GitHub Releases;
+- require an exact SHA-256 match before extraction;
+- install only `mge` and `mge-mcp-server` into `~/.local/bin` by default;
+- never request admin/root access or modify a shell profile.
+
+`-SourceDirectory` / `--source-dir` installs from a local mirror or fixture while retaining checksum verification. `-BaseUrl` / `--base-url` selects an HTTP mirror. These options are used by release verification and are mutually exclusive.
+
+### Install From A Source Checkout
 
 Install local release binaries into a user-writable directory:
 
@@ -271,7 +295,8 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 - The CI MSRV job passes on Rust 1.95.
 - `scripts/build-release.sh` or `scripts/build-release.ps1` passes and creates a local archive plus `SHA256SUMS`.
 - `scripts/smoke-release.sh` or `scripts/smoke-release.ps1` passes.
-- `scripts/install.sh` or `scripts/install.ps1` installs into a user-writable directory.
+- `scripts/install-release.sh` or `scripts/install-release.ps1` rejects a tampered archive and installs a verified release into a user-writable directory.
+- `scripts/install.sh` or `scripts/install.ps1` installs a locally built source checkout into a user-writable directory.
 - CLI smoke passes on a temporary store.
 - TUI help smoke (`mge tui --help`) passes.
 - Setup help smoke (`mge setup --help`) passes.
@@ -286,7 +311,7 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 ## Current Publishing Policy
 
 - No package publishing is automated yet.
-- Install scripts only copy locally built binaries into a user-writable directory.
+- Release installers verify GitHub or mirror archives before installing; source installers copy locally built binaries into a user-writable directory.
 - Windows and WSL Ubuntu release paths are locally verified. macOS remains enabled in CI and release automation; its result must be taken from the GitHub-hosted macOS job because no local macOS host is available.
 - No external MCP SDK dependency is bundled.
 - Python and TypeScript packages are repository-local developer wrappers.

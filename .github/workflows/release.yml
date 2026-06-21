@@ -132,9 +132,48 @@ jobs:
             dist/${{ matrix.archive }}.sha256
           if-no-files-found: error
 
+  install-smoke:
+    name: Verify installer on ${{ matrix.os }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download release archives
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Prepare checksums
+        shell: bash
+        run: cat dist/*.sha256 | sort > dist/SHA256SUMS
+
+      - name: Verify POSIX release installer
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="${RUNNER_TEMP}/mge-install"
+          bash scripts/install-release.sh --source-dir dist --install-dir "$install_dir"
+          "$install_dir/mge" setup --help
+
+      - name: Verify Windows release installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP "mge-install"
+          & .\scripts\install-release.ps1 -SourceDirectory dist -InstallDir $installDir
+          & (Join-Path $installDir "mge.exe") setup --help
+
   draft-release:
     name: Create draft release
-    needs: build
+    needs: [build, install-smoke]
     runs-on: ubuntu-latest
     steps:
       - name: Download archives
