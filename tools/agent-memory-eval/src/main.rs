@@ -43,6 +43,10 @@ struct Args {
     #[arg(long, value_enum, default_value_t = GeneratedProfile::Small)]
     profile: GeneratedProfile,
 
+    /// Query difficulty for the deterministic generated dataset.
+    #[arg(long, value_enum, default_value_t = GeneratedQueryProfile::Lexical)]
+    query_profile: GeneratedQueryProfile,
+
     /// Temporary/evaluation store root. If omitted, a unique temp directory is used.
     #[arg(long)]
     store_root: Option<PathBuf>,
@@ -131,6 +135,26 @@ enum GeneratedProfile {
     Tiny,
     Small,
     Medium,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum GeneratedQueryProfile {
+    Lexical,
+    Paraphrase,
+    #[value(name = "hard-negative")]
+    HardNegative,
+    Mixed,
+}
+
+impl GeneratedQueryProfile {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Lexical => "lexical",
+            Self::Paraphrase => "paraphrase",
+            Self::HardNegative => "hard-negative",
+            Self::Mixed => "mixed",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -234,6 +258,10 @@ struct RunSummary {
     hit_at_k: f64,
     recall_at_k: f64,
     precision_at_k: f64,
+    mrr_at_k: f64,
+    ndcg_at_k: f64,
+    negative_queries: usize,
+    no_answer_accuracy: Option<f64>,
     avg_latency_micros: u64,
     avg_end_to_end_micros: u64,
     p50_latency_micros: u64,
@@ -337,7 +365,10 @@ fn load_dataset(args: &Args) -> Result<EvalDataset> {
         return Ok(dataset);
     }
 
-    Ok(generate_dataset(args.profile))
+    Ok(generate_dataset_with_queries(
+        args.profile,
+        args.query_profile,
+    ))
 }
 
 fn validate_dataset(dataset: &EvalDataset) -> Result<()> {
@@ -378,16 +409,6 @@ fn validate_dataset(dataset: &EvalDataset) -> Result<()> {
             }
         }
     }
-    if dataset
-        .queries
-        .iter()
-        .all(|query| query.relevant_ids.is_empty())
-    {
-        return Err(anyhow!(
-            "dataset has no queries with relevant_ids; retrieval metrics need evidence labels"
-        ));
-    }
-
     Ok(())
 }
 
@@ -1161,16 +1182,24 @@ fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
         let _ = fs::remove_dir_all(&base_store);
     }
 
+    let mut notes = vec![
+        "Developer-only harness; datasets are not bundled and JSON is eval input/output only."
+            .to_string(),
+        "LongMemEval and best-effort LoCoMo-style JSON adapters are local-only; no datasets are committed or downloaded by the tool.".to_string(),
+        "This measures retrieval behavior, not final LLM answer quality.".to_string(),
+        "scoring cache build time is measured inside cell filtering time; those columns are not additive.".to_string(),
+    ];
+    if args.input.is_none() {
+        notes.push(format!(
+            "Generated query profile: {}; paraphrase queries retain scope/component anchors, while hard negatives deliberately share a scope with unrelated memories.",
+            args.query_profile.as_str()
+        ));
+    }
+
     Ok(EvalReport {
         dataset: summary,
         runs,
-        notes: vec![
-            "Developer-only harness; datasets are not bundled and JSON is eval input/output only."
-                .to_string(),
-            "LongMemEval and best-effort LoCoMo-style JSON adapters are local-only; no datasets are committed or downloaded by the tool.".to_string(),
-            "This measures retrieval behavior, not final LLM answer quality.".to_string(),
-            "scoring cache build time is measured inside cell filtering time; those columns are not additive.".to_string(),
-        ],
+        notes,
     })
 }
 
@@ -1876,6 +1905,10 @@ fn summarize_run(
     let mut hit_sum = 0.0;
     let mut recall_sum = 0.0;
     let mut precision_sum = 0.0;
+    let mut mrr_sum = 0.0;
+    let mut ndcg_sum = 0.0;
+    let mut no_answer_sum = 0.0;
+    let mut no_answer_samples = 0usize;
     let mut context_bytes_sum = 0usize;
     let mut returned_items_sum = 0usize;
     let mut hot_candidates_sum = 0usize;
@@ -1906,11 +1939,34 @@ fn summarize_run(
                 .collect::<BTreeSet<String>>();
             let relevant_returned = returned.intersection(&expected).count();
             if expected.is_empty() {
-                hit_sum += if returned.is_empty() { 1.0 } else { 0.0 };
-                recall_sum += if returned.is_empty() { 1.0 } else { 0.0 };
+                let correct_rejection = if returned.is_empty() { 1.0 } else { 0.0 };
+                hit_sum += correct_rejection;
+                recall_sum += correct_rejection;
+                mrr_sum += correct_rejection;
+                ndcg_sum += correct_rejection;
+                no_answer_sum += correct_rejection;
+                no_answer_samples += 1;
             } else {
                 hit_sum += if relevant_returned > 0 { 1.0 } else { 0.0 };
                 recall_sum += relevant_returned as f64 / expected.len() as f64;
+                mrr_sum += result
+                    .returned_ids
+                    .iter()
+                    .position(|id| expected.contains(id))
+                    .map(|index| 1.0 / (index + 1) as f64)
+                    .unwrap_or(0.0);
+                let mut seen = HashSet::new();
+                let dcg = result
+                    .returned_ids
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, id)| expected.contains(*id) && seen.insert((*id).as_str()))
+                    .map(|(index, _)| 1.0 / ((index + 2) as f64).log2())
+                    .sum::<f64>();
+                let ideal = (0..expected.len().min(top_k))
+                    .map(|index| 1.0 / ((index + 2) as f64).log2())
+                    .sum::<f64>();
+                ndcg_sum += if ideal > 0.0 { dcg / ideal } else { 0.0 };
             }
             precision_sum += if returned.is_empty() {
                 if expected.is_empty() {
@@ -1954,6 +2010,14 @@ fn summarize_run(
         hit_at_k: hit_sum / samples as f64,
         recall_at_k: recall_sum / samples as f64,
         precision_at_k: precision_sum / samples as f64,
+        mrr_at_k: mrr_sum / samples as f64,
+        ndcg_at_k: ndcg_sum / samples as f64,
+        negative_queries: queries
+            .iter()
+            .filter(|query| query.relevant_ids.is_empty())
+            .count(),
+        no_answer_accuracy: (no_answer_samples > 0)
+            .then_some(no_answer_sum / no_answer_samples as f64),
         avg_latency_micros: average_u64(&latencies),
         avg_end_to_end_micros: average_u64(&latencies)
             .saturating_add(store_open_micros_sum / samples as u64),
@@ -1996,7 +2060,10 @@ fn summarize_dataset(dataset: &EvalDataset) -> DatasetSummary {
     }
 }
 
-fn generate_dataset(profile: GeneratedProfile) -> EvalDataset {
+fn generate_dataset_with_queries(
+    profile: GeneratedProfile,
+    query_profile: GeneratedQueryProfile,
+) -> EvalDataset {
     let (projects, records_per_project, query_stride) = match profile {
         GeneratedProfile::Tiny => (2, 12, 4),
         GeneratedProfile::Small => (4, 48, 8),
@@ -2053,22 +2120,58 @@ fn generate_dataset(profile: GeneratedProfile) -> EvalDataset {
             });
 
             if row % query_stride == 0 {
-                queries.push(EvalQuery {
-                    id: format!("q:{scope}:{component}:{row}"),
-                    query: format!(
-                        "In {scope}, what does integration note {row} record for {component} {decision}?"
-                    ),
-                    scope: Some(scope.clone()),
-                    relevant_ids: vec![id],
-                    category: "single_fact_recall".to_string(),
-                });
+                if matches!(
+                    query_profile,
+                    GeneratedQueryProfile::Lexical | GeneratedQueryProfile::Mixed
+                ) {
+                    queries.push(EvalQuery {
+                        id: format!("q:lexical:{scope}:{component}:{row}"),
+                        query: format!(
+                            "In {scope}, what does integration note {row} record for {component} {decision}?"
+                        ),
+                        scope: Some(scope.clone()),
+                        relevant_ids: vec![id.clone()],
+                        category: "lexical_single_fact".to_string(),
+                    });
+                }
+                if matches!(
+                    query_profile,
+                    GeneratedQueryProfile::Paraphrase | GeneratedQueryProfile::Mixed
+                ) {
+                    queries.push(EvalQuery {
+                        id: format!("q:paraphrase:{scope}:{component}:{row}"),
+                        query: format!(
+                            "For {scope}, which choice is attached to {component} record number {row}?"
+                        ),
+                        scope: Some(scope.clone()),
+                        relevant_ids: vec![id.clone()],
+                        category: "partial_paraphrase".to_string(),
+                    });
+                }
+                if matches!(
+                    query_profile,
+                    GeneratedQueryProfile::HardNegative | GeneratedQueryProfile::Mixed
+                ) {
+                    queries.push(EvalQuery {
+                        id: format!("q:negative:{scope}:{component}:{row}"),
+                        query: format!(
+                            "In {scope}, what deployment deadline is recorded for missing item {row}?"
+                        ),
+                        scope: Some(scope.clone()),
+                        relevant_ids: Vec::new(),
+                        category: "hard_negative".to_string(),
+                    });
+                }
             }
         }
     }
 
     EvalDataset {
-        name: format!("generated_{profile:?}").to_ascii_lowercase(),
-        source: "generated safe agent-memory-style fixture".to_string(),
+        name: format!("generated_{profile:?}_{}", query_profile.as_str()).to_ascii_lowercase(),
+        source: format!(
+            "generated safe agent-memory-style fixture ({})",
+            query_profile.as_str()
+        ),
         memories,
         queries,
     }
@@ -2120,7 +2223,7 @@ fn text_report(report: &EvalReport) -> String {
     ));
     output.push_str("\n\n");
     output.push_str(&format!(
-        "{:<28} {:<18} {:<18} {:<8} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8} {:>8} {:>9} {:>8}",
+        "{:<28} {:<18} {:<18} {:<8} {:>7} {:>7} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8} {:>8} {:>9} {:>8}",
         "system",
         "layer",
         "index",
@@ -2128,6 +2231,8 @@ fn text_report(report: &EvalReport) -> String {
         "hit@k",
         "rec@k",
         "prec@k",
+        "mrr@k",
+        "ndcg@k",
         "avg_us",
         "e2e_us",
         "p50_us",
@@ -2136,11 +2241,11 @@ fn text_report(report: &EvalReport) -> String {
         "items"
     ));
     output.push('\n');
-    output.push_str(&"-".repeat(153));
+    output.push_str(&"-".repeat(169));
     output.push('\n');
     for run in &report.runs {
         output.push_str(&format!(
-            "{:<28} {:<18} {:<18} {:<8} {:>7.3} {:>7.3} {:>7.3} {:>8} {:>8} {:>8} {:>8} {:>9} {:>8.2}",
+            "{:<28} {:<18} {:<18} {:<8} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>8} {:>8} {:>8} {:>8} {:>9} {:>8.2}",
             run.system,
             run.layer,
             run.index_kind,
@@ -2148,6 +2253,8 @@ fn text_report(report: &EvalReport) -> String {
             run.hit_at_k,
             run.recall_at_k,
             run.precision_at_k,
+            run.mrr_at_k,
+            run.ndcg_at_k,
             run.avg_latency_micros,
             run.avg_end_to_end_micros,
             run.p50_latency_micros,
@@ -2156,6 +2263,25 @@ fn text_report(report: &EvalReport) -> String {
             run.avg_returned_items
         ));
         output.push('\n');
+    }
+    if report.runs.iter().any(|run| run.negative_queries > 0) {
+        output.push_str("\nhard-negative rejection:\n");
+        output.push_str(&format!(
+            "{:<28} {:<18} {:<8} {:>10} {:>16}\n",
+            "system", "layer", "mode", "queries", "no_answer_acc"
+        ));
+        output.push_str(&"-".repeat(86));
+        output.push('\n');
+        for run in report.runs.iter().filter(|run| run.negative_queries > 0) {
+            output.push_str(&format!(
+                "{:<28} {:<18} {:<8} {:>10} {:>16.3}\n",
+                run.system,
+                run.layer,
+                run.mode,
+                run.negative_queries,
+                run.no_answer_accuracy.unwrap_or_default()
+            ));
+        }
     }
     output.push_str("\nwork counters (averages):\n");
     output.push_str(&format!(
@@ -2209,6 +2335,9 @@ fn text_report(report: &EvalReport) -> String {
     }
     output.push_str("\nnotes:\n");
     output.push_str("- avg_us measures recall after engine open; e2e_us adds store_open for sealed_cold runs.\n");
+    output.push_str(
+        "- hard-negative queries count as correct only when retrieval returns no items.\n",
+    );
     for note in &report.notes {
         output.push_str(&format!("- {note}\n"));
     }
@@ -2310,7 +2439,8 @@ mod tests {
 
     #[test]
     fn generated_dataset_is_valid() {
-        let dataset = generate_dataset(GeneratedProfile::Tiny);
+        let dataset =
+            generate_dataset_with_queries(GeneratedProfile::Tiny, GeneratedQueryProfile::Lexical);
         validate_dataset(&dataset).unwrap();
         assert!(!dataset.memories.is_empty());
         assert!(!dataset.queries.is_empty());
@@ -2318,6 +2448,38 @@ mod tests {
             let row = query.relevant_ids[0].rsplit(':').next().unwrap();
             assert!(query.query.contains(&format!("note {row}")));
         }
+    }
+
+    #[test]
+    fn generated_query_profiles_cover_paraphrases_and_hard_negatives() {
+        let paraphrase = generate_dataset_with_queries(
+            GeneratedProfile::Tiny,
+            GeneratedQueryProfile::Paraphrase,
+        );
+        validate_dataset(&paraphrase).unwrap();
+        assert!(paraphrase
+            .queries
+            .iter()
+            .all(|query| query.category == "partial_paraphrase"));
+        assert!(paraphrase
+            .queries
+            .iter()
+            .all(|query| !query.relevant_ids.is_empty()));
+
+        let negatives = generate_dataset_with_queries(
+            GeneratedProfile::Tiny,
+            GeneratedQueryProfile::HardNegative,
+        );
+        validate_dataset(&negatives).unwrap();
+        assert!(negatives
+            .queries
+            .iter()
+            .all(|query| query.relevant_ids.is_empty()));
+
+        let mixed =
+            generate_dataset_with_queries(GeneratedProfile::Tiny, GeneratedQueryProfile::Mixed);
+        validate_dataset(&mixed).unwrap();
+        assert_eq!(mixed.queries.len(), paraphrase.queries.len() * 3);
     }
 
     #[test]
@@ -2465,7 +2627,8 @@ mod tests {
 
     #[test]
     fn scan_baseline_finds_generated_relevant_memory() {
-        let dataset = generate_dataset(GeneratedProfile::Tiny);
+        let dataset =
+            generate_dataset_with_queries(GeneratedProfile::Tiny, GeneratedQueryProfile::Lexical);
         let query = &dataset.queries[0];
         let returned = scan_baseline(&dataset, query, 5, RecallMode::Focused);
         assert!(returned.contains(&query.relevant_ids[0]));
@@ -2473,7 +2636,8 @@ mod tests {
 
     #[test]
     fn bm25_baseline_finds_generated_relevant_memory() {
-        let dataset = generate_dataset(GeneratedProfile::Tiny);
+        let dataset =
+            generate_dataset_with_queries(GeneratedProfile::Tiny, GeneratedQueryProfile::Lexical);
         let query = &dataset.queries[0];
         let index = Bm25Index::build(&dataset);
         let returned = index.search(query, 5, RecallMode::Focused);
@@ -2482,7 +2646,8 @@ mod tests {
 
     #[test]
     fn text_candidate_index_finds_generated_relevant_memory() {
-        let dataset = generate_dataset(GeneratedProfile::Tiny);
+        let dataset =
+            generate_dataset_with_queries(GeneratedProfile::Tiny, GeneratedQueryProfile::Lexical);
         let query = &dataset.queries[0];
         let index = TextCandidateIndex::build(&dataset);
         let returned = index.search(query, 5, RecallMode::Focused);
@@ -2491,7 +2656,8 @@ mod tests {
 
     #[test]
     fn page_token_index_finds_generated_relevant_memory() {
-        let dataset = generate_dataset(GeneratedProfile::Tiny);
+        let dataset =
+            generate_dataset_with_queries(GeneratedProfile::Tiny, GeneratedQueryProfile::Lexical);
         let query = &dataset.queries[0];
         let index = PageTokenIndex::build(&dataset, 8);
         let returned = index.search(query, 5, RecallMode::Focused);
@@ -2530,14 +2696,68 @@ mod tests {
         assert_eq!(summary.hit_at_k, 1.0);
         assert_eq!(summary.recall_at_k, 1.0);
         assert_eq!(summary.precision_at_k, 0.5);
+        assert_eq!(summary.mrr_at_k, 1.0);
+        assert_eq!(summary.ndcg_at_k, 1.0);
+        assert_eq!(summary.no_answer_accuracy, None);
 
         let report = EvalReport {
-            dataset: summarize_dataset(&generate_dataset(GeneratedProfile::Tiny)),
+            dataset: summarize_dataset(&generate_dataset_with_queries(
+                GeneratedProfile::Tiny,
+                GeneratedQueryProfile::Lexical,
+            )),
             runs: vec![summary],
             notes: Vec::new(),
         };
         let rendered = text_report(&report);
         assert!(rendered.contains("timing breakdown (averages, microseconds):"));
         assert!(rendered.contains("score_build"));
+    }
+
+    #[test]
+    fn run_summary_measures_rank_and_negative_rejection() {
+        let ranked_query = EvalQuery {
+            id: "ranked".to_string(),
+            query: "target".to_string(),
+            scope: None,
+            relevant_ids: vec!["target".to_string()],
+            category: "ranked".to_string(),
+        };
+        let ranked = summarize_run(
+            "test".to_string(),
+            "test".to_string(),
+            "none".to_string(),
+            "focused".to_string(),
+            5,
+            1,
+            &[ranked_query],
+            &[QueryResult {
+                returned_ids: vec!["distractor".to_string(), "target".to_string()],
+                ..QueryResult::default()
+            }],
+        );
+        assert_eq!(ranked.mrr_at_k, 0.5);
+        assert!((ranked.ndcg_at_k - 0.630_929_753).abs() < 1e-6);
+
+        let negative_query = EvalQuery {
+            id: "negative".to_string(),
+            query: "missing".to_string(),
+            scope: None,
+            relevant_ids: Vec::new(),
+            category: "hard_negative".to_string(),
+        };
+        let rejected = summarize_run(
+            "test".to_string(),
+            "test".to_string(),
+            "none".to_string(),
+            "focused".to_string(),
+            5,
+            1,
+            &[negative_query],
+            &[QueryResult::default()],
+        );
+        assert_eq!(rejected.negative_queries, 1);
+        assert_eq!(rejected.no_answer_accuracy, Some(1.0));
+        assert_eq!(rejected.mrr_at_k, 1.0);
+        assert_eq!(rejected.ndcg_at_k, 1.0);
     }
 }

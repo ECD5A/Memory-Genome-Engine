@@ -218,6 +218,17 @@ cargo run --release --manifest-path tools/agent-memory-eval/Cargo.toml -- \
   --index both --modes focused-broad --baselines all --output text
 ```
 
+Generated query difficulty can be selected independently:
+
+```bash
+--query-profile lexical
+--query-profile paraphrase
+--query-profile hard-negative
+--query-profile mixed
+```
+
+The report includes Hit/Recall/Precision@K, MRR@K, nDCG@K, and no-answer accuracy for hard negatives. Paraphrase fixtures retain scope/component anchors; they are not a semantic embedding benchmark. Hard negatives deliberately share a scope with unrelated records. The current retrieval contract ranks candidates and has no global semantic abstention threshold, so a non-empty result for such a query must not be interpreted as a verified answer.
+
 Generated fixtures are deterministic but synthetic. Local LongMemEval/LoCoMo adapters require user-supplied datasets; results measure retrieval, not final LLM answer quality, and must not be presented as cross-project claims without identical corpora and settings.
 
 ## Measured Engineering Baseline
@@ -263,6 +274,7 @@ That run imported 1,068,576 bytes into 985 chunks and 46 sealed pages. The Exact
 Interpretation limits:
 
 - The generated workload has deterministic, identifiable relevant records; it verifies retrieval correctness and engine behavior, not open-domain reasoning.
+- The published table uses the lexical query profile. Paraphrase and hard-negative profiles are development evidence and must be reported separately rather than blended into that baseline.
 - The repository corpus run is a performance workload. Its generated marker-targeted queries are not a real-world retrieval-quality score.
 - LongMemEval and LoCoMo adapters are implemented, but their full datasets were not installed for this run, so no full-dataset result is claimed.
 - Timing changes with hardware, filesystem state, background load, corpus shape, and ingestion settings.
