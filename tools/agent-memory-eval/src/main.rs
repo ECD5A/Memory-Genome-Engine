@@ -262,6 +262,7 @@ struct RunSummary {
     ndcg_at_k: f64,
     negative_queries: usize,
     no_answer_accuracy: Option<f64>,
+    abstention_analysis: Option<AbstentionAnalysis>,
     avg_latency_micros: u64,
     avg_end_to_end_micros: u64,
     p50_latency_micros: u64,
@@ -281,9 +282,20 @@ struct RunSummary {
     avg_context_packet_build_micros: u64,
 }
 
+#[derive(Clone, Debug, Serialize)]
+struct AbstentionAnalysis {
+    threshold_score: i64,
+    balanced_accuracy: f64,
+    positive_hit_accept_rate: f64,
+    negative_reject_rate: f64,
+    positive_samples: usize,
+    negative_samples: usize,
+}
+
 #[derive(Clone, Debug, Default)]
 struct QueryResult {
     returned_ids: Vec<String>,
+    top_score: Option<i64>,
     latency_micros: u64,
     store_open_micros: u64,
     context_bytes: usize,
@@ -718,7 +730,11 @@ fn convert_longmemeval(
         relevant_ids.sort();
         relevant_ids.dedup();
 
-        if relevant_ids.is_empty() {
+        let is_abstention = question_id.ends_with("_abs");
+        if is_abstention {
+            relevant_ids.clear();
+        }
+        if relevant_ids.is_empty() && !is_abstention {
             skipped_without_evidence += 1;
             continue;
         }
@@ -728,7 +744,11 @@ fn convert_longmemeval(
             query: question,
             scope: Some(scope),
             relevant_ids,
-            category: question_type,
+            category: if is_abstention {
+                "abstention".to_string()
+            } else {
+                question_type
+            },
         });
         if max_queries.is_some_and(|max| queries.len() >= max) {
             break;
@@ -1342,6 +1362,11 @@ fn evaluate_mge_query(
     }
     Ok(QueryResult {
         returned_ids,
+        top_score: packet
+            .debug
+            .score_details
+            .first()
+            .map(|detail| detail.score),
         latency_micros,
         store_open_micros: 0,
         context_bytes: packet.to_prompt_text().len(),
@@ -2018,6 +2043,7 @@ fn summarize_run(
             .count(),
         no_answer_accuracy: (no_answer_samples > 0)
             .then_some(no_answer_sum / no_answer_samples as f64),
+        abstention_analysis: summarize_abstention(queries, results, repeats),
         avg_latency_micros: average_u64(&latencies),
         avg_end_to_end_micros: average_u64(&latencies)
             .saturating_add(store_open_micros_sum / samples as u64),
@@ -2037,6 +2063,76 @@ fn summarize_run(
         avg_reranking_micros: reranking_micros_sum / samples as u64,
         avg_context_packet_build_micros: context_packet_build_micros_sum / samples as u64,
     }
+}
+
+fn summarize_abstention(
+    queries: &[EvalQuery],
+    results: &[QueryResult],
+    repeats: usize,
+) -> Option<AbstentionAnalysis> {
+    let positive_samples = queries
+        .iter()
+        .filter(|query| !query.relevant_ids.is_empty())
+        .count()
+        * repeats;
+    let negative_samples = queries
+        .iter()
+        .filter(|query| query.relevant_ids.is_empty())
+        .count()
+        * repeats;
+    if positive_samples == 0 || negative_samples == 0 {
+        return None;
+    }
+
+    let mut thresholds = results
+        .iter()
+        .filter_map(|result| result.top_score)
+        .collect::<Vec<_>>();
+    let highest = thresholds.iter().copied().max()?;
+    thresholds.push(highest.saturating_add(1));
+    thresholds.sort_unstable();
+    thresholds.dedup();
+
+    let mut best: Option<AbstentionAnalysis> = None;
+    for threshold in thresholds {
+        let mut positive_correct = 0usize;
+        let mut negative_correct = 0usize;
+        for (query_index, query) in queries.iter().enumerate() {
+            let expected = query.relevant_ids.iter().collect::<HashSet<_>>();
+            for repeat_index in 0..repeats {
+                let result = &results[query_index * repeats + repeat_index];
+                let accepted = !result.returned_ids.is_empty()
+                    && result.top_score.is_some_and(|score| score >= threshold);
+                if expected.is_empty() {
+                    negative_correct += usize::from(!accepted);
+                } else if accepted && result.returned_ids.iter().any(|id| expected.contains(id)) {
+                    positive_correct += 1;
+                }
+            }
+        }
+
+        let positive_hit_accept_rate = positive_correct as f64 / positive_samples as f64;
+        let negative_reject_rate = negative_correct as f64 / negative_samples as f64;
+        let candidate = AbstentionAnalysis {
+            threshold_score: threshold,
+            balanced_accuracy: (positive_hit_accept_rate + negative_reject_rate) / 2.0,
+            positive_hit_accept_rate,
+            negative_reject_rate,
+            positive_samples,
+            negative_samples,
+        };
+        let replace = best.as_ref().is_none_or(|current| {
+            candidate.balanced_accuracy > current.balanced_accuracy
+                || (candidate.balanced_accuracy == current.balanced_accuracy
+                    && (candidate.negative_reject_rate > current.negative_reject_rate
+                        || (candidate.negative_reject_rate == current.negative_reject_rate
+                            && candidate.threshold_score > current.threshold_score)))
+        });
+        if replace {
+            best = Some(candidate);
+        }
+    }
+    best
 }
 
 fn summarize_dataset(dataset: &EvalDataset) -> DatasetSummary {
@@ -2283,6 +2379,36 @@ fn text_report(report: &EvalReport) -> String {
             ));
         }
     }
+    if report
+        .runs
+        .iter()
+        .any(|run| run.abstention_analysis.is_some())
+    {
+        output.push_str("\neval-only score threshold sweep:\n");
+        output.push_str(&format!(
+            "{:<28} {:<18} {:<8} {:>10} {:>10} {:>10} {:>10}\n",
+            "system", "layer", "mode", "threshold", "balanced", "pos_hit", "neg_reject"
+        ));
+        output.push_str(&"-".repeat(105));
+        output.push('\n');
+        for run in report
+            .runs
+            .iter()
+            .filter(|run| run.abstention_analysis.is_some())
+        {
+            let analysis = run.abstention_analysis.as_ref().unwrap();
+            output.push_str(&format!(
+                "{:<28} {:<18} {:<8} {:>10} {:>10.3} {:>10.3} {:>10.3}\n",
+                run.system,
+                run.layer,
+                run.mode,
+                analysis.threshold_score,
+                analysis.balanced_accuracy,
+                analysis.positive_hit_accept_rate,
+                analysis.negative_reject_rate
+            ));
+        }
+    }
     output.push_str("\nwork counters (averages):\n");
     output.push_str(&format!(
         "{:<28} {:<18} {:<8} {:>10} {:>10} {:>10} {:>12}\n",
@@ -2337,6 +2463,9 @@ fn text_report(report: &EvalReport) -> String {
     output.push_str("- avg_us measures recall after engine open; e2e_us adds store_open for sealed_cold runs.\n");
     output.push_str(
         "- hard-negative queries count as correct only when retrieval returns no items.\n",
+    );
+    output.push_str(
+        "- threshold sweep is diagnostic only and does not change production recall output.\n",
     );
     for note in &report.notes {
         output.push_str(&format!("- {note}\n"));
@@ -2543,6 +2672,32 @@ mod tests {
         assert_eq!(dataset.memories.len(), 2);
         assert_eq!(dataset.queries[0].relevant_ids.len(), 1);
         assert!(dataset.queries[0].relevant_ids[0].ends_with(":session"));
+    }
+
+    #[test]
+    fn converts_longmemeval_abstention_as_negative_even_with_answer_sessions() {
+        let value = serde_json::json!([{
+            "question_id": "q1_abs",
+            "question_type": "single-session-user",
+            "question": "What event never happened?",
+            "haystack_session_ids": ["s1"],
+            "answer_session_ids": ["s1"],
+            "haystack_sessions": [[
+                {"role": "user", "content": "The notebook is blue."}
+            ]]
+        }]);
+        let dataset = convert_longmemeval(
+            &value,
+            "test".to_string(),
+            None,
+            None,
+            IngestMode::SessionChunk,
+        )
+        .expect("convert");
+        validate_dataset(&dataset).unwrap();
+        assert_eq!(dataset.queries.len(), 1);
+        assert!(dataset.queries[0].relevant_ids.is_empty());
+        assert_eq!(dataset.queries[0].category, "abstention");
     }
 
     #[test]
@@ -2759,5 +2914,52 @@ mod tests {
         assert_eq!(rejected.no_answer_accuracy, Some(1.0));
         assert_eq!(rejected.mrr_at_k, 1.0);
         assert_eq!(rejected.ndcg_at_k, 1.0);
+    }
+
+    #[test]
+    fn run_summary_finds_eval_only_abstention_threshold() {
+        let queries = vec![
+            EvalQuery {
+                id: "positive".to_string(),
+                query: "known".to_string(),
+                scope: None,
+                relevant_ids: vec!["target".to_string()],
+                category: "positive".to_string(),
+            },
+            EvalQuery {
+                id: "negative".to_string(),
+                query: "unknown".to_string(),
+                scope: None,
+                relevant_ids: Vec::new(),
+                category: "abstention".to_string(),
+            },
+        ];
+        let results = vec![
+            QueryResult {
+                returned_ids: vec!["target".to_string()],
+                top_score: Some(80),
+                ..QueryResult::default()
+            },
+            QueryResult {
+                returned_ids: vec!["distractor".to_string()],
+                top_score: Some(20),
+                ..QueryResult::default()
+            },
+        ];
+        let summary = summarize_run(
+            "mge".to_string(),
+            "hot".to_string(),
+            "exact".to_string(),
+            "focused".to_string(),
+            5,
+            1,
+            &queries,
+            &results,
+        );
+        let analysis = summary.abstention_analysis.expect("threshold analysis");
+        assert_eq!(analysis.threshold_score, 80);
+        assert_eq!(analysis.balanced_accuracy, 1.0);
+        assert_eq!(analysis.positive_hit_accept_rate, 1.0);
+        assert_eq!(analysis.negative_reject_rate, 1.0);
     }
 }
