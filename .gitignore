@@ -19,3 +19,5 @@ dist/
 *.tsbuildinfo
 **/*.rs.bk
 desktop.ini
+*.mge-backup-*
+*.mge-tmp

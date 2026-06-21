@@ -13,6 +13,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 mod app_service;
+mod host_integration;
 mod tui;
 
 use std::env;
@@ -22,6 +23,7 @@ use std::str::FromStr;
 use anyhow::{bail, Context, Result};
 use app_service::{doctor_report, AppService, MarkdownImportInput};
 use clap::{Parser, Subcommand};
+use host_integration::{configure_host, AgentHost, HostSetupOptions};
 use mge_core::{
     CellId, CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine, MemoryKind,
     MemorySource, MemoryStatus, MemoryValue, MgeError, PageClustererKind, PageCodecKind,
@@ -273,11 +275,34 @@ enum Commands {
         command: ImportCommands,
     },
     Setup {
+        /// Optional agent host to configure after store setup.
+        #[arg(value_enum)]
+        host: Option<AgentHost>,
+
         #[arg(long)]
         encrypted: bool,
 
         #[arg(long)]
         passphrase_env: Option<String>,
+
+        /// Explicit mge-mcp-server binary path.
+        #[arg(long)]
+        mcp_server: Option<PathBuf>,
+
+        /// Print the planned host change without modifying host configuration.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Remove the Memory Genome MCP registration from the selected host.
+        #[arg(long)]
+        remove: bool,
+
+        /// Replace an existing conflicting Memory Genome MCP registration.
+        #[arg(long)]
+        force: bool,
+
+        #[arg(long)]
+        json: bool,
     },
     Tui {
         #[arg(long)]
@@ -798,12 +823,58 @@ fn main() -> Result<()> {
             }
         },
         Commands::Setup {
+            host,
             encrypted,
             passphrase_env,
+            mcp_server,
+            dry_run,
+            remove,
+            force,
+            json,
         } => {
             let service = AppService::new(cli.store.clone(), passphrase_env);
-            let report = service.setup_fast(encrypted)?;
-            print!("{}", report.to_human_text());
+            if let Some(host) = host {
+                let setup = if remove {
+                    None
+                } else {
+                    Some(service.setup_fast(encrypted)?)
+                };
+                let integration = configure_host(HostSetupOptions {
+                    host,
+                    store: cli.store.clone(),
+                    passphrase_env: service.passphrase_env_name().map(str::to_string),
+                    mcp_server,
+                    dry_run,
+                    remove,
+                    force,
+                })?;
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "setup": setup,
+                            "integration": integration
+                        }))?
+                    );
+                } else {
+                    if let Some(setup) = setup {
+                        print!("{}", setup.to_human_text());
+                    }
+                    print!("{}", integration.to_human_text());
+                }
+            } else {
+                if mcp_server.is_some() || dry_run || remove || force {
+                    bail!(
+                        "--mcp-server, --dry-run, --remove, and --force require an agent host: codex, claude-code, cursor, or generic-mcp"
+                    );
+                }
+                let report = service.setup_fast(encrypted)?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else {
+                    print!("{}", report.to_human_text());
+                }
+            }
         }
         Commands::Tui { passphrase_env } => {
             tui::run(tui::TuiOptions {

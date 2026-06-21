@@ -73,6 +73,25 @@ Use the lowest layer that fits the host:
 
 Rust remains the core. Python and TypeScript wrappers delegate to the Rust CLI and do not duplicate memory logic.
 
+## Agent Host Setup
+
+Install `mge` and `mge-mcp-server` in the same directory, initialize a store, and register it with a supported local host:
+
+```bash
+mge setup codex
+mge setup claude-code
+mge setup cursor
+mge setup generic-mcp
+```
+
+- Codex and Claude Code use their native MCP registration commands.
+- Cursor merges `memory-genome` into the project-local `.cursor/mcp.json` and preserves unrelated servers.
+- `generic-mcp` prints a portable stdio configuration without modifying host settings.
+- `--dry-run` prints the planned native command, `--remove` removes only the Memory Genome registration, and `--force` is required to replace a conflicting registration.
+- `--mcp-server <PATH>` selects an explicit server binary when it is not next to `mge` or on `PATH`.
+
+Setup starts the server and checks MCP initialize, tool discovery, and store stats before writing host configuration. For encrypted stores, pass `--encrypted --passphrase-env MGE_PASSPHRASE`; only the environment variable name is stored. The host process must receive that environment variable at runtime. The passphrase value is never written to host configuration.
+
 ## MCP Stdio Server
 
 The adapter expects an existing initialized Memory Genome store. Create it once with CLI/setup before sending `mge_remember`, `mge_recall`, or other store tools:
@@ -81,11 +100,13 @@ The adapter expects an existing initialized Memory Genome store. Create it once 
 cargo run -p mge-cli -- init --profile fast
 ```
 
-Run:
+Run with a default store context:
 
 ```bash
-cargo run -p mge-cli --bin mge-mcp-server
+cargo run -p mge-cli --bin mge-mcp-server -- --store .memory-genome
 ```
+
+`--passphrase-env <NAME>` adds the default encrypted-store environment variable. Per-call `store_path` and `passphrase_env` remain compatible overrides. Without `--store`, callers must continue to provide `store_path` in every tool request.
 
 Contract:
 
@@ -97,7 +118,7 @@ Contract:
 Each input line is one JSON-RPC request:
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"mge_stats","params":{"store_path":".memory-genome"}}
+{"jsonrpc":"2.0","id":1,"method":"mge_stats","params":{}}
 ```
 
 Each output line is one JSON-RPC response:
@@ -111,7 +132,7 @@ Standard MCP hosts use `initialize`, `notifications/initialized`, `ping`, `tools
 ```json
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"local-agent","version":"1.0"}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mge_stats","arguments":{"store_path":".memory-genome"}}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mge_stats","arguments":{}}}
 ```
 
 Schema discovery:
@@ -176,9 +197,9 @@ Store tools:
 - `mge_rebuild_indexes`
 - `mge_export_markdown`
 
-All store tools accept `store_path`; encrypted stores also accept `passphrase_env`. `mge_validate` accepts `deep`; `mge_export_markdown` accepts optional `output_path`.
+All store tools accept an optional `store_path` override when the server was started with `--store`; otherwise it is required. Encrypted stores similarly accept a per-call `passphrase_env` override. `mge_validate` accepts `deep`; `mge_export_markdown` accepts optional `output_path`.
 
-There is no `mge_init` MCP tool in the current contract. This keeps the adapter focused on agent memory operations after the host has chosen or created the local store. If an agent host needs automated first-run setup, run `mge init` / `mge setup` once before starting the MCP session.
+There is no `mge_init` MCP tool in the current contract. This keeps the adapter focused on agent memory operations after the host has chosen or created the local store. Use `mge setup <HOST>` for first-run store creation and host registration.
 
 ### Structured Errors
 

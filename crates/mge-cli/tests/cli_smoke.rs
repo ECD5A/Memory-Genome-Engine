@@ -420,6 +420,125 @@ fn cli_setup_encrypted_requires_passphrase_env() {
 }
 
 #[test]
+fn cli_setup_prints_generic_and_native_host_commands() {
+    let dir = tempdir().unwrap();
+    let project = dir.path().join("project");
+    fs::create_dir_all(&project).unwrap();
+    let store = project.join(".memory-genome");
+    let server = PathBuf::from(env!("CARGO_BIN_EXE_mge-mcp-server"));
+
+    let generic = Command::new(env!("CARGO_BIN_EXE_mge"))
+        .current_dir(&project)
+        .arg("--store")
+        .arg(&store)
+        .args(["setup", "generic-mcp", "--mcp-server"])
+        .arg(&server)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(
+        generic.status.success(),
+        "generic setup failed: {}",
+        String::from_utf8_lossy(&generic.stderr)
+    );
+    let generic: Value = serde_json::from_slice(&generic.stdout).unwrap();
+    assert_eq!(generic["integration"]["host"], "generic MCP host");
+    assert_eq!(generic["integration"]["changed"], false);
+    assert_eq!(generic["integration"]["smoke_ok"], true);
+    assert!(generic["integration"]["command"]
+        .as_str()
+        .unwrap()
+        .contains("mcpServers"));
+
+    for host in ["codex", "claude-code"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_mge"))
+            .current_dir(&project)
+            .arg("--store")
+            .arg(&store)
+            .args(["setup", host, "--mcp-server"])
+            .arg(&server)
+            .args(["--dry-run", "--json"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{host} dry-run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["integration"]["dry_run"], true);
+        assert!(report["integration"]["command"]
+            .as_str()
+            .unwrap()
+            .contains("mcp add"));
+    }
+}
+
+#[test]
+fn cli_setup_cursor_merges_idempotently_and_removes_only_mge() {
+    let dir = tempdir().unwrap();
+    let project = dir.path().join("cursor-project");
+    let cursor_dir = project.join(".cursor");
+    fs::create_dir_all(&cursor_dir).unwrap();
+    let config = cursor_dir.join("mcp.json");
+    fs::write(
+        &config,
+        serde_json::to_vec_pretty(&json!({
+            "mcpServers": {
+                "existing-server": { "command": "existing", "args": [] }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let store = project.join(".memory-genome");
+    let server = PathBuf::from(env!("CARGO_BIN_EXE_mge-mcp-server"));
+
+    let run_cursor = |extra: &[&str]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mge"));
+        command
+            .current_dir(&project)
+            .arg("--store")
+            .arg(&store)
+            .args(["setup", "cursor", "--mcp-server"])
+            .arg(&server)
+            .arg("--json")
+            .args(extra);
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "cursor setup failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+
+    let added = run_cursor(&[]);
+    assert_eq!(added["integration"]["changed"], true);
+    let configured: Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+    assert!(configured["mcpServers"]["existing-server"].is_object());
+    assert_eq!(configured["mcpServers"]["memory-genome"]["type"], "stdio");
+    assert_eq!(
+        configured["mcpServers"]["memory-genome"]["args"][0],
+        "--store"
+    );
+
+    let repeated = run_cursor(&[]);
+    assert_eq!(repeated["integration"]["changed"], false);
+    assert_eq!(repeated["integration"]["action"], "already configured");
+
+    let removed = run_cursor(&["--remove"]);
+    assert_eq!(removed["integration"]["changed"], true);
+    let configured: Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+    assert!(configured["mcpServers"]["existing-server"].is_object());
+    assert!(configured["mcpServers"].get("memory-genome").is_none());
+    assert!(fs::read_dir(&cursor_dir)
+        .unwrap()
+        .flatten()
+        .any(|entry| entry.file_name().to_string_lossy().contains("mge-backup")));
+}
+
+#[test]
 fn cli_doctor_reports_unencrypted_store_status() {
     let dir = tempdir().unwrap();
     let store = dir.path().join(".memory-genome");

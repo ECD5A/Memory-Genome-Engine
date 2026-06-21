@@ -64,6 +64,17 @@ cargo run -p mge-cli -- setup --encrypted --passphrase-env MGE_PASSPHRASE
 Encrypted setup reads the passphrase from the environment variable name passed to `--passphrase-env`; the passphrase itself is not typed into the TUI or printed.
 Encryption is a store-creation choice. Re-running `setup --encrypted` or `init --encrypted` never silently converts an existing plaintext store.
 
+Register the initialized store with a local agent host:
+
+```bash
+mge setup codex
+mge setup claude-code
+mge setup cursor
+mge setup generic-mcp
+```
+
+The first three commands update only the selected host registration. Generic mode prints a portable MCP stdio configuration. Add `--dry-run` to inspect a native command first or `--remove` to undo the registration. See [Integration](docs/INTEGRATION.md) for encrypted-host setup and rollback details.
+
 ## Create A Store
 
 Default store:
