@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail, Context, Result};
+use clap::Parser;
 use mge_core::{
     CellId, ContextPacket, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
     RecallMode, RecallRequest, RememberRequest, SensitivityLevel, SessionChunkOptions,
@@ -29,8 +30,30 @@ use serde_json::{json, Map, Value};
 
 const JSONRPC_VERSION: &str = "2.0";
 const PROTOCOL_VERSION: &str = "mge-jsonrpc-1";
-const INTEGRATION_SCHEMA_VERSION: u32 = 2;
+const INTEGRATION_SCHEMA_VERSION: u32 = 3;
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "mge-mcp-server",
+    version,
+    about = "Memory Genome Engine MCP stdio server"
+)]
+struct ServerArgs {
+    /// Default store used when a tool call omits store_path.
+    #[arg(long)]
+    store: Option<PathBuf>,
+
+    /// Default environment variable name used to unlock an encrypted store.
+    #[arg(long)]
+    passphrase_env: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ServerConfig {
+    store: Option<PathBuf>,
+    passphrase_env: Option<String>,
+}
 
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
@@ -193,6 +216,11 @@ struct McpCallToolParams {
 }
 
 fn main() -> Result<()> {
+    let args = ServerArgs::parse();
+    let config = ServerConfig {
+        store: args.store,
+        passphrase_env: args.passphrase_env,
+    };
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 
@@ -202,7 +230,7 @@ fn main() -> Result<()> {
             continue;
         }
 
-        if let Some(response) = handle_line(&line) {
+        if let Some(response) = handle_line(&line, &config) {
             serde_json::to_writer(&mut stdout, &response)?;
             stdout.write_all(b"\n")?;
             stdout.flush()?;
@@ -212,7 +240,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn handle_line(line: &str) -> Option<JsonRpcResponse> {
+fn handle_line(line: &str, config: &ServerConfig) -> Option<JsonRpcResponse> {
     let line = line.trim_start_matches('\u{feff}');
     match serde_json::from_str::<JsonRpcRequest>(line) {
         Ok(request) => {
@@ -233,11 +261,11 @@ fn handle_line(line: &str) -> Option<JsonRpcResponse> {
             }
 
             if id.is_none() {
-                let _ = handle_request(request);
+                let _ = handle_request(request, config);
                 return None;
             }
 
-            match handle_request(request) {
+            match handle_request(request, config) {
                 Ok(result) => Some(JsonRpcResponse {
                     jsonrpc: JSONRPC_VERSION,
                     id,
@@ -260,24 +288,27 @@ fn handle_line(line: &str) -> Option<JsonRpcResponse> {
     }
 }
 
-fn handle_request(request: JsonRpcRequest) -> std::result::Result<Value, ToolError> {
+fn handle_request(
+    request: JsonRpcRequest,
+    config: &ServerConfig,
+) -> std::result::Result<Value, ToolError> {
     let tool = request.method.as_str();
     match tool {
-        "initialize" => Ok(mcp_initialize(&request.params)),
+        "initialize" => Ok(mcp_initialize(&request.params, config)),
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({ "tools": mcp_tools() })),
-        "tools/call" => mcp_call_tool(request.params),
+        "tools/list" => Ok(json!({ "tools": mcp_tools(config) })),
+        "tools/call" => mcp_call_tool(request.params, config),
         "notifications/initialized" | "notifications/cancelled" => Ok(json!({})),
-        "mge_schema" => Ok(mge_schema()),
-        "mge_remember" => with_tool(tool, mge_remember(request.params)),
-        "mge_remember_session" => with_tool(tool, mge_remember_session(request.params)),
-        "mge_recall" => with_tool(tool, mge_recall(request.params)),
-        "mge_seal" => with_tool(tool, mge_seal(request.params)),
-        "mge_checkpoint" => with_tool(tool, mge_checkpoint(request.params)),
-        "mge_stats" => with_tool(tool, mge_stats(request.params)),
-        "mge_validate" => with_tool(tool, mge_validate(request.params)),
-        "mge_rebuild_indexes" => with_tool(tool, mge_rebuild_indexes(request.params)),
-        "mge_export_markdown" => with_tool(tool, mge_export_markdown(request.params)),
+        "mge_schema" => Ok(mge_schema(config)),
+        "mge_remember"
+        | "mge_remember_session"
+        | "mge_recall"
+        | "mge_seal"
+        | "mge_checkpoint"
+        | "mge_stats"
+        | "mge_validate"
+        | "mge_rebuild_indexes"
+        | "mge_export_markdown" => call_named_tool(tool, request.params, config),
         other => Err(ToolError {
             code: -32601,
             message: format!("unknown method: {other}"),
@@ -288,7 +319,7 @@ fn handle_request(request: JsonRpcRequest) -> std::result::Result<Value, ToolErr
     }
 }
 
-fn mcp_initialize(params: &Value) -> Value {
+fn mcp_initialize(params: &Value, config: &ServerConfig) -> Value {
     let requested = params
         .get("protocolVersion")
         .and_then(Value::as_str)
@@ -296,6 +327,14 @@ fn mcp_initialize(params: &Value) -> Value {
     let protocol_version = match requested {
         "2024-11-05" | MCP_PROTOCOL_VERSION => requested,
         _ => MCP_PROTOCOL_VERSION,
+    };
+    let instructions = if let Some(store) = &config.store {
+        format!(
+            "The Memory Genome store is preconfigured at {}. Use mge_recall before work and mge_remember or mge_remember_session after useful work. Omit store_path unless intentionally overriding the configured store.",
+            store.display()
+        )
+    } else {
+        "Initialize a store with the mge CLI, then use mge_recall before work and mge_remember or mge_remember_session after useful work. Every store tool requires store_path because this server has no configured default store.".to_string()
     };
     json!({
         "protocolVersion": protocol_version,
@@ -307,11 +346,11 @@ fn mcp_initialize(params: &Value) -> Value {
             "title": "Memory Genome Engine",
             "version": env!("CARGO_PKG_VERSION")
         },
-        "instructions": "Initialize a store with the mge CLI, then use mge_recall before work and mge_remember or mge_remember_session after useful work."
+        "instructions": instructions
     })
 }
 
-fn mcp_call_tool(params: Value) -> std::result::Result<Value, ToolError> {
+fn mcp_call_tool(params: Value, config: &ServerConfig) -> std::result::Result<Value, ToolError> {
     let call: McpCallToolParams = serde_json::from_value(params).map_err(|err| ToolError {
         code: -32602,
         message: format!("invalid tools/call params: {err}"),
@@ -319,7 +358,7 @@ fn mcp_call_tool(params: Value) -> std::result::Result<Value, ToolError> {
         recoverable: true,
         details: Some(json!({ "error_kind": "invalid_params" })),
     })?;
-    match call_named_tool(&call.name, call.arguments) {
+    match call_named_tool(&call.name, call.arguments, config) {
         Ok(result) => Ok(mcp_tool_result(result, false)),
         Err(err) => {
             let error = json!({
@@ -336,18 +375,31 @@ fn mcp_call_tool(params: Value) -> std::result::Result<Value, ToolError> {
     }
 }
 
-fn call_named_tool(name: &str, params: Value) -> std::result::Result<Value, ToolError> {
+fn call_named_tool(
+    name: &str,
+    params: Value,
+    config: &ServerConfig,
+) -> std::result::Result<Value, ToolError> {
     match name {
-        "mge_schema" => Ok(mge_schema()),
-        "mge_remember" => with_tool(name, mge_remember(params)),
-        "mge_remember_session" => with_tool(name, mge_remember_session(params)),
-        "mge_recall" => with_tool(name, mge_recall(params)),
-        "mge_seal" => with_tool(name, mge_seal(params)),
-        "mge_checkpoint" => with_tool(name, mge_checkpoint(params)),
-        "mge_stats" => with_tool(name, mge_stats(params)),
-        "mge_validate" => with_tool(name, mge_validate(params)),
-        "mge_rebuild_indexes" => with_tool(name, mge_rebuild_indexes(params)),
-        "mge_export_markdown" => with_tool(name, mge_export_markdown(params)),
+        "mge_schema" => Ok(mge_schema(config)),
+        "mge_remember" => with_tool(name, mge_remember(params_with_defaults(params, config))),
+        "mge_remember_session" => with_tool(
+            name,
+            mge_remember_session(params_with_defaults(params, config)),
+        ),
+        "mge_recall" => with_tool(name, mge_recall(params_with_defaults(params, config))),
+        "mge_seal" => with_tool(name, mge_seal(params_with_defaults(params, config))),
+        "mge_checkpoint" => with_tool(name, mge_checkpoint(params_with_defaults(params, config))),
+        "mge_stats" => with_tool(name, mge_stats(params_with_defaults(params, config))),
+        "mge_validate" => with_tool(name, mge_validate(params_with_defaults(params, config))),
+        "mge_rebuild_indexes" => with_tool(
+            name,
+            mge_rebuild_indexes(params_with_defaults(params, config)),
+        ),
+        "mge_export_markdown" => with_tool(
+            name,
+            mge_export_markdown(params_with_defaults(params, config)),
+        ),
         other => Err(ToolError {
             code: -32602,
             message: format!("unknown tool: {other}"),
@@ -419,14 +471,18 @@ fn message_with_cause(err: &anyhow::Error, pattern: &str) -> String {
     outer
 }
 
-fn mge_schema() -> Value {
+fn mge_schema(config: &ServerConfig) -> Value {
     tool_result(
         "mge_schema",
         true,
         json!({
-            "tools": tool_schemas(),
+            "tools": tool_schemas(config),
             "context_packet_contract": context_packet_contract_schema(),
-            "error_contract": error_contract_schema()
+            "error_contract": error_contract_schema(),
+            "server_defaults": {
+                "store_configured": config.store.is_some(),
+                "passphrase_env_configured": config.passphrase_env.is_some()
+            }
         }),
     )
 }
@@ -655,6 +711,25 @@ fn open_engine(store_path: &PathBuf, passphrase_env: Option<&str>) -> Result<Mem
         .with_context(|| format!("failed to open store {}", store_path.display()))
 }
 
+fn params_with_defaults(params: Value, config: &ServerConfig) -> Value {
+    let mut properties = match params {
+        Value::Object(properties) => properties,
+        Value::Null => Map::new(),
+        other => return other,
+    };
+    if let Some(store) = &config.store {
+        properties
+            .entry("store_path".to_string())
+            .or_insert_with(|| Value::String(store.to_string_lossy().into_owned()));
+    }
+    if let Some(passphrase_env) = &config.passphrase_env {
+        properties
+            .entry("passphrase_env".to_string())
+            .or_insert_with(|| Value::String(passphrase_env.clone()));
+    }
+    Value::Object(properties)
+}
+
 fn passphrase_from_env(passphrase_env: Option<&str>) -> Result<Option<String>> {
     let Some(name) = passphrase_env else {
         return Ok(None);
@@ -725,11 +800,14 @@ fn is_invalid_enum_value(message: &str) -> bool {
         || message.contains("unknown durability policy")
 }
 
-fn tool_schemas() -> Value {
+fn tool_schemas(config: &ServerConfig) -> Value {
+    let remember_required = required_fields(config, &["content"]);
+    let session_required = required_fields(config, &["turns"]);
+    let store_required = required_fields(config, &[]);
     json!({
         "mge_remember": {
             "input": {
-                "required": ["store_path", "content"],
+                "required": remember_required,
                 "properties": {
                     "store_path": "string path to existing Memory Genome store",
                     "content": "string memory content",
@@ -750,7 +828,7 @@ fn tool_schemas() -> Value {
         },
         "mge_remember_session": {
             "input": {
-                "required": ["store_path", "turns"],
+                "required": session_required,
                 "properties": {
                     "store_path": "string path to existing Memory Genome store",
                     "turns": "array of {role, content} session turns",
@@ -771,7 +849,7 @@ fn tool_schemas() -> Value {
         },
         "mge_recall": {
             "input": {
-                "required": ["store_path"],
+                "required": store_required,
                 "properties": {
                     "store_path": "string path to existing Memory Genome store",
                     "query": "required for focused/broad",
@@ -787,12 +865,12 @@ fn tool_schemas() -> Value {
             },
             "output": ["ok", "tool", "protocol_version", "integration_schema_version", "context_packet", "context", "json_runtime_storage"]
         },
-        "mge_seal": store_tool_schema("seal"),
-        "mge_checkpoint": store_tool_schema("checkpoint"),
-        "mge_stats": store_tool_schema("stats"),
+        "mge_seal": store_tool_schema("seal", config),
+        "mge_checkpoint": store_tool_schema("checkpoint", config),
+        "mge_stats": store_tool_schema("stats", config),
         "mge_validate": {
             "input": {
-                "required": ["store_path"],
+                "required": required_fields(config, &[]),
                 "properties": {
                     "store_path": "string path to existing Memory Genome store",
                     "deep": "boolean, default false",
@@ -801,10 +879,10 @@ fn tool_schemas() -> Value {
             },
             "output": ["ok", "tool", "protocol_version", "integration_schema_version", "validation"]
         },
-        "mge_rebuild_indexes": store_tool_schema("rebuild"),
+        "mge_rebuild_indexes": store_tool_schema("rebuild", config),
         "mge_export_markdown": {
             "input": {
-                "required": ["store_path"],
+                "required": required_fields(config, &[]),
                 "properties": {
                     "store_path": "string path to existing Memory Genome store",
                     "output_path": "optional markdown output path",
@@ -816,7 +894,7 @@ fn tool_schemas() -> Value {
     })
 }
 
-fn mcp_tools() -> Vec<Value> {
+fn mcp_tools(config: &ServerConfig) -> Vec<Value> {
     vec![
         mcp_tool(
             "mge_schema",
@@ -828,7 +906,7 @@ fn mcp_tools() -> Vec<Value> {
             "Store one typed memory cell in L1 hot memory.",
             json!({
                 "type": "object",
-                "required": ["store_path", "content"],
+                "required": required_fields(config, &["content"]),
                 "properties": {
                     "store_path": { "type": "string" },
                     "content": { "type": "string", "minLength": 1 },
@@ -851,7 +929,7 @@ fn mcp_tools() -> Vec<Value> {
             "Deterministically chunk agent turns and store each chunk as a memory cell.",
             json!({
                 "type": "object",
-                "required": ["store_path", "turns"],
+                "required": required_fields(config, &["turns"]),
                 "properties": {
                     "store_path": { "type": "string" },
                     "turns": {
@@ -885,7 +963,7 @@ fn mcp_tools() -> Vec<Value> {
             "Recall task-relevant memory as a ContextPacket.",
             json!({
                 "type": "object",
-                "required": ["store_path"],
+                "required": required_fields(config, &[]),
                 "properties": {
                     "store_path": { "type": "string" },
                     "query": { "type": "string" },
@@ -900,18 +978,23 @@ fn mcp_tools() -> Vec<Value> {
                 }
             }),
         ),
-        mcp_store_tool("mge_seal", "Seal current hot memory into immutable pages."),
+        mcp_store_tool(
+            "mge_seal",
+            "Seal current hot memory into immutable pages.",
+            config,
+        ),
         mcp_store_tool(
             "mge_checkpoint",
             "Flush pending hot records and write a recovery snapshot.",
+            config,
         ),
-        mcp_store_tool("mge_stats", "Return current store statistics."),
+        mcp_store_tool("mge_stats", "Return current store statistics.", config),
         mcp_tool(
             "mge_validate",
             "Validate store structure and optionally decode all sealed pages.",
             json!({
                 "type": "object",
-                "required": ["store_path"],
+                "required": required_fields(config, &[]),
                 "properties": {
                     "store_path": { "type": "string" },
                     "deep": { "type": "boolean", "default": false },
@@ -922,13 +1005,14 @@ fn mcp_tools() -> Vec<Value> {
         mcp_store_tool(
             "mge_rebuild_indexes",
             "Rebuild catalog and candidate indexes from sealed pages.",
+            config,
         ),
         mcp_tool(
             "mge_export_markdown",
             "Explicitly export memory to a plaintext Markdown file.",
             json!({
                 "type": "object",
-                "required": ["store_path"],
+                "required": required_fields(config, &[]),
                 "properties": {
                     "store_path": { "type": "string" },
                     "output_path": { "type": "string" },
@@ -939,13 +1023,13 @@ fn mcp_tools() -> Vec<Value> {
     ]
 }
 
-fn mcp_store_tool(name: &str, description: &str) -> Value {
+fn mcp_store_tool(name: &str, description: &str, config: &ServerConfig) -> Value {
     mcp_tool(
         name,
         description,
         json!({
             "type": "object",
-            "required": ["store_path"],
+            "required": required_fields(config, &[]),
             "properties": {
                 "store_path": { "type": "string" },
                 "passphrase_env": { "type": "string" }
@@ -962,10 +1046,10 @@ fn mcp_tool(name: &str, description: &str, input_schema: Value) -> Value {
     })
 }
 
-fn store_tool_schema(output_field: &str) -> Value {
+fn store_tool_schema(output_field: &str, config: &ServerConfig) -> Value {
     json!({
         "input": {
-            "required": ["store_path"],
+            "required": required_fields(config, &[]),
             "properties": {
                 "store_path": "string path to existing Memory Genome store",
                 "passphrase_env": "optional environment variable name used to unlock encrypted stores"
@@ -973,6 +1057,15 @@ fn store_tool_schema(output_field: &str) -> Value {
         },
         "output": ["ok", "tool", "protocol_version", "integration_schema_version", output_field]
     })
+}
+
+fn required_fields(config: &ServerConfig, fields: &[&'static str]) -> Vec<&'static str> {
+    let mut required = Vec::with_capacity(fields.len() + usize::from(config.store.is_none()));
+    if config.store.is_none() {
+        required.push("store_path");
+    }
+    required.extend_from_slice(fields);
+    required
 }
 
 fn context_packet_contract_schema() -> Value {

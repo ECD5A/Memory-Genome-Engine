@@ -7,7 +7,7 @@
     "tool_name": "mge_unknown_tool",
     "recoverable": false,
     "protocol_version": "mge-jsonrpc-1",
-    "integration_schema_version": 2,
+    "integration_schema_version": 3,
     "error_kind": "unknown_method"
   }
 }

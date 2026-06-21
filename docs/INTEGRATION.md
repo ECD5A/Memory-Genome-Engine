@@ -92,7 +92,7 @@ Contract:
 - JSON-RPC version: `2.0`
 - supported MCP protocol revision: `2025-06-18` (with `2024-11-05` negotiation support)
 - `protocol_version`: `mge-jsonrpc-1`
-- `integration_schema_version`: `2`
+- `integration_schema_version`: `3`
 
 Each input line is one JSON-RPC request:
 
@@ -103,7 +103,7 @@ Each input line is one JSON-RPC request:
 Each output line is one JSON-RPC response:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"ok":true,"tool":"mge_stats","protocol_version":"mge-jsonrpc-1","integration_schema_version":2,"stats":{}}}
+{"jsonrpc":"2.0","id":1,"result":{"ok":true,"tool":"mge_stats","protocol_version":"mge-jsonrpc-1","integration_schema_version":3,"stats":{}}}
 ```
 
 Standard MCP hosts use `initialize`, `notifications/initialized`, `ping`, `tools/list`, and `tools/call`. Notifications do not produce JSON-RPC responses. `tools/call` returns text content plus `structuredContent` and `isError`. Direct `mge_*` methods remain available as a versioned extension for existing hosts and SDK tests.
@@ -185,7 +185,7 @@ There is no `mge_init` MCP tool in the current contract. This keeps the adapter 
 Errors are stable for SDKs:
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params: missing field `content`","tool_name":"mge_remember","recoverable":true,"protocol_version":"mge-jsonrpc-1","integration_schema_version":2,"details":{"error_kind":"invalid_params"}}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params: missing field `content`","tool_name":"mge_remember","recoverable":true,"protocol_version":"mge-jsonrpc-1","integration_schema_version":3,"details":{"error_kind":"invalid_params"}}}
 ```
 
 Important `details.error_kind` values:

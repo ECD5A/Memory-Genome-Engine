@@ -824,7 +824,7 @@ fn mcp_server_json_rpc_adapter_supports_agent_workflow() {
 
     assert_eq!(responses.len(), 9);
     assert_eq!(responses[0]["result"]["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(responses[0]["result"]["integration_schema_version"], 2);
+    assert_eq!(responses[0]["result"]["integration_schema_version"], 3);
     assert_eq!(responses[0]["result"]["tool"], "mge_remember");
     assert_eq!(responses[0]["result"]["ok"], true);
     assert_eq!(responses[0]["result"]["cell_id"], 1);
@@ -898,7 +898,7 @@ fn mcp_server_exposes_stable_schema_and_structured_errors() {
 
     let schema = &responses[0]["result"];
     assert_eq!(schema["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(schema["integration_schema_version"], 2);
+    assert_eq!(schema["integration_schema_version"], 3);
     for tool in [
         "mge_remember",
         "mge_remember_session",
@@ -1081,6 +1081,144 @@ fn mcp_standard_lifecycle_lists_and_calls_tools() {
         responses[3]["result"]["structuredContent"]["details"]["error_kind"],
         "unknown_tool"
     );
+}
+
+#[test]
+fn mcp_server_default_store_removes_repeated_path_arguments() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    run_mge(&store, &["init"]);
+
+    let requests = [
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "default-store-test", "version": "0.1.0" }
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {}
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "mge_remember",
+                "arguments": {
+                    "content": "default store MCP memory",
+                    "scope": "default-store"
+                }
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "mge_recall",
+                "arguments": {
+                    "query": "default store MCP memory",
+                    "scope": "default-store"
+                }
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "mge_schema",
+            "params": {}
+        }),
+    ];
+    let mut input = String::new();
+    for request in requests {
+        input.push_str(&serde_json::to_string(&request).unwrap());
+        input.push('\n');
+    }
+    let store_arg = store.to_string_lossy().into_owned();
+    let responses = run_mcp_raw_lines_with_args(&input, &["--store", &store_arg]);
+
+    assert!(responses[0]["result"]["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("preconfigured"));
+    let tools = responses[1]["result"]["tools"].as_array().unwrap();
+    let remember = tools
+        .iter()
+        .find(|tool| tool["name"] == "mge_remember")
+        .unwrap();
+    assert_eq!(remember["inputSchema"]["required"], json!(["content"]));
+    assert_eq!(responses[2]["result"]["isError"], false);
+    assert_eq!(responses[3]["result"]["isError"], false);
+    assert_eq!(
+        responses[3]["result"]["structuredContent"]["context_packet"]["relevant_memory"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        responses[4]["result"]["server_defaults"]["store_configured"],
+        true
+    );
+    assert_eq!(responses[4]["result"]["integration_schema_version"], 3);
+}
+
+#[test]
+fn mcp_server_defaults_unlock_encrypted_store_without_secret_in_arguments() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("encrypted-memory");
+    let passphrase_env = "MGE_TEST_MCP_DEFAULT_PASSPHRASE";
+    std::env::set_var(passphrase_env, "default MCP encrypted passphrase");
+    run_mge(
+        &store,
+        &["init", "--encrypted", "--passphrase-env", passphrase_env],
+    );
+
+    let requests = [
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "mge_remember",
+                "arguments": { "content": "encrypted default MCP memory" }
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": { "name": "mge_stats", "arguments": {} }
+        }),
+    ];
+    let mut input = String::new();
+    for request in requests {
+        input.push_str(&serde_json::to_string(&request).unwrap());
+        input.push('\n');
+    }
+    let store_arg = store.to_string_lossy().into_owned();
+    let responses = run_mcp_raw_lines_with_args(
+        &input,
+        &["--store", &store_arg, "--passphrase-env", passphrase_env],
+    );
+    std::env::remove_var(passphrase_env);
+
+    assert_eq!(responses[0]["result"]["isError"], false);
+    assert_eq!(responses[1]["result"]["isError"], false);
+    assert_eq!(
+        responses[1]["result"]["structuredContent"]["stats"]["hot_cells"],
+        1
+    );
+    let input_text = input.to_lowercase();
+    assert!(!input_text.contains("passphrase"));
 }
 
 #[test]
@@ -1448,7 +1586,7 @@ fn mcp_agent_session_fixture_runs_as_one_process() {
     assert_eq!(responses.len(), 10);
     assert_eq!(responses[0]["result"]["tool"], "mge_schema");
     assert_eq!(responses[0]["result"]["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(responses[0]["result"]["integration_schema_version"], 2);
+    assert_eq!(responses[0]["result"]["integration_schema_version"], 3);
     assert_eq!(responses[1]["result"]["tool"], "mge_remember");
     assert_eq!(responses[1]["result"]["cell_id"], 1);
     assert_eq!(
@@ -2599,7 +2737,12 @@ fn run_mcp_json_lines(requests: &[Value]) -> Vec<Value> {
 }
 
 fn run_mcp_raw_lines(input: &str) -> Vec<Value> {
+    run_mcp_raw_lines_with_args(input, &[])
+}
+
+fn run_mcp_raw_lines_with_args(input: &str, args: &[&str]) -> Vec<Value> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_mge-mcp-server"))
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

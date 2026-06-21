@@ -5,7 +5,7 @@
     "ok": true,
     "tool": "mge_rebuild_indexes",
     "protocol_version": "mge-jsonrpc-1",
-    "integration_schema_version": 2,
+    "integration_schema_version": 3,
     "rebuild": {
       "index_kind": "exact_marker_page",
       "pages_scanned": 1,

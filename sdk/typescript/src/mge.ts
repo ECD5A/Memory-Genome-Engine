@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 export const PROTOCOL_VERSION = "mge-jsonrpc-1";
-export const INTEGRATION_SCHEMA_VERSION = 2;
+export const INTEGRATION_SCHEMA_VERSION = 3;
 
 export type RecallMode = "focused" | "broad" | "full_scope" | "full-scope";
 
