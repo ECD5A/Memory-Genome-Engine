@@ -334,7 +334,7 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 
 `.github/workflows/release.yml` runs only for `v*` tags. It verifies format, workspace and eval tests, strict clippy, rustdoc, and Rust 1.95 compatibility with the locked dependency graph. It then builds checksummed product archives for Windows x86-64, Linux x86-64, macOS Apple Silicon, and macOS Intel, uploads them as workflow artifacts, and creates or updates a **draft** GitHub Release with one combined `SHA256SUMS`. The workflow includes only `mge` and `mge-mcp-server`; SDK packages and development benchmark binaries are not published. A maintainer must review checksums, notes, and every platform result before publishing the draft.
 
-Rust crates and both repository-local SDK manifests use version `0.1.0`. Integration schema versioning is independent from package versioning.
+Rust crates, the development eval harness, and both repository-local SDK manifests use version `0.1.1`. Integration schema version `3` is independent from package versioning.
 
 ## Package Publishing Plan
 
@@ -350,9 +350,9 @@ Do not publish packages from this repository until release ownership, versioning
 
 Current recommendation: GitHub release assets are enough for the public preview. Package-manager publishing should wait until Windows, Linux, and macOS preview users have exercised the archives.
 
-## GitHub v0.1 Release
+## GitHub v0.1.1 Release
 
-Create the first public `v0.1.0` release from a clean `main` commit after the checklist above passes. Use `v0.1.0-rc.1` first to exercise the complete private tag workflow and exact release archives.
+Create the next public preview `v0.1.1` from a clean `main` commit after the checklist above passes. The existing `v0.1.0` tag remains immutable. Use `v0.1.1-rc.1` first to exercise the complete private tag workflow, cross-platform installer gates, and exact release archives.
 
 Recommended assets:
 
@@ -372,8 +372,8 @@ Keep the release product-focused:
 Tag command shape:
 
 ```bash
-git tag -a v0.1.0 -m "Memory Genome Engine v0.1.0"
-git push origin v0.1.0
+git tag -a v0.1.1 -m "Memory Genome Engine v0.1.1"
+git push origin v0.1.1
 ```
 
 The tag workflow creates the draft and uploads all platform archives. Do not publish it until the downloaded assets, checksums, release notes, and platform jobs are reviewed.

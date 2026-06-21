@@ -110,7 +110,7 @@ try {
         params = @{
             protocolVersion = "2025-06-18"
             capabilities = @{}
-            clientInfo = @{ name = "mge-release-smoke"; version = "0.1.0" }
+            clientInfo = @{ name = "mge-release-smoke"; version = "0.1.1" }
         }
     } | ConvertTo-Json -Compress -Depth 6
     $InitializedNotification = @{

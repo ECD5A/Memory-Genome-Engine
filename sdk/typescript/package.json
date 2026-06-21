@@ -1,6 +1,6 @@
 {
   "name": "@memory-genome/engine-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Thin TypeScript wrapper for the Memory Genome Engine Rust CLI",
   "type": "module",
