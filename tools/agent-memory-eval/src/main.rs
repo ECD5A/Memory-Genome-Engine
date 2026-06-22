@@ -202,6 +202,9 @@ enum MgeRankerSelection {
     Local,
     WeightedLocalRrf2,
     WeightedLocalRrf,
+    RuntimeGlobal,
+    RuntimeGlobalRrf,
+    WeightedRuntimeGlobalRrf,
     All,
 }
 
@@ -213,6 +216,9 @@ enum ExperimentalRanker {
     LocalRrf,
     WeightedLocalRrf2,
     WeightedLocalRrf3,
+    RuntimeGlobalBm25,
+    RuntimeGlobalRrf,
+    WeightedRuntimeGlobalRrf2,
 }
 
 impl ExperimentalRanker {
@@ -224,6 +230,9 @@ impl ExperimentalRanker {
             Self::LocalRrf => "candidate_local_rrf",
             Self::WeightedLocalRrf2 => "candidate_weighted_local_rrf_2",
             Self::WeightedLocalRrf3 => "candidate_weighted_local_rrf_3",
+            Self::RuntimeGlobalBm25 => "candidate_runtime_global_bm25",
+            Self::RuntimeGlobalRrf => "candidate_runtime_global_rrf",
+            Self::WeightedRuntimeGlobalRrf2 => "candidate_weighted_runtime_global_rrf_2",
         }
     }
 }
@@ -1426,6 +1435,11 @@ fn evaluate_mge_experimental_reranker(
                 ExperimentalRanker::Bm25 | ExperimentalRanker::Rrf => {
                     bm25.rank_candidates(query, &current)
                 }
+                ExperimentalRanker::RuntimeGlobalBm25
+                | ExperimentalRanker::RuntimeGlobalRrf
+                | ExperimentalRanker::WeightedRuntimeGlobalRrf2 => {
+                    bm25.rank_candidates_runtime_global(query, &current)
+                }
                 ExperimentalRanker::LocalBm25
                 | ExperimentalRanker::LocalRrf
                 | ExperimentalRanker::WeightedLocalRrf2
@@ -1434,8 +1448,12 @@ fn evaluate_mge_experimental_reranker(
                 }
             };
             let mut returned_ids = match ranker {
-                ExperimentalRanker::Bm25 | ExperimentalRanker::LocalBm25 => lexical,
-                ExperimentalRanker::Rrf | ExperimentalRanker::LocalRrf => {
+                ExperimentalRanker::Bm25
+                | ExperimentalRanker::LocalBm25
+                | ExperimentalRanker::RuntimeGlobalBm25 => lexical,
+                ExperimentalRanker::Rrf
+                | ExperimentalRanker::LocalRrf
+                | ExperimentalRanker::RuntimeGlobalRrf => {
                     reciprocal_rank_fusion(&current, &lexical)
                 }
                 ExperimentalRanker::WeightedLocalRrf2 => {
@@ -1443,6 +1461,9 @@ fn evaluate_mge_experimental_reranker(
                 }
                 ExperimentalRanker::WeightedLocalRrf3 => {
                     reciprocal_rank_fusion_weighted(&current, &lexical, 3.0, 1.0)
+                }
+                ExperimentalRanker::WeightedRuntimeGlobalRrf2 => {
+                    reciprocal_rank_fusion_weighted(&current, &lexical, 2.0, 1.0)
                 }
             };
             returned_ids.truncate(top_k);
@@ -1831,6 +1852,14 @@ fn selected_experimental_rankers(selection: MgeRankerSelection) -> Vec<Experimen
             ExperimentalRanker::WeightedLocalRrf2,
             ExperimentalRanker::WeightedLocalRrf3,
         ],
+        MgeRankerSelection::RuntimeGlobal => vec![
+            ExperimentalRanker::RuntimeGlobalBm25,
+            ExperimentalRanker::RuntimeGlobalRrf,
+        ],
+        MgeRankerSelection::RuntimeGlobalRrf => vec![ExperimentalRanker::RuntimeGlobalRrf],
+        MgeRankerSelection::WeightedRuntimeGlobalRrf => {
+            vec![ExperimentalRanker::WeightedRuntimeGlobalRrf2]
+        }
         MgeRankerSelection::All => vec![
             ExperimentalRanker::Bm25,
             ExperimentalRanker::Rrf,
@@ -1838,6 +1867,9 @@ fn selected_experimental_rankers(selection: MgeRankerSelection) -> Vec<Experimen
             ExperimentalRanker::LocalRrf,
             ExperimentalRanker::WeightedLocalRrf2,
             ExperimentalRanker::WeightedLocalRrf3,
+            ExperimentalRanker::RuntimeGlobalBm25,
+            ExperimentalRanker::RuntimeGlobalRrf,
+            ExperimentalRanker::WeightedRuntimeGlobalRrf2,
         ],
     }
 }
@@ -1849,6 +1881,8 @@ struct Bm25Index {
     doc_index_by_id: HashMap<String, usize>,
     document_frequency: HashMap<String, usize>,
     avg_doc_len: f64,
+    runtime_document_frequency: HashMap<String, usize>,
+    runtime_avg_doc_len: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -1865,7 +1899,9 @@ impl Bm25Index {
         let mut runtime_docs = Vec::with_capacity(dataset.memories.len());
         let mut doc_index_by_id = HashMap::with_capacity(dataset.memories.len());
         let mut document_frequency = HashMap::<String, usize>::new();
+        let mut runtime_document_frequency = HashMap::<String, usize>::new();
         let mut total_doc_len = 0usize;
+        let mut runtime_total_doc_len = 0usize;
 
         for memory in &dataset.memories {
             let tokens = memory_tokens(memory);
@@ -1890,10 +1926,15 @@ impl Bm25Index {
             for token in runtime_memory_tokens(memory) {
                 *runtime_term_frequency.entry(token).or_insert(0) += 1;
             }
+            for token in runtime_term_frequency.keys() {
+                *runtime_document_frequency.entry(token.clone()).or_insert(0) += 1;
+            }
+            let runtime_length = runtime_term_frequency.values().sum();
+            runtime_total_doc_len += runtime_length;
             runtime_docs.push(Bm25Doc {
                 id: memory.id.clone(),
                 scope: memory.scope.clone(),
-                length: runtime_term_frequency.values().sum(),
+                length: runtime_length,
                 term_frequency: runtime_term_frequency,
             });
         }
@@ -1903,12 +1944,19 @@ impl Bm25Index {
         } else {
             total_doc_len as f64 / docs.len() as f64
         };
+        let runtime_avg_doc_len = if runtime_docs.is_empty() {
+            0.0
+        } else {
+            runtime_total_doc_len as f64 / runtime_docs.len() as f64
+        };
         Self {
             docs,
             runtime_docs,
             doc_index_by_id,
             document_frequency,
             avg_doc_len,
+            runtime_document_frequency,
+            runtime_avg_doc_len,
         }
     }
 
@@ -1964,8 +2012,57 @@ impl Bm25Index {
                 let doc = self
                     .doc_index_by_id
                     .get(id)
-                    .and_then(|index| self.runtime_docs.get(*index))?;
+                    .and_then(|index| self.docs.get(*index))?;
                 Some((id.clone(), self.score_doc(doc, &query_terms), original_rank))
+            })
+            .collect::<Vec<_>>();
+        scored.sort_by(|left, right| {
+            right
+                .1
+                .partial_cmp(&left.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.2.cmp(&right.2))
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        scored.into_iter().map(|(id, _, _)| id).collect()
+    }
+
+    fn rank_candidates_runtime_global(
+        &self,
+        query: &EvalQuery,
+        candidate_ids: &[String],
+    ) -> Vec<String> {
+        let query_terms = tokenize_keywords(&query.query)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let doc_count = self.runtime_docs.len() as f64;
+        let mut scored = candidate_ids
+            .iter()
+            .enumerate()
+            .filter_map(|(original_rank, id)| {
+                let doc = self
+                    .doc_index_by_id
+                    .get(id)
+                    .and_then(|index| self.runtime_docs.get(*index))?;
+                let score = query_terms
+                    .iter()
+                    .filter_map(|term| {
+                        let tf = doc.term_frequency.get(term).copied()?;
+                        let df = self
+                            .runtime_document_frequency
+                            .get(term)
+                            .copied()
+                            .unwrap_or(0);
+                        Some(bm25_term_score(
+                            doc_count,
+                            df as f64,
+                            tf,
+                            doc.length,
+                            self.runtime_avg_doc_len,
+                        ))
+                    })
+                    .sum::<f64>();
+                Some((id.clone(), score, original_rank))
             })
             .collect::<Vec<_>>();
         scored.sort_by(|left, right| {
@@ -1990,7 +2087,7 @@ impl Bm25Index {
                 let doc = self
                     .doc_index_by_id
                     .get(id)
-                    .and_then(|index| self.docs.get(*index))?;
+                    .and_then(|index| self.runtime_docs.get(*index))?;
                 Some((original_rank, doc))
             })
             .collect::<Vec<_>>();
