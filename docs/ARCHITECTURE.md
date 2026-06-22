@@ -241,10 +241,10 @@ Recall does the following:
 Recall modes are explicit:
 
 - `focused` is the default point-query mode. It uses normal scoring/reranking and `max_items`.
-- `broad` is for wider tasks, projects, modules, or themes. It expands candidate page selection and raises the effective result limit when the caller did not request a larger one.
+- `broad` is for wider tasks, projects, modules, or themes. It expands candidate selection while still treating `max_items` as a strict output limit.
 - `full_scope` is for an explicit request for all active memory inside a scope. It requires a scope, does not require text relevance, and still excludes deprecated/rejected/superseded memory by default.
 
-The `ContextPacket` is task-relevant and size-controlled. It is not treated as inherently tiny; `max_items`, recall mode, and scope define the practical size boundary.
+The `ContextPacket` is task-relevant and size-controlled. `max_items` strictly caps focused and broad output; full-scope intentionally returns all allowed memory in its explicit scope.
 
 Reranking is transparent in JSON/debug output. `ContextDebugInfo.score_details` reports the score components for returned items:
 

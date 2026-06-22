@@ -287,45 +287,63 @@ Interpretation limits:
 The following local runs use official public dataset files without bundling or modifying them:
 
 - LongMemEval repository commit `9e0b455f4ef0e2ab8f2e582289761153549043fc`, Oracle dataset revision `98d7416c24c778c2fee6e6f3006e7a073259d48f`, file SHA-256 `821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c`;
+- LongMemEval-S cleaned file SHA-256 `d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442`;
 - LoCoMo repository commit `3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376`, `data/locomo10.json` SHA-256 `79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4`.
 
-Commands use release builds, top-K 5, three timing repeats, both page indexes, focused and broad modes, and all diagnostic baselines:
+Quality runs use release builds and strict top-K 5. Oracle and LoCoMo cover both page indexes; the larger LongMemEval-S run uses the default Exact index. Timing is intentionally excluded from these quality tables because it is machine- and load-sensitive.
 
 ```bash
 cargo run --locked --release --manifest-path tools/agent-memory-eval/Cargo.toml -- \
   --input <longmemeval_oracle.json> --input-format long-mem-eval \
-  --ingest-mode session-chunk --top-k 5 --repeats 3 --index both \
-  --modes focused-broad --baselines all --output json --report <REPORT.json>
+  --ingest-mode session-chunk --top-k 5 --repeats 1 --index both \
+  --modes focused-broad --baselines bm25 --output json --report <REPORT.json>
 
 cargo run --locked --release --manifest-path tools/agent-memory-eval/Cargo.toml -- \
   --input <locomo10.json> --input-format locomo \
-  --ingest-mode session-chunk --top-k 5 --repeats 3 --index both \
-  --modes focused-broad --baselines all --output json --report <REPORT.json>
+  --top-k 5 --repeats 1 --index both --modes focused-broad \
+  --baselines bm25 --output json --report <REPORT.json>
 ```
 
 LongMemEval Oracle converted into 4,578 deterministic session chunks and 500 queries, including 30 `_abs` questions treated as negative retrieval cases:
 
-| Retrieval path | Mode | Hit@5 | Recall@5 | MRR@5 | Avg repeated latency |
+| Retrieval path | Mode | Hit@5 | Recall@5 | MRR@5 | nDCG@5 |
 |---|---|---:|---:|---:|---:|
-| MGE Exact sealed | focused | 0.906 | 0.822 | 0.725 | 0.581 ms |
-| MGE BinaryFuse sealed | focused | 0.906 | 0.822 | 0.725 | 0.560 ms |
-| MGE Exact sealed | broad | 0.940 | 0.938 | 0.730 | 0.615 ms |
-| MGE BinaryFuse sealed | broad | 0.940 | 0.938 | 0.730 | 0.576 ms |
-| Eval-only BM25 | focused | 0.914 | 0.823 | 0.742 | 0.054 ms |
+| MGE Exact sealed | focused | 0.964 | 0.875 | 0.771 | 0.757 |
+| MGE BinaryFuse sealed | focused | 0.964 | 0.875 | 0.771 | 0.757 |
+| MGE Exact sealed | broad | 0.964 | 0.875 | 0.771 | 0.757 |
+| MGE BinaryFuse sealed | broad | 0.964 | 0.875 | 0.771 | 0.757 |
+| Eval-only BM25 | focused | 0.972 | 0.876 | 0.789 | 0.770 |
 
 LoCoMo converted into 5,881 memories and 1,977 evidence-bearing queries; nine queries without usable evidence annotations were skipped:
 
-| Retrieval path | Mode | Hit@5 | Recall@5 | MRR@5 | Avg repeated latency |
+| Retrieval path | Mode | Hit@5 | Recall@5 | MRR@5 | nDCG@5 |
 |---|---|---:|---:|---:|---:|
-| MGE Exact sealed | focused | 0.526 | 0.482 | 0.388 | 0.635 ms |
-| MGE BinaryFuse sealed | focused | 0.525 | 0.481 | 0.387 | 0.589 ms |
-| MGE Exact sealed | broad | 0.701 | 0.647 | 0.414 | 0.998 ms |
-| MGE BinaryFuse sealed | broad | 0.701 | 0.647 | 0.414 | 0.850 ms |
-| Eval-only BM25 | focused | 0.545 | 0.499 | 0.415 | 0.347 ms |
+| MGE Exact sealed | focused | 0.526 | 0.482 | 0.387 | 0.396 |
+| MGE BinaryFuse sealed | focused | 0.526 | 0.482 | 0.388 | 0.396 |
+| MGE Exact sealed | broad | 0.540 | 0.497 | 0.398 | 0.408 |
+| MGE BinaryFuse sealed | broad | 0.540 | 0.497 | 0.398 | 0.408 |
+| Eval-only BM25 | focused | 0.545 | 0.499 | 0.415 | 0.421 |
 
-These are retrieval-adapter results, not official end-to-end LongMemEval or LoCoMo answer scores. MGE timing includes its production page lifecycle, filtering, ranking, and `ContextPacket` build; the BM25 row is an in-memory algorithmic baseline and is not a product-level latency comparison. LongMemEval cold Exact focused recall averaged 5.853 ms plus 6.005 ms store open; LoCoMo averaged 8.836 ms plus 7.471 ms store open.
+LongMemEval-S converted into 85,253 session chunks and 500 queries:
 
-The current production contract returns ranked candidates rather than asserting that a question is answerable. A post-hoc score-threshold sweep is therefore reported only as a design diagnostic. On the deterministic mixed fixture it reached 0.975 balanced accuracy, but on LongMemEval sealed broad it reached only 0.674 (0.615 positive hit/accept rate and 0.733 negative rejection). The threshold was selected and measured on the same samples, not a holdout set. This is insufficient evidence for a production threshold, so recall behavior remains unchanged.
+| Retrieval path | Mode | Hit@5 | Recall@5 | MRR@5 | nDCG@5 |
+|---|---|---:|---:|---:|---:|
+| MGE Exact sealed | focused | 0.894 | 0.769 | 0.697 | 0.668 |
+| MGE Exact sealed | broad | 0.894 | 0.770 | 0.696 | 0.669 |
+| Eval-only BM25 | focused | 0.894 | 0.785 | 0.717 | 0.688 |
+
+Broad recall keeps wider candidate selection but now treats `max_items` as a strict output budget. With `max_items=5`, the output-only change preserved strict top-5 quality while reducing average returned context:
+
+| Dataset | Previous items / estimated tokens | Strict budget items / estimated tokens | Estimated token reduction |
+|---|---:|---:|---:|
+| LongMemEval Oracle | 8.92 / 6,720 | 4.57 / 3,535 | 47% |
+| LoCoMo | 20.00 / 1,083 | 5.00 / 300 | 72% |
+
+These are retrieval-adapter results, not official end-to-end LongMemEval or LoCoMo answer scores. The BM25 row is an in-memory algorithmic diagnostic and is not a product-level latency comparison. Exact and BinaryFuse remain quality-equivalent in these runs; BinaryFuse stays optional rather than being presented as a universal speed improvement.
+
+Dev-only candidate reranking experiments also tested global BM25, candidate-local BM25, equal RRF, and weighted RRF. The production-aligned weighted local variant improved Oracle but slightly reduced LoCoMo MRR/nDCG, while equal RRF reduced LongMemEval-S Hit@5. None was promoted into the core ranking path; the evaluator keeps them only for future controlled experiments.
+
+The current production contract returns ranked candidates rather than asserting that a question is answerable. A post-hoc score-threshold sweep is therefore reported only as a design diagnostic. On the deterministic mixed fixture it reached 0.975 balanced accuracy, but on strict-top-K LongMemEval sealed broad it reached only 0.668 (0.602 positive hit/accept rate and 0.733 negative rejection). The threshold was selected and measured on the same samples, not a holdout set. This is insufficient evidence for a production threshold, so recall behavior remains unchanged.
 
 ## Benchmark Smoke
 

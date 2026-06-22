@@ -12,7 +12,7 @@
   <sub><a href="https://github.com/ECD5A/Memory-Genome-Engine/blob/main/README.ru.md">Русская версия</a></sub>
 </p>
 
-Memory Genome Engine gives local AI agents durable project memory they can recall across sessions without requiring a cloud service or vector database. It stores typed `MemoryCell` records, describes them with `MarkerGenome`, moves cold memory into sealed binary pages, and returns task-relevant `ContextPacket` output.
+Memory Genome Engine gives AI agents durable, local-first project memory they can recall across sessions without requiring a cloud service or vector database. It stores typed `MemoryCell` records, describes them with `MarkerGenome`, moves cold memory into sealed binary pages, and returns task-relevant `ContextPacket` output.
 
 <p align="center">
   <img src="assets/mge-console-demo-en.gif" alt="Memory Genome Engine terminal dashboard" width="100%">
@@ -40,19 +40,17 @@ MGE treats agent memory as an inspectable local subsystem rather than an opaque 
 
 Marker-first retrieval is deterministic and lightweight, but it is not universal semantic search. Query anchors and ingestion quality matter, and production recall does not currently apply a global abstention threshold. The [measured evidence and limitations](docs/RELEASE.md#external-retrieval-evidence) are documented separately.
 
-## Measured Baseline
+## Measured Evidence
 
-A deterministic release-mode workload provides a reproducible engineering baseline for the default Exact index path:
+Local release-mode retrieval runs use strict top-5 scoring and official dataset files supplied outside the repository:
 
-| Metric | Result |
-|---|---:|
-| Workload | 1,280 memories / 80 queries |
-| Focused Hit@5 / Recall@5 | 1.00 / 1.00 |
-| Hot focused recall, avg / p95 | 0.51 / 0.63 ms |
-| Repeated sealed focused recall, avg / p95 | 0.27 / 0.38 ms |
-| Cold store open + focused recall, avg | 2.40 ms |
+| Dataset / default Exact focused path | Memories | Hit@5 | Recall@5 | MRR@5 |
+|---|---:|---:|---:|---:|
+| LongMemEval Oracle | 4,578 | 0.964 | 0.875 | 0.771 |
+| LongMemEval-S | 85,253 | 0.894 | 0.769 | 0.697 |
+| LoCoMo | 5,881 | 0.526 | 0.482 | 0.387 |
 
-Measured on AC power with the Windows high-performance plan, Intel Core i7-9750H, Windows 10 x64, Rust 1.95.0, core commit `2fdbc99`, and five timing repeats. This is a synthetic correctness/performance baseline, not a competitor comparison or final LLM-answer benchmark. See the [method and limitations](docs/RELEASE.md#measured-engineering-baseline).
+These measure retrieval from deterministic adapters, not final LLM answer quality or superiority over another product. Dataset revisions, checksums, ingestion rules, BM25 diagnostics, context-budget measurements, and limitations are in [Release](docs/RELEASE.md#external-retrieval-evidence).
 
 ## Quick Start
 

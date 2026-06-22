@@ -30,8 +30,10 @@ host starts task
 Recall modes:
 
 - `focused`: default for a narrow question, next action, or tool decision.
-- `broad`: project/module/task planning where the agent needs more related memory.
+- `broad`: project/module/task planning where the agent needs a wider candidate search.
 - `full_scope`: explicit audit/export/review inside a known scope; always pass `scope`.
+
+`max_items` is a strict output budget for focused and broad recall. Full-scope intentionally ignores that item budget and returns all allowed memory in the explicit scope.
 
 Local host examples:
 
