@@ -1004,7 +1004,7 @@ fn mcp_tools(config: &ServerConfig) -> Vec<Value> {
         ),
         mcp_store_tool(
             "mge_rebuild_indexes",
-            "Rebuild catalog and candidate indexes from sealed pages.",
+            "Rebuild catalog, candidate indexes, and lexical statistics from sealed pages.",
             config,
         ),
         mcp_tool(

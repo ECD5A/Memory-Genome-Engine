@@ -116,6 +116,7 @@ fn cli_milestone_flow_outputs_context_stats_and_validation_json() {
     assert!(store.join("indexes").join("page_index.mgi").is_file());
     assert!(store.join("indexes").join("marker_index.mgi").is_file());
     assert!(store.join("indexes").join("fuse_index.mgi").is_file());
+    assert!(store.join("indexes").join("lexical_stats.mgi").is_file());
     assert!(store.join("exports").join("memory.md").is_file());
 
     assert!(!store.join("manifest.json").exists());

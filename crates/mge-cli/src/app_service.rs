@@ -871,6 +871,7 @@ fn doctor_file_statuses(root: &Path) -> Vec<DoctorFileStatus> {
         ("indexes/page_index.mgi", true),
         ("indexes/marker_index.mgi", true),
         ("indexes/fuse_index.mgi", true),
+        ("indexes/lexical_stats.mgi", true),
         ("exports", false),
     ]
     .into_iter()

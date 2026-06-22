@@ -76,6 +76,7 @@ Plaintext by design in the current security model:
 - manifest safe metadata, security mode, KDF salt/parameters, AEAD scheme/version;
 - marker dictionary: `dictionary/markers.mgd`;
 - indexes and page catalog: `indexes/*.mgi`;
+- derived lexical token fingerprints and document frequencies: `indexes/lexical_stats.mgi`;
 - page catalog summaries: marker/scope/kind/status/sensitivity/trust summaries and encoded-size metadata;
 - Markdown export: `exports/memory.md`;
 - process memory while the store is unlocked.
@@ -102,6 +103,7 @@ The following metadata remains plaintext by design:
 Plaintext metadata risks:
 
 - marker names can reveal topics, product names, people, repositories, or incident areas;
+- deterministic lexical fingerprints and their frequencies can support dictionary guessing;
 - file, project, and scope markers can reveal project structure;
 - kind/status/sensitivity/trust summaries can leak categories such as decisions, task states, rejected/deprecated memory, or secret-reference presence;
 - index size, page count, page sizes, and encoded sizes leak rough memory volume and growth patterns;

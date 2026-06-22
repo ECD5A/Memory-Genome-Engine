@@ -86,6 +86,7 @@ Sealed memory is semi-static and page based:
 .memory-genome/indexes/page_index.mgi
 .memory-genome/indexes/marker_index.mgi
 .memory-genome/indexes/fuse_index.mgi
+.memory-genome/indexes/lexical_stats.mgi
 .memory-genome/exports/memory.md
 ```
 
@@ -153,7 +154,7 @@ The manifest stores the default codec/compression for newly sealed pages. Each `
 
 `mge mark` writes soft status overrides into `manifest.mgm` for memory maintenance. It can hide or reject hot and sealed cells during recall without rewriting sealed page payloads; `--status active` clears the override.
 
-`mge validate` is a read-only storage consistency check. It verifies manifest/catalog/index kind alignment, page file readability, binary headers, payload checksums, page metadata, marker summaries, page checksums, marker dictionary consistency and references, cell links, candidate-index coverage, and orphan storage files. It reports wrong magic, wrong file kind, unsupported version, truncated payload, and corrupted payload errors. It does not repair or rewrite store data.
+`mge validate` is a read-only storage consistency check. It verifies manifest/catalog/index kind alignment, page file readability, binary headers, payload checksums, page metadata, marker summaries, page checksums, marker dictionary consistency and references, cell links, candidate-index coverage, derived lexical statistics, and orphan storage files. It reports wrong magic, wrong file kind, unsupported version, truncated payload, and corrupted payload errors. It does not repair or rewrite store data.
 
 ## Page Clustering
 
