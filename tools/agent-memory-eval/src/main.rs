@@ -13,10 +13,10 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, ValueEnum};
 use mge_core::{
-    chunk_session_turns, CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine,
-    MemoryKind, MemorySource, MemoryStatus, MemoryValue, PageClustererKind, PageCodecKind,
-    RecallMode, RecallRequest, RememberRequest, SecurityMode, SensitivityLevel,
-    SessionChunkOptions, SessionTurn, TrustLevel,
+    chunk_session_turns, tokenize_keywords, CompressionKind, DurabilityPolicy, IndexKind,
+    InitOptions, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
+    PageClustererKind, PageCodecKind, RecallMode, RecallRequest, RememberRequest, SecurityMode,
+    SensitivityLevel, SessionChunkOptions, SessionTurn, TrustLevel,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1845,6 +1845,7 @@ fn selected_experimental_rankers(selection: MgeRankerSelection) -> Vec<Experimen
 #[derive(Clone, Debug)]
 struct Bm25Index {
     docs: Vec<Bm25Doc>,
+    runtime_docs: Vec<Bm25Doc>,
     doc_index_by_id: HashMap<String, usize>,
     document_frequency: HashMap<String, usize>,
     avg_doc_len: f64,
@@ -1861,6 +1862,7 @@ struct Bm25Doc {
 impl Bm25Index {
     fn build(dataset: &EvalDataset) -> Self {
         let mut docs = Vec::with_capacity(dataset.memories.len());
+        let mut runtime_docs = Vec::with_capacity(dataset.memories.len());
         let mut doc_index_by_id = HashMap::with_capacity(dataset.memories.len());
         let mut document_frequency = HashMap::<String, usize>::new();
         let mut total_doc_len = 0usize;
@@ -1883,6 +1885,17 @@ impl Bm25Index {
                 length,
                 term_frequency,
             });
+
+            let mut runtime_term_frequency = HashMap::<String, usize>::new();
+            for token in runtime_memory_tokens(memory) {
+                *runtime_term_frequency.entry(token).or_insert(0) += 1;
+            }
+            runtime_docs.push(Bm25Doc {
+                id: memory.id.clone(),
+                scope: memory.scope.clone(),
+                length: runtime_term_frequency.values().sum(),
+                term_frequency: runtime_term_frequency,
+            });
         }
 
         let avg_doc_len = if docs.is_empty() {
@@ -1892,6 +1905,7 @@ impl Bm25Index {
         };
         Self {
             docs,
+            runtime_docs,
             doc_index_by_id,
             document_frequency,
             avg_doc_len,
@@ -1950,7 +1964,7 @@ impl Bm25Index {
                 let doc = self
                     .doc_index_by_id
                     .get(id)
-                    .and_then(|index| self.docs.get(*index))?;
+                    .and_then(|index| self.runtime_docs.get(*index))?;
                 Some((id.clone(), self.score_doc(doc, &query_terms), original_rank))
             })
             .collect::<Vec<_>>();
@@ -1966,7 +1980,9 @@ impl Bm25Index {
     }
 
     fn rank_candidates_local(&self, query: &EvalQuery, candidate_ids: &[String]) -> Vec<String> {
-        let query_terms = tokenize(&query.query);
+        let query_terms = tokenize_keywords(&query.query)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
         let candidates = candidate_ids
             .iter()
             .enumerate()
@@ -2249,6 +2265,16 @@ fn memory_tokens(memory: &EvalMemory) -> Vec<String> {
         memory.text,
         memory.markers.join(" ")
     ))
+}
+
+fn runtime_memory_tokens(memory: &EvalMemory) -> Vec<String> {
+    let mut tokens = memory
+        .subject
+        .as_deref()
+        .map(tokenize_keywords)
+        .unwrap_or_default();
+    tokens.extend(tokenize_keywords(&memory.text));
+    tokens
 }
 
 fn bm25_term_score(
