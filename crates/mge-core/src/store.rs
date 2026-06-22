@@ -1961,19 +1961,61 @@ impl MemoryEngine {
         for page in &mut pages {
             attach_page_checksum(page)?;
         }
-        let mut catalog = self.load_page_catalog()?;
-        for page in &pages {
-            let encoded_size_bytes = self.write_page(page)?;
-            catalog
-                .pages
-                .push(self.page_catalog_entry_for_page(page, encoded_size_bytes)?);
-            self.manifest.next_page_id = self.manifest.next_page_id.max(page.page_id + 1);
-        }
-        self.save_page_catalog(&catalog)?;
+        let original_catalog = self.load_page_catalog()?;
+        let original_next_page_id = self.manifest.next_page_id;
+        let original_last_seal_time = self.manifest.last_seal_time;
+        let original_updated_at = self.manifest.updated_at;
+        let mut catalog = original_catalog.clone();
+        let mut written_page_paths = Vec::with_capacity(pages.len());
+        let transaction = (|| -> Result<(Vec<MemoryPage>, Option<PathBuf>)> {
+            for page in &pages {
+                let page_path = self.pages_dir().join(page_file_name(page.page_id));
+                if page_path.exists() {
+                    return Err(MgeError::StorageFormat(format!(
+                        "refusing to overwrite existing sealed page {}",
+                        page_path.display()
+                    )));
+                }
+                let encoded_size_bytes = self.write_page(page)?;
+                written_page_paths.push(page_path);
+                catalog
+                    .pages
+                    .push(self.page_catalog_entry_for_page(page, encoded_size_bytes)?);
+            }
+            self.save_page_catalog(&catalog)?;
 
-        let all_pages = self.load_all_pages()?;
-        self.rebuild_candidate_indexes_for_pages(&all_pages)?;
-        self.rebuild_lexical_stats_for_pages(&all_pages)?;
+            let all_pages = self.load_all_pages()?;
+            self.rebuild_candidate_indexes_for_pages(&all_pages)?;
+            self.rebuild_lexical_stats_for_pages(&all_pages)?;
+            self.manifest.next_page_id = pages
+                .iter()
+                .map(|page| page.page_id.saturating_add(1))
+                .max()
+                .unwrap_or(original_next_page_id)
+                .max(original_next_page_id);
+            self.manifest.last_seal_time = Some(current_timestamp());
+            self.manifest.updated_at = current_timestamp();
+            self.save_manifest()?;
+
+            let archived_hot_log = hot_store.archive_and_clear()?;
+            Ok((all_pages, archived_hot_log))
+        })();
+        let (all_pages, archived_hot_log) = match transaction {
+            Ok(result) => result,
+            Err(error) => {
+                self.manifest.next_page_id = original_next_page_id;
+                self.manifest.last_seal_time = original_last_seal_time;
+                self.manifest.updated_at = original_updated_at;
+                if let Err(rollback_error) =
+                    self.rollback_failed_seal(&original_catalog, &written_page_paths)
+                {
+                    return Err(MgeError::StorageFormat(format!(
+                        "seal failed: {error}; rollback failed: {rollback_error}"
+                    )));
+                }
+                return Err(error);
+            }
+        };
         {
             let mut cache = self.page_cache.borrow_mut();
             let first_cached_page = all_pages.len().saturating_sub(cache.capacity);
@@ -1982,18 +2024,50 @@ impl MemoryEngine {
                 cache.insert(Arc::new(page), Some(scoring));
             }
         }
-
-        let archived_hot_log = hot_store.archive_and_clear()?;
         self.hot.clear();
-        self.manifest.last_seal_time = Some(current_timestamp());
-        self.manifest.updated_at = current_timestamp();
-        self.save_manifest()?;
 
         Ok(SealReport {
             hot_cells_sealed: hot_cells.len(),
             pages_written: pages.len(),
             archived_hot_log,
         })
+    }
+
+    fn rollback_failed_seal(
+        &self,
+        original_catalog: &PageCatalog,
+        written_page_paths: &[PathBuf],
+    ) -> Result<()> {
+        let mut errors = Vec::new();
+        for path in written_page_paths {
+            if path.exists() {
+                if let Err(error) = fs::remove_file(path) {
+                    errors.push(format!("remove {}: {error}", path.display()));
+                }
+            }
+        }
+        if let Err(error) = self.save_page_catalog(original_catalog) {
+            errors.push(format!("restore page catalog: {error}"));
+        }
+        match self.load_all_pages() {
+            Ok(original_pages) => {
+                if let Err(error) = self.rebuild_candidate_indexes_for_pages(&original_pages) {
+                    errors.push(format!("restore candidate indexes: {error}"));
+                }
+                if let Err(error) = self.rebuild_lexical_stats_for_pages(&original_pages) {
+                    errors.push(format!("restore lexical statistics: {error}"));
+                }
+            }
+            Err(error) => errors.push(format!("reload original pages: {error}")),
+        }
+        if let Err(error) = self.save_manifest() {
+            errors.push(format!("restore manifest: {error}"));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(MgeError::StorageFormat(errors.join("; ")))
+        }
     }
 
     pub fn checkpoint(&mut self) -> Result<HotCheckpointReport> {

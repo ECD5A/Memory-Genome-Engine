@@ -1257,6 +1257,50 @@ fn checkpoint_snapshot_replays_hot_log_after_snapshot_offset() {
 }
 
 #[test]
+fn checkpoint_seal_reopen_and_rebuild_soak_preserves_all_cells() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    for index in 0..192 {
+        remember_text_cell(
+            &mut engine,
+            "recovery-soak",
+            MemoryStatus::Active,
+            TrustLevel::ToolObserved,
+            &format!("durable recovery soak cell {index}"),
+            &[format!("tag:soak_{}", index % 8)],
+        );
+        if index % 64 == 63 {
+            engine.checkpoint().unwrap();
+        }
+    }
+    drop(engine);
+
+    let mut engine = MemoryEngine::open_at(dir.path()).unwrap();
+    assert_eq!(engine.stats().unwrap().hot_cells, 192);
+    let seal = engine.seal().unwrap();
+    assert_eq!(seal.hot_cells_sealed, 192);
+    drop(engine);
+
+    let engine = MemoryEngine::open_at(dir.path()).unwrap();
+    assert!(engine.validate_deep().unwrap().ok);
+    let mut request = RecallRequest::new("recovery soak");
+    request.mode = RecallMode::FullScope;
+    request.scope = Some("recovery-soak".to_string());
+    assert_eq!(
+        engine
+            .recall(request.clone())
+            .unwrap()
+            .relevant_memory
+            .len(),
+        192
+    );
+
+    engine.rebuild_catalog_and_indexes().unwrap();
+    assert!(engine.validate_deep().unwrap().ok);
+    assert_eq!(engine.recall(request).unwrap().relevant_memory.len(), 192);
+}
+
+#[test]
 fn full_scope_recall_uses_hot_ram_and_sealed_pages_together() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
@@ -1624,6 +1668,74 @@ fn seal_hot_cells_into_pages() {
         .remove(0);
     assert!(page.checksum.is_some());
     assert!(mge_core::page_checksum_matches(&page).unwrap());
+}
+
+#[test]
+fn failed_hot_archive_rolls_back_seal_without_duplicate_cells() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "seal-rollback",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "seal rollback keeps exactly one durable cell",
+        &["tag:seal_rollback".to_string()],
+    );
+
+    let archive_path = dir.path().join("hot").join("archive");
+    fs::write(&archive_path, b"block archive directory creation").unwrap();
+    assert!(engine.seal().is_err());
+
+    let failed_stats = engine.stats().unwrap();
+    assert_eq!(failed_stats.hot_cells, 1);
+    assert_eq!(failed_stats.sealed_cells, 0);
+    assert!(engine.validate_deep().unwrap().ok);
+
+    fs::remove_file(&archive_path).unwrap();
+    let seal = engine.seal().unwrap();
+    assert_eq!(seal.hot_cells_sealed, 1);
+    let sealed_stats = engine.stats().unwrap();
+    assert_eq!(sealed_stats.hot_cells, 0);
+    assert_eq!(sealed_stats.sealed_cells, 1);
+
+    let mut request = RecallRequest::new("seal rollback");
+    request.mode = RecallMode::FullScope;
+    request.scope = Some("seal-rollback".to_string());
+    let packet = engine.recall(request).unwrap();
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert_eq!(
+        packet.relevant_memory[0].content,
+        "seal rollback keeps exactly one durable cell"
+    );
+}
+
+#[test]
+fn failed_derived_index_write_rolls_back_pages_and_allows_seal_retry() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_text_cell(
+        &mut engine,
+        "index-rollback",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "derived index failure keeps hot memory retryable",
+        &["tag:index_rollback".to_string()],
+    );
+
+    let stats_path = dir.path().join("indexes").join("lexical_stats.mgi");
+    fs::remove_file(&stats_path).unwrap();
+    fs::create_dir(&stats_path).unwrap();
+    assert!(engine.seal().is_err());
+    assert_eq!(engine.stats().unwrap().hot_cells, 1);
+    assert_eq!(engine.stats().unwrap().sealed_cells, 0);
+    assert_eq!(fs::read_dir(dir.path().join("pages")).unwrap().count(), 0);
+
+    fs::remove_dir(&stats_path).unwrap();
+    let seal = engine.seal().unwrap();
+    assert_eq!(seal.hot_cells_sealed, 1);
+    assert_eq!(engine.stats().unwrap().sealed_cells, 1);
+    assert!(engine.validate_deep().unwrap().ok);
 }
 
 #[test]

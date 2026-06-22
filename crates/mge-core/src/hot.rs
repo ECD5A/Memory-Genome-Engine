@@ -675,8 +675,16 @@ impl HotStore {
 
         let archive_path = unique_archive_path(&archive_dir, current_timestamp());
         fs::rename(&self.path, &archive_path)?;
-        binary::atomic_write_bytes(&self.path, &empty_hot_log_bytes()?)?;
-        self.remove_snapshot()?;
+        if let Err(error) = binary::atomic_write_bytes(&self.path, &empty_hot_log_bytes()?) {
+            if let Err(rollback_error) = fs::rename(&archive_path, &self.path) {
+                return Err(MgeError::StorageFormat(format!(
+                    "failed to reset hot log after archive: {error}; failed to restore archived log: {rollback_error}"
+                )));
+            }
+            return Err(error);
+        }
+        // A stale snapshot is ignored when its log offset exceeds the new log length.
+        let _ = self.remove_snapshot();
         Ok(Some(archive_path))
     }
 }
