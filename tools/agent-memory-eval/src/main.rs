@@ -71,6 +71,14 @@ struct Args {
     #[arg(long, value_enum, default_value_t = BaselineSelection::Both)]
     baselines: BaselineSelection,
 
+    /// Dev-only rerank experiments over an expanded MGE candidate pool.
+    #[arg(long, value_enum, default_value_t = MgeRankerSelection::Current)]
+    mge_rankers: MgeRankerSelection,
+
+    /// Number of MGE results exposed to a dev-only reranker.
+    #[arg(long, default_value_t = 64)]
+    candidate_pool: usize,
+
     /// Output format.
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     output: OutputFormat,
@@ -182,6 +190,42 @@ enum BaselineSelection {
     All,
     Both,
     None,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum MgeRankerSelection {
+    Current,
+    Bm25,
+    Rrf,
+    LocalBm25,
+    LocalRrf,
+    Local,
+    WeightedLocalRrf2,
+    WeightedLocalRrf,
+    All,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExperimentalRanker {
+    Bm25,
+    Rrf,
+    LocalBm25,
+    LocalRrf,
+    WeightedLocalRrf2,
+    WeightedLocalRrf3,
+}
+
+impl ExperimentalRanker {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Bm25 => "candidate_bm25",
+            Self::Rrf => "candidate_rrf",
+            Self::LocalBm25 => "candidate_local_bm25",
+            Self::LocalRrf => "candidate_local_rrf",
+            Self::WeightedLocalRrf2 => "candidate_weighted_local_rrf_2",
+            Self::WeightedLocalRrf3 => "candidate_weighted_local_rrf_3",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -354,6 +398,9 @@ fn main() -> Result<()> {
     }
     if args.repeats == 0 {
         return Err(anyhow!("--repeats must be greater than zero"));
+    }
+    if args.candidate_pool == 0 {
+        return Err(anyhow!("--candidate-pool must be greater than zero"));
     }
 
     let dataset = load_dataset(&args)?;
@@ -1122,6 +1169,8 @@ fn split_key_facts(input: &str) -> Vec<String> {
 fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
     let summary = summarize_dataset(&dataset);
     let mut runs = Vec::new();
+    let experimental_rankers = selected_experimental_rankers(args.mge_rankers);
+    let experimental_bm25 = (!experimental_rankers.is_empty()).then(|| Bm25Index::build(&dataset));
 
     let indexes = selected_indexes(args.index);
     let modes = selected_modes(args.modes);
@@ -1202,6 +1251,22 @@ fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
                 "sealed_repeated",
                 index_kind,
             )?);
+            if let Some(bm25) = &experimental_bm25 {
+                for ranker in &experimental_rankers {
+                    runs.push(evaluate_mge_experimental_reranker(
+                        &reopened,
+                        &dataset,
+                        &cell_to_eval_id,
+                        *mode,
+                        args.top_k,
+                        args.repeats,
+                        args.candidate_pool,
+                        index_kind,
+                        *ranker,
+                        bm25,
+                    )?);
+                }
+            }
         }
         drop(reopened);
 
@@ -1244,6 +1309,12 @@ fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
         notes.push(format!(
             "Generated query profile: {}; paraphrase queries retain scope/component anchors, while hard negatives deliberately share a scope with unrelated memories.",
             args.query_profile.as_str()
+        ));
+    }
+    if !experimental_rankers.is_empty() {
+        notes.push(format!(
+            "Dev-only rerank experiments use an expanded MGE output pool of {} items; their latency includes building that oversized ContextPacket and is not a production estimate.",
+            args.candidate_pool.max(args.top_k)
         ));
     }
 
@@ -1308,6 +1379,100 @@ fn evaluate_mge(
     Ok(summarize_run(
         format!("mge_{}", index_kind.as_str()),
         layer.to_string(),
+        index_kind.as_str().to_string(),
+        mode.as_str().to_string(),
+        top_k,
+        repeats,
+        &dataset.queries,
+        &results,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_mge_experimental_reranker(
+    engine: &MemoryEngine,
+    dataset: &EvalDataset,
+    cell_to_eval_id: &HashMap<u64, String>,
+    mode: RecallMode,
+    top_k: usize,
+    repeats: usize,
+    candidate_pool: usize,
+    index_kind: IndexKind,
+    ranker: ExperimentalRanker,
+    bm25: &Bm25Index,
+) -> Result<RunSummary> {
+    let memory_by_id = dataset
+        .memories
+        .iter()
+        .map(|memory| (memory.id.as_str(), memory))
+        .collect::<HashMap<_, _>>();
+    let mut results = Vec::with_capacity(dataset.queries.len() * repeats);
+    for query in &dataset.queries {
+        for _ in 0..repeats {
+            let started = Instant::now();
+            let mut request = RecallRequest::new(query.query.clone());
+            request.mode = mode;
+            request.scope = query.scope.clone();
+            request.max_items = candidate_pool.max(top_k);
+            let packet = engine.recall(request)?;
+            let current = packet
+                .debug
+                .score_details
+                .iter()
+                .take(packet.relevant_memory.len())
+                .filter_map(|score| cell_to_eval_id.get(&score.cell_id).cloned())
+                .collect::<Vec<_>>();
+            let lexical = match ranker {
+                ExperimentalRanker::Bm25 | ExperimentalRanker::Rrf => {
+                    bm25.rank_candidates(query, &current)
+                }
+                ExperimentalRanker::LocalBm25
+                | ExperimentalRanker::LocalRrf
+                | ExperimentalRanker::WeightedLocalRrf2
+                | ExperimentalRanker::WeightedLocalRrf3 => {
+                    bm25.rank_candidates_local(query, &current)
+                }
+            };
+            let mut returned_ids = match ranker {
+                ExperimentalRanker::Bm25 | ExperimentalRanker::LocalBm25 => lexical,
+                ExperimentalRanker::Rrf | ExperimentalRanker::LocalRrf => {
+                    reciprocal_rank_fusion(&current, &lexical)
+                }
+                ExperimentalRanker::WeightedLocalRrf2 => {
+                    reciprocal_rank_fusion_weighted(&current, &lexical, 2.0, 1.0)
+                }
+                ExperimentalRanker::WeightedLocalRrf3 => {
+                    reciprocal_rank_fusion_weighted(&current, &lexical, 3.0, 1.0)
+                }
+            };
+            returned_ids.truncate(top_k);
+            let context_bytes = returned_ids
+                .iter()
+                .filter_map(|id| memory_by_id.get(id.as_str()))
+                .map(|memory| memory.text.len())
+                .sum();
+            results.push(QueryResult {
+                returned_ids,
+                latency_micros: elapsed_micros(started),
+                context_bytes,
+                hot_candidates: packet.debug.hot_candidate_cells,
+                pages_loaded: packet.debug.loaded_pages,
+                pages_pruned: packet.debug.pages_pruned_by_metadata,
+                cells_scanned: packet.debug.cells_scanned,
+                page_read_micros: packet.debug.page_file_read_load_micros,
+                page_decode_micros: packet.debug.page_decode_micros,
+                scoring_cache_build_micros: packet.debug.scoring_cache_build_micros,
+                cell_filtering_micros: packet.debug.cell_filtering_micros,
+                reranking_micros: packet.debug.reranking_micros,
+                context_packet_build_micros: packet.debug.context_packet_build_micros,
+                ..QueryResult::default()
+            });
+        }
+    }
+
+    Ok(summarize_run(
+        format!("mge_{}_{}", index_kind.as_str(), ranker.as_str()),
+        "sealed_repeated_experimental".to_string(),
         index_kind.as_str().to_string(),
         mode.as_str().to_string(),
         top_k,
@@ -1649,9 +1814,38 @@ fn selected_baselines(selection: BaselineSelection) -> Vec<BaselineKind> {
     }
 }
 
+fn selected_experimental_rankers(selection: MgeRankerSelection) -> Vec<ExperimentalRanker> {
+    match selection {
+        MgeRankerSelection::Current => Vec::new(),
+        MgeRankerSelection::Bm25 => vec![ExperimentalRanker::Bm25],
+        MgeRankerSelection::Rrf => vec![ExperimentalRanker::Rrf],
+        MgeRankerSelection::LocalBm25 => vec![ExperimentalRanker::LocalBm25],
+        MgeRankerSelection::LocalRrf => vec![ExperimentalRanker::LocalRrf],
+        MgeRankerSelection::Local => {
+            vec![ExperimentalRanker::LocalBm25, ExperimentalRanker::LocalRrf]
+        }
+        MgeRankerSelection::WeightedLocalRrf2 => {
+            vec![ExperimentalRanker::WeightedLocalRrf2]
+        }
+        MgeRankerSelection::WeightedLocalRrf => vec![
+            ExperimentalRanker::WeightedLocalRrf2,
+            ExperimentalRanker::WeightedLocalRrf3,
+        ],
+        MgeRankerSelection::All => vec![
+            ExperimentalRanker::Bm25,
+            ExperimentalRanker::Rrf,
+            ExperimentalRanker::LocalBm25,
+            ExperimentalRanker::LocalRrf,
+            ExperimentalRanker::WeightedLocalRrf2,
+            ExperimentalRanker::WeightedLocalRrf3,
+        ],
+    }
+}
+
 #[derive(Clone, Debug)]
 struct Bm25Index {
     docs: Vec<Bm25Doc>,
+    doc_index_by_id: HashMap<String, usize>,
     document_frequency: HashMap<String, usize>,
     avg_doc_len: f64,
 }
@@ -1667,6 +1861,7 @@ struct Bm25Doc {
 impl Bm25Index {
     fn build(dataset: &EvalDataset) -> Self {
         let mut docs = Vec::with_capacity(dataset.memories.len());
+        let mut doc_index_by_id = HashMap::with_capacity(dataset.memories.len());
         let mut document_frequency = HashMap::<String, usize>::new();
         let mut total_doc_len = 0usize;
 
@@ -1681,6 +1876,7 @@ impl Bm25Index {
             }
             let length = term_frequency.values().sum::<usize>();
             total_doc_len += length;
+            doc_index_by_id.insert(memory.id.clone(), docs.len());
             docs.push(Bm25Doc {
                 id: memory.id.clone(),
                 scope: memory.scope.clone(),
@@ -1696,6 +1892,7 @@ impl Bm25Index {
         };
         Self {
             docs,
+            doc_index_by_id,
             document_frequency,
             avg_doc_len,
         }
@@ -1743,6 +1940,129 @@ impl Bm25Index {
         }
         score
     }
+
+    fn rank_candidates(&self, query: &EvalQuery, candidate_ids: &[String]) -> Vec<String> {
+        let query_terms = tokenize(&query.query);
+        let mut scored = candidate_ids
+            .iter()
+            .enumerate()
+            .filter_map(|(original_rank, id)| {
+                let doc = self
+                    .doc_index_by_id
+                    .get(id)
+                    .and_then(|index| self.docs.get(*index))?;
+                Some((id.clone(), self.score_doc(doc, &query_terms), original_rank))
+            })
+            .collect::<Vec<_>>();
+        scored.sort_by(|left, right| {
+            right
+                .1
+                .partial_cmp(&left.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.2.cmp(&right.2))
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        scored.into_iter().map(|(id, _, _)| id).collect()
+    }
+
+    fn rank_candidates_local(&self, query: &EvalQuery, candidate_ids: &[String]) -> Vec<String> {
+        let query_terms = tokenize(&query.query);
+        let candidates = candidate_ids
+            .iter()
+            .enumerate()
+            .filter_map(|(original_rank, id)| {
+                let doc = self
+                    .doc_index_by_id
+                    .get(id)
+                    .and_then(|index| self.docs.get(*index))?;
+                Some((original_rank, doc))
+            })
+            .collect::<Vec<_>>();
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+
+        let mut document_frequency = HashMap::<&str, usize>::new();
+        let mut total_doc_len = 0usize;
+        for (_, doc) in &candidates {
+            total_doc_len += doc.length;
+            for term in &query_terms {
+                if doc.term_frequency.contains_key(term) {
+                    *document_frequency.entry(term.as_str()).or_insert(0) += 1;
+                }
+            }
+        }
+        let doc_count = candidates.len() as f64;
+        let avg_doc_len = total_doc_len as f64 / doc_count;
+        let mut scored = candidates
+            .into_iter()
+            .map(|(original_rank, doc)| {
+                let score = query_terms
+                    .iter()
+                    .filter_map(|term| {
+                        let tf = doc.term_frequency.get(term).copied()?;
+                        let df = document_frequency.get(term.as_str()).copied().unwrap_or(0);
+                        Some(bm25_term_score(
+                            doc_count,
+                            df as f64,
+                            tf,
+                            doc.length,
+                            avg_doc_len,
+                        ))
+                    })
+                    .sum::<f64>();
+                (doc.id.clone(), score, original_rank)
+            })
+            .collect::<Vec<_>>();
+        scored.sort_by(|left, right| {
+            right
+                .1
+                .partial_cmp(&left.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.2.cmp(&right.2))
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        scored.into_iter().map(|(id, _, _)| id).collect()
+    }
+}
+
+fn reciprocal_rank_fusion(current: &[String], lexical: &[String]) -> Vec<String> {
+    reciprocal_rank_fusion_weighted(current, lexical, 1.0, 1.0)
+}
+
+fn reciprocal_rank_fusion_weighted(
+    current: &[String],
+    lexical: &[String],
+    current_weight: f64,
+    lexical_weight: f64,
+) -> Vec<String> {
+    const RRF_K: f64 = 60.0;
+    let mut scores = HashMap::<String, f64>::new();
+    let mut original_rank = HashMap::<String, usize>::new();
+    for (rank, id) in current.iter().enumerate() {
+        original_rank.insert(id.clone(), rank);
+        *scores.entry(id.clone()).or_insert(0.0) += current_weight / (RRF_K + rank as f64 + 1.0);
+    }
+    for (rank, id) in lexical.iter().enumerate() {
+        *scores.entry(id.clone()).or_insert(0.0) += lexical_weight / (RRF_K + rank as f64 + 1.0);
+    }
+
+    let mut ranked = scores.into_iter().collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .partial_cmp(&left.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                original_rank
+                    .get(&left.0)
+                    .copied()
+                    .unwrap_or(usize::MAX)
+                    .cmp(&original_rank.get(&right.0).copied().unwrap_or(usize::MAX))
+            })
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    ranked.into_iter().map(|(id, _)| id).collect()
 }
 
 #[derive(Clone, Debug)]
@@ -2908,6 +3228,46 @@ mod tests {
         let index = Bm25Index::build(&dataset);
         let returned = index.search(query, 5, RecallMode::Focused);
         assert!(returned.contains(&query.relevant_ids[0]));
+    }
+
+    #[test]
+    fn candidate_bm25_reranker_promotes_relevant_memory() {
+        let dataset =
+            generate_dataset_with_queries(GeneratedProfile::Tiny, GeneratedQueryProfile::Lexical);
+        let query = &dataset.queries[0];
+        let target = query.relevant_ids[0].clone();
+        let distractor = dataset
+            .memories
+            .iter()
+            .find(|memory| memory.id != target)
+            .unwrap()
+            .id
+            .clone();
+        let index = Bm25Index::build(&dataset);
+        let ranked = index.rank_candidates(query, &[distractor, target.clone()]);
+        assert_eq!(ranked.first(), Some(&target));
+
+        let ranked_local = index.rank_candidates_local(query, &ranked);
+        assert_eq!(ranked_local.first(), Some(&target));
+    }
+
+    #[test]
+    fn reciprocal_rank_fusion_keeps_candidate_set_deterministic() {
+        let current = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let lexical = vec!["c".to_string(), "b".to_string(), "a".to_string()];
+        let first = reciprocal_rank_fusion(&current, &lexical);
+        let second = reciprocal_rank_fusion(&current, &lexical);
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 3);
+        assert!(first.iter().all(|id| current.contains(id)));
+    }
+
+    #[test]
+    fn weighted_rrf_preserves_more_of_the_current_rank() {
+        let current = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let lexical = vec!["c".to_string(), "b".to_string(), "a".to_string()];
+        let ranked = reciprocal_rank_fusion_weighted(&current, &lexical, 2.0, 1.0);
+        assert_eq!(ranked, current);
     }
 
     #[test]
