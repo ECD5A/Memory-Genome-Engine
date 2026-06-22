@@ -4,7 +4,7 @@
 //
 // Licensed under the Apache License, Version 2.0.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -254,6 +254,7 @@ struct RunSummary {
     index_kind: String,
     mode: String,
     queries: usize,
+    positive_queries: usize,
     top_k: usize,
     hit_at_k: f64,
     recall_at_k: f64,
@@ -263,12 +264,15 @@ struct RunSummary {
     negative_queries: usize,
     no_answer_accuracy: Option<f64>,
     abstention_analysis: Option<AbstentionAnalysis>,
+    category_breakdown: Vec<CategorySummary>,
     avg_latency_micros: u64,
     avg_end_to_end_micros: u64,
     p50_latency_micros: u64,
     p95_latency_micros: u64,
     avg_context_bytes: usize,
+    avg_context_tokens_estimate: usize,
     avg_returned_items: f64,
+    avg_items_at_k: f64,
     avg_hot_candidates: f64,
     avg_pages_loaded: f64,
     avg_pages_pruned: f64,
@@ -280,6 +284,33 @@ struct RunSummary {
     avg_cell_filtering_micros: u64,
     avg_reranking_micros: u64,
     avg_context_packet_build_micros: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct CategorySummary {
+    category: String,
+    queries: usize,
+    positive_queries: usize,
+    negative_queries: usize,
+    hit_at_k: f64,
+    recall_at_k: f64,
+    precision_at_k: f64,
+    mrr_at_k: f64,
+    ndcg_at_k: f64,
+    no_answer_accuracy: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct RetrievalMetricAccumulator {
+    samples: usize,
+    positive_samples: usize,
+    negative_samples: usize,
+    hit_sum: f64,
+    recall_sum: f64,
+    precision_sum: f64,
+    mrr_sum: f64,
+    ndcg_sum: f64,
+    no_answer_sum: f64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1916,6 +1947,65 @@ fn bm25_term_score(
     idf * (tf * (k1 + 1.0)) / normalization
 }
 
+impl RetrievalMetricAccumulator {
+    fn record(&mut self, query: &EvalQuery, result: &QueryResult, top_k: usize) {
+        self.samples += 1;
+        if query.relevant_ids.is_empty() {
+            self.negative_samples += 1;
+            self.no_answer_sum += f64::from(result.returned_ids.is_empty());
+            return;
+        }
+
+        self.positive_samples += 1;
+        let expected = query.relevant_ids.iter().collect::<BTreeSet<_>>();
+        let returned_at_k = result.returned_ids.iter().take(top_k).collect::<Vec<_>>();
+        let returned_unique = returned_at_k.iter().copied().collect::<BTreeSet<_>>();
+        let relevant_returned = returned_unique.intersection(&expected).count();
+
+        self.hit_sum += f64::from(relevant_returned > 0);
+        self.recall_sum += relevant_returned as f64 / expected.len() as f64;
+        self.precision_sum += if returned_unique.is_empty() {
+            0.0
+        } else {
+            relevant_returned as f64 / returned_unique.len() as f64
+        };
+        self.mrr_sum += returned_at_k
+            .iter()
+            .position(|id| expected.contains(*id))
+            .map(|index| 1.0 / (index + 1) as f64)
+            .unwrap_or(0.0);
+
+        let mut seen = HashSet::new();
+        let dcg = returned_at_k
+            .iter()
+            .enumerate()
+            .filter(|(_, id)| expected.contains(**id) && seen.insert(id.as_str()))
+            .map(|(index, _)| 1.0 / ((index + 2) as f64).log2())
+            .sum::<f64>();
+        let ideal = (0..expected.len().min(top_k))
+            .map(|index| 1.0 / ((index + 2) as f64).log2())
+            .sum::<f64>();
+        self.ndcg_sum += if ideal > 0.0 { dcg / ideal } else { 0.0 };
+    }
+
+    fn category_summary(&self, category: String, repeats: usize) -> CategorySummary {
+        let positive_denominator = self.positive_samples.max(1) as f64;
+        CategorySummary {
+            category,
+            queries: self.samples / repeats,
+            positive_queries: self.positive_samples / repeats,
+            negative_queries: self.negative_samples / repeats,
+            hit_at_k: self.hit_sum / positive_denominator,
+            recall_at_k: self.recall_sum / positive_denominator,
+            precision_at_k: self.precision_sum / positive_denominator,
+            mrr_at_k: self.mrr_sum / positive_denominator,
+            ndcg_at_k: self.ndcg_sum / positive_denominator,
+            no_answer_accuracy: (self.negative_samples > 0)
+                .then_some(self.no_answer_sum / self.negative_samples as f64),
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn summarize_run(
     system: String,
@@ -1927,15 +2017,11 @@ fn summarize_run(
     queries: &[EvalQuery],
     results: &[QueryResult],
 ) -> RunSummary {
-    let mut hit_sum = 0.0;
-    let mut recall_sum = 0.0;
-    let mut precision_sum = 0.0;
-    let mut mrr_sum = 0.0;
-    let mut ndcg_sum = 0.0;
-    let mut no_answer_sum = 0.0;
-    let mut no_answer_samples = 0usize;
+    let mut metrics = RetrievalMetricAccumulator::default();
+    let mut category_metrics = BTreeMap::<String, RetrievalMetricAccumulator>::new();
     let mut context_bytes_sum = 0usize;
     let mut returned_items_sum = 0usize;
+    let mut items_at_k_sum = 0usize;
     let mut hot_candidates_sum = 0usize;
     let mut pages_loaded_sum = 0usize;
     let mut pages_pruned_sum = 0usize;
@@ -1950,60 +2036,21 @@ fn summarize_run(
     let mut latencies = Vec::with_capacity(results.len());
 
     for (query_index, query) in queries.iter().enumerate() {
-        let expected = query
-            .relevant_ids
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<String>>();
         for repeat_index in 0..repeats {
             let result = &results[query_index * repeats + repeat_index];
-            let returned = result
-                .returned_ids
-                .iter()
-                .cloned()
-                .collect::<BTreeSet<String>>();
-            let relevant_returned = returned.intersection(&expected).count();
-            if expected.is_empty() {
-                let correct_rejection = if returned.is_empty() { 1.0 } else { 0.0 };
-                hit_sum += correct_rejection;
-                recall_sum += correct_rejection;
-                mrr_sum += correct_rejection;
-                ndcg_sum += correct_rejection;
-                no_answer_sum += correct_rejection;
-                no_answer_samples += 1;
+            metrics.record(query, result, top_k);
+            let category = if query.category.is_empty() {
+                "uncategorized"
             } else {
-                hit_sum += if relevant_returned > 0 { 1.0 } else { 0.0 };
-                recall_sum += relevant_returned as f64 / expected.len() as f64;
-                mrr_sum += result
-                    .returned_ids
-                    .iter()
-                    .position(|id| expected.contains(id))
-                    .map(|index| 1.0 / (index + 1) as f64)
-                    .unwrap_or(0.0);
-                let mut seen = HashSet::new();
-                let dcg = result
-                    .returned_ids
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, id)| expected.contains(*id) && seen.insert((*id).as_str()))
-                    .map(|(index, _)| 1.0 / ((index + 2) as f64).log2())
-                    .sum::<f64>();
-                let ideal = (0..expected.len().min(top_k))
-                    .map(|index| 1.0 / ((index + 2) as f64).log2())
-                    .sum::<f64>();
-                ndcg_sum += if ideal > 0.0 { dcg / ideal } else { 0.0 };
-            }
-            precision_sum += if returned.is_empty() {
-                if expected.is_empty() {
-                    1.0
-                } else {
-                    0.0
-                }
-            } else {
-                relevant_returned as f64 / returned.len() as f64
+                query.category.as_str()
             };
+            category_metrics
+                .entry(category.to_string())
+                .or_default()
+                .record(query, result, top_k);
             context_bytes_sum += result.context_bytes;
             returned_items_sum += result.returned_ids.len();
+            items_at_k_sum += result.returned_ids.len().min(top_k);
             hot_candidates_sum += result.hot_candidates;
             pages_loaded_sum += result.pages_loaded;
             pages_pruned_sum += result.pages_pruned;
@@ -2025,32 +2072,43 @@ fn summarize_run(
 
     latencies.sort_unstable();
     let samples = results.len().max(1);
+    let positive_denominator = metrics.positive_samples.max(1) as f64;
     RunSummary {
         system,
         layer,
         index_kind,
         mode,
         queries: queries.len(),
+        positive_queries: queries
+            .iter()
+            .filter(|query| !query.relevant_ids.is_empty())
+            .count(),
         top_k,
-        hit_at_k: hit_sum / samples as f64,
-        recall_at_k: recall_sum / samples as f64,
-        precision_at_k: precision_sum / samples as f64,
-        mrr_at_k: mrr_sum / samples as f64,
-        ndcg_at_k: ndcg_sum / samples as f64,
+        hit_at_k: metrics.hit_sum / positive_denominator,
+        recall_at_k: metrics.recall_sum / positive_denominator,
+        precision_at_k: metrics.precision_sum / positive_denominator,
+        mrr_at_k: metrics.mrr_sum / positive_denominator,
+        ndcg_at_k: metrics.ndcg_sum / positive_denominator,
         negative_queries: queries
             .iter()
             .filter(|query| query.relevant_ids.is_empty())
             .count(),
-        no_answer_accuracy: (no_answer_samples > 0)
-            .then_some(no_answer_sum / no_answer_samples as f64),
-        abstention_analysis: summarize_abstention(queries, results, repeats),
+        no_answer_accuracy: (metrics.negative_samples > 0)
+            .then_some(metrics.no_answer_sum / metrics.negative_samples as f64),
+        abstention_analysis: summarize_abstention(queries, results, repeats, top_k),
+        category_breakdown: category_metrics
+            .into_iter()
+            .map(|(category, metrics)| metrics.category_summary(category, repeats))
+            .collect(),
         avg_latency_micros: average_u64(&latencies),
         avg_end_to_end_micros: average_u64(&latencies)
             .saturating_add(store_open_micros_sum / samples as u64),
         p50_latency_micros: percentile(&latencies, 50.0),
         p95_latency_micros: percentile(&latencies, 95.0),
         avg_context_bytes: context_bytes_sum / samples,
+        avg_context_tokens_estimate: (context_bytes_sum / samples).div_ceil(4),
         avg_returned_items: returned_items_sum as f64 / samples as f64,
+        avg_items_at_k: items_at_k_sum as f64 / samples as f64,
         avg_hot_candidates: hot_candidates_sum as f64 / samples as f64,
         avg_pages_loaded: pages_loaded_sum as f64 / samples as f64,
         avg_pages_pruned: pages_pruned_sum as f64 / samples as f64,
@@ -2069,6 +2127,7 @@ fn summarize_abstention(
     queries: &[EvalQuery],
     results: &[QueryResult],
     repeats: usize,
+    top_k: usize,
 ) -> Option<AbstentionAnalysis> {
     let positive_samples = queries
         .iter()
@@ -2105,7 +2164,13 @@ fn summarize_abstention(
                     && result.top_score.is_some_and(|score| score >= threshold);
                 if expected.is_empty() {
                     negative_correct += usize::from(!accepted);
-                } else if accepted && result.returned_ids.iter().any(|id| expected.contains(id)) {
+                } else if accepted
+                    && result
+                        .returned_ids
+                        .iter()
+                        .take(top_k)
+                        .any(|id| expected.contains(id))
+                {
                     positive_correct += 1;
                 }
             }
@@ -2360,6 +2425,51 @@ fn text_report(report: &EvalReport) -> String {
         ));
         output.push('\n');
     }
+    output.push_str("\ncontext budget (averages; token estimate is UTF-8 bytes / 4):\n");
+    output.push_str(&format!(
+        "{:<28} {:<18} {:<8} {:>10} {:>10} {:>10} {:>12}\n",
+        "system", "layer", "mode", "out_items", "items@k", "ctx_bytes", "est_tokens"
+    ));
+    output.push_str(&"-".repeat(105));
+    output.push('\n');
+    for run in &report.runs {
+        output.push_str(&format!(
+            "{:<28} {:<18} {:<8} {:>10.2} {:>10.2} {:>10} {:>12}\n",
+            run.system,
+            run.layer,
+            run.mode,
+            run.avg_returned_items,
+            run.avg_items_at_k,
+            run.avg_context_bytes,
+            run.avg_context_tokens_estimate
+        ));
+    }
+    output.push_str("\ncategory breakdown (positive retrieval metrics use strict top-k):\n");
+    output.push_str(&format!(
+        "{:<28} {:<18} {:<8} {:<26} {:>7} {:>7} {:>7} {:>7} {:>7}\n",
+        "system", "layer", "mode", "category", "hit@k", "rec@k", "mrr@k", "ndcg@k", "no_ans"
+    ));
+    output.push_str(&"-".repeat(135));
+    output.push('\n');
+    for run in &report.runs {
+        for category in &run.category_breakdown {
+            output.push_str(&format!(
+                "{:<28} {:<18} {:<8} {:<26} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7}\n",
+                run.system,
+                run.layer,
+                run.mode,
+                category.category,
+                category.hit_at_k,
+                category.recall_at_k,
+                category.mrr_at_k,
+                category.ndcg_at_k,
+                category
+                    .no_answer_accuracy
+                    .map(|value| format!("{value:.3}"))
+                    .unwrap_or_else(|| "-".to_string())
+            ));
+        }
+    }
     if report.runs.iter().any(|run| run.negative_queries > 0) {
         output.push_str("\nhard-negative rejection:\n");
         output.push_str(&format!(
@@ -2461,6 +2571,7 @@ fn text_report(report: &EvalReport) -> String {
     }
     output.push_str("\nnotes:\n");
     output.push_str("- avg_us measures recall after engine open; e2e_us adds store_open for sealed_cold runs.\n");
+    output.push_str("- retrieval metrics exclude negative/abstention queries and score only the first top_k returned ids.\n");
     output.push_str(
         "- hard-negative queries count as correct only when retrieval returns no items.\n",
     );
@@ -2854,6 +2965,10 @@ mod tests {
         assert_eq!(summary.mrr_at_k, 1.0);
         assert_eq!(summary.ndcg_at_k, 1.0);
         assert_eq!(summary.no_answer_accuracy, None);
+        assert_eq!(summary.positive_queries, 1);
+        assert_eq!(summary.avg_items_at_k, 2.0);
+        assert_eq!(summary.avg_context_tokens_estimate, 25);
+        assert_eq!(summary.category_breakdown.len(), 1);
 
         let report = EvalReport {
             dataset: summarize_dataset(&generate_dataset_with_queries(
@@ -2912,8 +3027,48 @@ mod tests {
         );
         assert_eq!(rejected.negative_queries, 1);
         assert_eq!(rejected.no_answer_accuracy, Some(1.0));
-        assert_eq!(rejected.mrr_at_k, 1.0);
-        assert_eq!(rejected.ndcg_at_k, 1.0);
+        assert_eq!(rejected.positive_queries, 0);
+        assert_eq!(rejected.mrr_at_k, 0.0);
+        assert_eq!(rejected.ndcg_at_k, 0.0);
+        assert_eq!(rejected.category_breakdown[0].no_answer_accuracy, Some(1.0));
+    }
+
+    #[test]
+    fn run_summary_applies_strict_top_k_to_broad_output() {
+        let query = EvalQuery {
+            id: "strict-top-k".to_string(),
+            query: "target".to_string(),
+            scope: None,
+            relevant_ids: vec!["target".to_string()],
+            category: "ranking".to_string(),
+        };
+        let summary = summarize_run(
+            "mge".to_string(),
+            "sealed_repeated".to_string(),
+            "exact".to_string(),
+            "broad".to_string(),
+            5,
+            1,
+            &[query],
+            &[QueryResult {
+                returned_ids: vec![
+                    "d1".to_string(),
+                    "d2".to_string(),
+                    "d3".to_string(),
+                    "d4".to_string(),
+                    "d5".to_string(),
+                    "target".to_string(),
+                ],
+                ..QueryResult::default()
+            }],
+        );
+
+        assert_eq!(summary.avg_returned_items, 6.0);
+        assert_eq!(summary.avg_items_at_k, 5.0);
+        assert_eq!(summary.hit_at_k, 0.0);
+        assert_eq!(summary.recall_at_k, 0.0);
+        assert_eq!(summary.mrr_at_k, 0.0);
+        assert_eq!(summary.ndcg_at_k, 0.0);
     }
 
     #[test]
