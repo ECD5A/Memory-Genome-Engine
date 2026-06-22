@@ -24,6 +24,100 @@ use crate::binary::{self, FileKind};
 use crate::errors::{MgeError, Result};
 use crate::models::{MarkerId, PageId};
 use crate::pages::MemoryPage;
+use crate::retrieval::CachedCellScoringData;
+
+const LEXICAL_STATS_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct LexicalCorpusStats {
+    version: u32,
+    document_count: u64,
+    total_token_count: u64,
+    document_frequency: Vec<(u64, u32)>,
+}
+
+impl Default for LexicalCorpusStats {
+    fn default() -> Self {
+        Self {
+            version: LEXICAL_STATS_VERSION,
+            document_count: 0,
+            total_token_count: 0,
+            document_frequency: Vec::new(),
+        }
+    }
+}
+
+impl LexicalCorpusStats {
+    pub(crate) fn build(pages: &[MemoryPage]) -> Self {
+        let mut document_count = 0u64;
+        let mut total_token_count = 0u64;
+        let mut document_frequency = BTreeMap::<u64, u32>::new();
+        for cell in pages.iter().flat_map(|page| page.cells.iter()) {
+            let scoring = CachedCellScoringData::from_cell(cell);
+            document_count = document_count.saturating_add(1);
+            total_token_count = total_token_count.saturating_add(scoring.document_len() as u64);
+            let mut fingerprints = BTreeSet::new();
+            scoring.for_each_unique_token(|token| {
+                fingerprints.insert(token_fingerprint(token));
+            });
+            for fingerprint in fingerprints {
+                let count = document_frequency.entry(fingerprint).or_default();
+                *count = count.saturating_add(1);
+            }
+        }
+        Self {
+            version: LEXICAL_STATS_VERSION,
+            document_count,
+            total_token_count,
+            document_frequency: document_frequency.into_iter().collect(),
+        }
+    }
+
+    pub(crate) fn document_count(&self) -> usize {
+        self.document_count as usize
+    }
+
+    pub(crate) fn total_token_count(&self) -> usize {
+        self.total_token_count as usize
+    }
+
+    pub(crate) fn document_frequency(&self, token: &str) -> usize {
+        let fingerprint = token_fingerprint(token);
+        self.document_frequency
+            .binary_search_by_key(&fingerprint, |(value, _)| *value)
+            .ok()
+            .and_then(|index| self.document_frequency.get(index))
+            .map_or(0, |(_, count)| *count as usize)
+    }
+
+    pub(crate) fn save_to_path(&self, path: impl AsRef<Path>) -> Result<()> {
+        binary::write_messagepack_file(path, FileKind::LexicalStats, self)
+    }
+
+    pub(crate) fn load_from_path(path: impl AsRef<Path>) -> Result<Option<Self>> {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let stats: Self = binary::read_messagepack_file(path, FileKind::LexicalStats)?;
+        if stats.version != LEXICAL_STATS_VERSION {
+            return Err(MgeError::StorageFormat(format!(
+                "unsupported lexical stats version {}",
+                stats.version
+            )));
+        }
+        Ok(Some(stats))
+    }
+}
+
+fn token_fingerprint(token: &str) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x100000001b3;
+
+    token.as_bytes().iter().fold(OFFSET_BASIS, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(PRIME)
+    })
+}
 
 pub trait CandidatePageIndex {
     fn build(pages: &[MemoryPage]) -> Result<Self>

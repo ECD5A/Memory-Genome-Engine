@@ -671,6 +671,11 @@ fn init_creates_binary_storage_layout() {
         .join("marker_index.mgi")
         .is_file());
     assert!(dir.path().join("indexes").join("fuse_index.mgi").is_file());
+    assert!(dir
+        .path()
+        .join("indexes")
+        .join("lexical_stats.mgi")
+        .is_file());
     assert!(dir.path().join("exports").is_dir());
 
     assert!(!dir.path().join("manifest.json").exists());
@@ -3163,6 +3168,7 @@ fn rebuild_indexes_restores_missing_exact_index_and_preserves_pages() {
     let before_catalog = engine.inspect().unwrap().page_catalog;
     let before_pages = page_file_bytes(dir.path(), &before_catalog);
     fs::remove_file(dir.path().join("indexes").join("marker_index.mgi")).unwrap();
+    fs::remove_file(dir.path().join("indexes").join("lexical_stats.mgi")).unwrap();
 
     let broken = engine.validate_deep().unwrap();
     assert!(!broken.ok);
@@ -3187,6 +3193,11 @@ fn rebuild_indexes_restores_missing_exact_index_and_preserves_pages() {
         .join("indexes")
         .join("marker_index.mgi")
         .is_file());
+    assert!(dir
+        .path()
+        .join("indexes")
+        .join("lexical_stats.mgi")
+        .is_file());
     assert!(engine.validate_deep().unwrap().ok);
 
     let packet = engine
@@ -3195,6 +3206,60 @@ fn rebuild_indexes_restores_missing_exact_index_and_preserves_pages() {
         ))
         .unwrap();
     assert_eq!(packet.relevant_memory.len(), 1);
+}
+
+#[test]
+fn missing_lexical_stats_keeps_legacy_recall_compatible_until_rebuild() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+    drop(engine);
+
+    let stats_path = dir.path().join("indexes").join("lexical_stats.mgi");
+    fs::remove_file(&stats_path).unwrap();
+    let engine = MemoryEngine::open_at(dir.path()).unwrap();
+    let packet = engine
+        .recall(RecallRequest::new(
+            "How should the agent answer technical questions?",
+        ))
+        .unwrap();
+    assert_eq!(packet.relevant_memory.len(), 1);
+
+    let validation = engine.validate_deep().unwrap();
+    assert!(validation.ok);
+    assert!(validation
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("lexical corpus statistics are missing")));
+
+    engine.rebuild_catalog_and_indexes().unwrap();
+    assert!(stats_path.is_file());
+    assert!(engine.validate_deep().unwrap().ok);
+}
+
+#[test]
+fn rebuild_indexes_restores_corrupted_lexical_stats() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    remember_answer_style(&mut engine);
+    engine.seal().unwrap();
+
+    let stats_path = dir.path().join("indexes").join("lexical_stats.mgi");
+    let mut bytes = fs::read(&stats_path).unwrap();
+    let last = bytes.last_mut().unwrap();
+    *last ^= 0x5a;
+    fs::write(&stats_path, bytes).unwrap();
+
+    let validation = engine.validate_deep().unwrap();
+    assert!(!validation.ok);
+    assert!(validation
+        .errors
+        .iter()
+        .any(|error| error.contains("lexical corpus statistics load failed")));
+
+    engine.rebuild_catalog_and_indexes().unwrap();
+    assert!(engine.validate_deep().unwrap().ok);
 }
 
 #[test]

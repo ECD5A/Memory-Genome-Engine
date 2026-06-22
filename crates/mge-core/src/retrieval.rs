@@ -190,6 +190,29 @@ impl CachedCellScoringData {
                 .unwrap_or_default(),
         }
     }
+
+    pub(crate) fn document_len(&self) -> usize {
+        self.subject_tokens.len() + self.value_tokens.len()
+    }
+
+    pub(crate) fn term_frequency(&self, token: &str) -> usize {
+        usize::from(self.subject_tokens.iter().any(|item| item == token))
+            + usize::from(self.value_tokens.iter().any(|item| item == token))
+    }
+
+    pub(crate) fn for_each_unique_token(&self, mut visit: impl FnMut(&str)) {
+        let mut tokens = self
+            .subject_tokens
+            .iter()
+            .chain(self.value_tokens.iter())
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        tokens.sort_unstable();
+        tokens.dedup();
+        for token in tokens {
+            visit(token);
+        }
+    }
 }
 
 impl ScoringContext {

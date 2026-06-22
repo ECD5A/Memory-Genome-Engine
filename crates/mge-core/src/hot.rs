@@ -122,6 +122,17 @@ impl HotMemoryLayer {
         self.scoring_by_id.get(&cell_id)
     }
 
+    pub(crate) fn lexical_total_token_count(&self) -> usize {
+        self.scoring_by_id
+            .values()
+            .map(CachedCellScoringData::document_len)
+            .sum()
+    }
+
+    pub(crate) fn lexical_document_frequency(&self, token: &str) -> usize {
+        self.token_to_cells.get(token).map_or(0, Vec::len)
+    }
+
     pub fn all_cells(&self) -> Vec<MemoryCell> {
         self.cells_by_id.values().cloned().collect()
     }
