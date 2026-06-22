@@ -58,8 +58,7 @@ impl RecallRequest {
 
     pub fn effective_max_items(&self, total_candidates: usize) -> usize {
         match self.mode {
-            RecallMode::Focused => self.max_items,
-            RecallMode::Broad => self.max_items.max(20),
+            RecallMode::Focused | RecallMode::Broad => self.max_items,
             RecallMode::FullScope => total_candidates,
         }
     }

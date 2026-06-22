@@ -1428,7 +1428,7 @@ fn lexical_rerank_prefers_precise_text_over_noisy_candidate() {
 }
 
 #[test]
-fn broad_recall_returns_more_relevant_items_than_focused() {
+fn broad_recall_uses_broader_search_and_respects_output_limit() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
     for index in 0..8 {
@@ -1447,6 +1447,7 @@ fn broad_recall_returns_more_relevant_items_than_focused() {
         .unwrap();
     let mut broad_request = RecallRequest::new("broad recall topic");
     broad_request.mode = RecallMode::Broad;
+    broad_request.max_items = 8;
     let broad = engine.recall(broad_request).unwrap();
 
     assert_eq!(focused.debug.recall_mode, RecallMode::Focused);
@@ -1454,7 +1455,15 @@ fn broad_recall_returns_more_relevant_items_than_focused() {
     assert_eq!(focused.relevant_memory.len(), 5);
     assert!(broad.relevant_memory.len() > focused.relevant_memory.len());
     assert_eq!(broad.relevant_memory.len(), 8);
-    assert_eq!(broad.debug.max_items, 20);
+    assert_eq!(broad.debug.max_items, 8);
+
+    let mut limited_request = RecallRequest::new("broad recall topic");
+    limited_request.mode = RecallMode::Broad;
+    limited_request.max_items = 2;
+    let limited = engine.recall(limited_request).unwrap();
+    assert_eq!(limited.relevant_memory.len(), 2);
+    assert_eq!(limited.debug.max_items, 2);
+    assert!(limited.debug.total_candidates >= 8);
 }
 
 #[test]

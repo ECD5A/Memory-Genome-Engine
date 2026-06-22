@@ -305,8 +305,8 @@ fn cli_recall_modes_support_broad_and_full_scope() {
         &["recall", "alpha module task", "--mode", "broad", "--json"],
     );
     assert_eq!(broad["debug"]["recall_mode"], "broad");
-    assert_eq!(broad["debug"]["max_items"], 20);
-    assert_eq!(broad["relevant_memory"].as_array().unwrap().len(), 7);
+    assert_eq!(broad["debug"]["max_items"], 5);
+    assert_eq!(broad["relevant_memory"].as_array().unwrap().len(), 5);
 
     run_mge(&store, &["seal"]);
     let full_scope = run_mge_json(
