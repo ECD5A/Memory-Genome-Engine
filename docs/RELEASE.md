@@ -308,28 +308,28 @@ LongMemEval Oracle converted into 4,578 deterministic session chunks and 500 que
 
 | Retrieval path | Mode | Hit@5 | Recall@5 | MRR@5 | nDCG@5 |
 |---|---|---:|---:|---:|---:|
-| MGE Exact sealed | focused | 0.964 | 0.875 | 0.771 | 0.757 |
-| MGE BinaryFuse sealed | focused | 0.964 | 0.875 | 0.771 | 0.757 |
-| MGE Exact sealed | broad | 0.964 | 0.875 | 0.771 | 0.757 |
-| MGE BinaryFuse sealed | broad | 0.964 | 0.875 | 0.771 | 0.757 |
+| MGE Exact sealed | focused | 0.972 | 0.877 | 0.775 | 0.761 |
+| MGE BinaryFuse sealed | focused | 0.972 | 0.877 | 0.775 | 0.761 |
+| MGE Exact sealed | broad | 0.972 | 0.877 | 0.775 | 0.761 |
+| MGE BinaryFuse sealed | broad | 0.972 | 0.877 | 0.775 | 0.761 |
 | Eval-only BM25 | focused | 0.972 | 0.876 | 0.789 | 0.770 |
 
 LoCoMo converted into 5,881 memories and 1,977 evidence-bearing queries; nine queries without usable evidence annotations were skipped:
 
 | Retrieval path | Mode | Hit@5 | Recall@5 | MRR@5 | nDCG@5 |
 |---|---|---:|---:|---:|---:|
-| MGE Exact sealed | focused | 0.526 | 0.482 | 0.387 | 0.396 |
-| MGE BinaryFuse sealed | focused | 0.526 | 0.482 | 0.388 | 0.396 |
-| MGE Exact sealed | broad | 0.540 | 0.497 | 0.398 | 0.408 |
-| MGE BinaryFuse sealed | broad | 0.540 | 0.497 | 0.398 | 0.408 |
+| MGE Exact sealed | focused | 0.531 | 0.487 | 0.393 | 0.401 |
+| MGE BinaryFuse sealed | focused | 0.531 | 0.487 | 0.393 | 0.401 |
+| MGE Exact sealed | broad | 0.544 | 0.499 | 0.402 | 0.411 |
+| MGE BinaryFuse sealed | broad | 0.544 | 0.499 | 0.402 | 0.411 |
 | Eval-only BM25 | focused | 0.545 | 0.499 | 0.415 | 0.421 |
 
 LongMemEval-S converted into 85,253 session chunks and 500 queries:
 
 | Retrieval path | Mode | Hit@5 | Recall@5 | MRR@5 | nDCG@5 |
 |---|---|---:|---:|---:|---:|
-| MGE Exact sealed | focused | 0.894 | 0.769 | 0.697 | 0.668 |
-| MGE Exact sealed | broad | 0.894 | 0.770 | 0.696 | 0.669 |
+| MGE Exact sealed | focused | 0.896 | 0.782 | 0.701 | 0.676 |
+| MGE Exact sealed | broad | 0.898 | 0.784 | 0.701 | 0.677 |
 | Eval-only BM25 | focused | 0.894 | 0.785 | 0.717 | 0.688 |
 
 Broad recall keeps wider candidate selection but now treats `max_items` as a strict output budget. With `max_items=5`, the output-only change preserved strict top-5 quality while reducing average returned context:
@@ -341,7 +341,7 @@ Broad recall keeps wider candidate selection but now treats `max_items` as a str
 
 These are retrieval-adapter results, not official end-to-end LongMemEval or LoCoMo answer scores. The BM25 row is an in-memory algorithmic diagnostic and is not a product-level latency comparison. Exact and BinaryFuse remain quality-equivalent in these runs; BinaryFuse stays optional rather than being presented as a universal speed improvement.
 
-Dev-only candidate reranking experiments also tested global BM25, candidate-local BM25, equal RRF, and weighted RRF. The production-aligned weighted local variant improved Oracle but slightly reduced LoCoMo MRR/nDCG, while equal RRF reduced LongMemEval-S Hit@5. None was promoted into the core ranking path; the evaluator keeps them only for future controlled experiments.
+Dev-only candidate reranking experiments tested global BM25, candidate-local BM25, equal RRF, and weighted RRF. Pure BM25 and weighted/local variants were rejected after dataset regressions. Equal RRF between the existing sealed ranking and production-token global BM25 improved all four reported metrics on Oracle, LoCoMo, and LongMemEval-S, so that narrow sealed-only variant was promoted. Its document-frequency statistics are a rebuildable runtime index; hot and mixed hot/sealed ranking remain unchanged.
 
 The current production contract returns ranked candidates rather than asserting that a question is answerable. A post-hoc score-threshold sweep is therefore reported only as a design diagnostic. On the deterministic mixed fixture it reached 0.975 balanced accuracy, but on strict-top-K LongMemEval sealed broad it reached only 0.668 (0.602 positive hit/accept rate and 0.733 negative rejection). The threshold was selected and measured on the same samples, not a holdout set. This is insufficient evidence for a production threshold, so recall behavior remains unchanged.
 

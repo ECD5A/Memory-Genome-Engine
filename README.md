@@ -46,9 +46,9 @@ Local release-mode retrieval runs use strict top-5 scoring and official dataset 
 
 | Dataset / default Exact focused path | Memories | Hit@5 | Recall@5 | MRR@5 |
 |---|---:|---:|---:|---:|
-| LongMemEval Oracle | 4,578 | 0.964 | 0.875 | 0.771 |
-| LongMemEval-S | 85,253 | 0.894 | 0.769 | 0.697 |
-| LoCoMo | 5,881 | 0.526 | 0.482 | 0.387 |
+| LongMemEval Oracle | 4,578 | 0.972 | 0.877 | 0.775 |
+| LongMemEval-S | 85,253 | 0.896 | 0.782 | 0.701 |
+| LoCoMo | 5,881 | 0.531 | 0.487 | 0.393 |
 
 These measure retrieval from deterministic adapters, not final LLM answer quality or superiority over another product. Dataset revisions, checksums, ingestion rules, BM25 diagnostics, context-budget measurements, and limitations are in [Release](docs/RELEASE.md#external-retrieval-evidence).
 
