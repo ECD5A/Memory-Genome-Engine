@@ -59,11 +59,15 @@ MGE рассматривает память агента как проверяе
 ```bash
 mge setup
 mge setup codex
+mge setup claude-code
+mge setup cursor
 mge remember "User prefers concise technical answers" --kind user_preference --scope global --trust user_confirmed
 mge recall "How should the agent answer technical questions?"
 mge seal
 mge validate --deep
 ```
+
+`mge setup codex`, `mge setup claude-code` и `mge setup cursor` регистрируют локальный `mge-mcp-server` для этих хостов. `mge setup generic-mcp` печатает переносимую stdio-конфигурацию для других инструментов.
 
 Терминальный интерфейс:
 
@@ -87,19 +91,19 @@ mge validate --deep --passphrase-env MGE_PASSPHRASE
 
 ## Интеграция с агентами
 
-CLI:
+Агенты могут использовать одно и то же локальное хранилище через CLI-команды, MCP-совместимый stdio-сервер или тонкие SDK-обёртки.
+
+Recall через CLI:
 
 ```bash
 mge recall "project context" --mode broad --scope my_project
 ```
 
-MCP-совместимый stdio-сервер:
+MCP-совместимый stdio-сервер для любого совместимого хоста:
 
 ```bash
 mge-mcp-server --store .memory-genome
 ```
-
-Команды `mge setup codex`, `mge setup claude-code` и `mge setup cursor` автоматически регистрируют сервер. `mge setup generic-mcp` печатает переносимую конфигурацию для другого хоста. Подробности приведены в разделе [интеграции](docs/INTEGRATION.md).
 
 Примеры SDK:
 
@@ -107,6 +111,8 @@ mge-mcp-server --store .memory-genome
 python examples/python_agent_host.py
 node examples/typescript_agent_host.ts
 ```
+
+Подробности по настройке зашифрованных хранилищ для хостов, схемам, структурированным ошибкам и SDK приведены в разделе [интеграции](docs/INTEGRATION.md).
 
 ## Документация
 

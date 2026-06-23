@@ -59,11 +59,15 @@ Install a checksummed release using the [Quickstart](QUICKSTART.md), then initia
 ```bash
 mge setup
 mge setup codex
+mge setup claude-code
+mge setup cursor
 mge remember "User prefers concise technical answers" --kind user_preference --scope global --trust user_confirmed
 mge recall "How should the agent answer technical questions?"
 mge seal
 mge validate --deep
 ```
+
+`mge setup codex`, `mge setup claude-code`, and `mge setup cursor` register the local `mge-mcp-server` for those hosts. `mge setup generic-mcp` prints a portable stdio configuration for other tools.
 
 Terminal UI:
 
@@ -87,19 +91,19 @@ Payload encryption protects hot records, snapshots, and sealed page payloads. Me
 
 ## Agent Integration
 
-CLI:
+Agents can use the same local store through CLI commands, the MCP-compatible stdio server, or thin SDK wrappers.
+
+CLI recall:
 
 ```bash
 mge recall "project context" --mode broad --scope my_project
 ```
 
-MCP stdio server:
+MCP stdio server for any compatible host:
 
 ```bash
 mge-mcp-server --store .memory-genome
 ```
-
-`mge setup codex`, `mge setup claude-code`, and `mge setup cursor` register that server automatically. `mge setup generic-mcp` prints a portable host configuration. See [Integration](docs/INTEGRATION.md).
 
 SDK examples:
 
@@ -107,6 +111,8 @@ SDK examples:
 python examples/python_agent_host.py
 node examples/typescript_agent_host.ts
 ```
+
+See [Integration](docs/INTEGRATION.md) for encrypted host setup, schemas, structured errors, and SDK details.
 
 ## Documentation
 
