@@ -19,7 +19,7 @@ mge-mcp-server into a user-writable directory. No admin rights are required.
 
 Examples:
   .\scripts\install-release.ps1
-  .\scripts\install-release.ps1 -Version v0.1.1
+  .\scripts\install-release.ps1 -Version v0.1.2
   .\scripts\install-release.ps1 -SourceDirectory target\mge-release\archives
 "@
 }

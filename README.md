@@ -38,7 +38,7 @@ MGE treats agent memory as an inspectable local subsystem rather than an opaque 
 - `ContextPacket` returns ranked memory together with constraints, warnings, and score details for agent workflows.
 - CLI, MCP-compatible stdio, and thin SDKs expose the same Rust engine without requiring a cloud service, embedding model, or vector database.
 
-Marker-first retrieval is deterministic and lightweight, but it is not universal semantic search. Query anchors and ingestion quality matter, and production recall does not currently apply a global abstention threshold. The [measured evidence and limitations](docs/RELEASE.md#external-retrieval-evidence) are documented separately.
+Marker-first retrieval is deterministic and lightweight, but it is not universal semantic search. Query anchors and ingestion quality matter, and default recall ranks candidates rather than automatically abstaining. Agent hosts that prefer silence over weak matches can opt in with `--min-score` / `min_score`. The [measured evidence and limitations](docs/RELEASE.md#external-retrieval-evidence) are documented separately.
 
 ## Measured Evidence
 

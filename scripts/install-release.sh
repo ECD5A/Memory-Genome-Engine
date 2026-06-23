@@ -17,7 +17,7 @@ mge-mcp-server into a user-writable directory. Root is not required.
 
 Examples:
   ./scripts/install-release.sh
-  ./scripts/install-release.sh --version v0.1.1
+  ./scripts/install-release.sh --version v0.1.2
   ./scripts/install-release.sh --source-dir target/mge-release/archives
 EOF
 }

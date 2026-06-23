@@ -16,7 +16,7 @@ curl --fail --location --remote-name https://raw.githubusercontent.com/ECD5A/Mem
 bash install-release.sh
 ```
 
-The installers verify the selected archive against the release `SHA256SUMS` before extracting `mge` and `mge-mcp-server`. They do not require admin/root privileges or modify shell profiles. A fixed release can be selected with `-Version v0.1.1` or `--version v0.1.1`.
+The installers verify the selected archive against the release `SHA256SUMS` before extracting `mge` and `mge-mcp-server`. They do not require admin/root privileges or modify shell profiles. A fixed release can be selected with `-Version v0.1.2` or `--version v0.1.2`.
 
 Archives can also be downloaded manually from:
 

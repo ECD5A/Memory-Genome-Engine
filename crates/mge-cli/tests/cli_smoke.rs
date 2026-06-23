@@ -1162,7 +1162,7 @@ fn mcp_standard_lifecycle_lists_and_calls_tools() {
             "params": {
                 "protocolVersion": "2025-06-18",
                 "capabilities": {},
-                "clientInfo": { "name": "mge-test-host", "version": "0.1.1" }
+                "clientInfo": { "name": "mge-test-host", "version": "0.1.2" }
             }
         }),
         json!({
@@ -1238,7 +1238,7 @@ fn mcp_server_default_store_removes_repeated_path_arguments() {
             "params": {
                 "protocolVersion": "2025-06-18",
                 "capabilities": {},
-                "clientInfo": { "name": "default-store-test", "version": "0.1.1" }
+                "clientInfo": { "name": "default-store-test", "version": "0.1.2" }
             }
         }),
         json!({
@@ -1385,7 +1385,7 @@ fn mcp_standard_tool_workflow_runs_in_one_process() {
             "params": {
                 "protocolVersion": "2025-06-18",
                 "capabilities": {},
-                "clientInfo": { "name": "mge-workflow-test", "version": "0.1.1" }
+                "clientInfo": { "name": "mge-workflow-test", "version": "0.1.2" }
             }
         }),
         json!({
