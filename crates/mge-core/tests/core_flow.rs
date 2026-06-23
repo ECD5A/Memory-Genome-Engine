@@ -121,6 +121,18 @@ fn remember_session_uses_production_chunks_in_hot_and_sealed_recall() {
             .iter()
             .any(|marker| marker == "memory_granularity:session_chunk")
     }));
+    assert!(hot
+        .relevant_memory
+        .iter()
+        .any(|item| { item.markers.iter().any(|marker| marker == "role:user") }));
+
+    let mut role_recall = RecallRequest::new("Routine project context 1");
+    role_recall.scope = Some("release-project".to_string());
+    let role_packet = engine.recall(role_recall).unwrap();
+    assert!(role_packet
+        .relevant_memory
+        .iter()
+        .any(|item| { item.markers.iter().any(|marker| marker == "role:assistant") }));
 
     engine.seal().unwrap();
     let sealed = engine.recall(recall).unwrap();
@@ -128,6 +140,45 @@ fn remember_session_uses_production_chunks_in_hot_and_sealed_recall() {
         .relevant_memory
         .iter()
         .any(|item| item.content.contains("cobalt release key")));
+    assert!(sealed
+        .relevant_memory
+        .iter()
+        .any(|item| { item.markers.iter().any(|marker| marker == "role:user") }));
+}
+
+#[test]
+fn recall_min_score_filters_focused_candidates_without_affecting_full_scope() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+
+    let mut remember = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text("The release gate uses the cobalt token".to_string()),
+    );
+    remember.subject = Some("release gate".to_string());
+    remember.scope = "release-project".to_string();
+    engine.remember(remember).unwrap();
+
+    let mut focused = RecallRequest::new("cobalt token");
+    focused.scope = Some("release-project".to_string());
+    let baseline = engine.recall(focused.clone()).unwrap();
+    assert_eq!(baseline.relevant_memory.len(), 1);
+    assert_eq!(baseline.debug.score_filtered_candidates, 0);
+
+    focused.min_score = Some(10_000);
+    let filtered = engine.recall(focused).unwrap();
+    assert!(filtered.relevant_memory.is_empty());
+    assert_eq!(filtered.debug.score_filtered_candidates, 1);
+    assert_eq!(filtered.debug.min_score, Some(10_000));
+
+    let mut full_scope = RecallRequest::new("");
+    full_scope.mode = RecallMode::FullScope;
+    full_scope.scope = Some("release-project".to_string());
+    full_scope.min_score = Some(10_000);
+    let full_scope_packet = engine.recall(full_scope).unwrap();
+    assert_eq!(full_scope_packet.relevant_memory.len(), 1);
+    assert_eq!(full_scope_packet.debug.score_filtered_candidates, 0);
+    assert_eq!(full_scope_packet.debug.min_score, Some(10_000));
 }
 
 #[test]

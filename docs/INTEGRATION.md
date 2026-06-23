@@ -115,7 +115,7 @@ Contract:
 - JSON-RPC version: `2.0`
 - supported MCP protocol revision: `2025-06-18` (with `2024-11-05` negotiation support)
 - `protocol_version`: `mge-jsonrpc-1`
-- `integration_schema_version`: `3`
+- `integration_schema_version`: `4`
 
 Each input line is one JSON-RPC request:
 
@@ -126,7 +126,7 @@ Each input line is one JSON-RPC request:
 Each output line is one JSON-RPC response:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"ok":true,"tool":"mge_stats","protocol_version":"mge-jsonrpc-1","integration_schema_version":3,"stats":{}}}
+{"jsonrpc":"2.0","id":1,"result":{"ok":true,"tool":"mge_stats","protocol_version":"mge-jsonrpc-1","integration_schema_version":4,"stats":{}}}
 ```
 
 Standard MCP hosts use `initialize`, `notifications/initialized`, `ping`, `tools/list`, and `tools/call`. Notifications do not produce JSON-RPC responses. `tools/call` returns text content plus `structuredContent` and `isError`. Direct `mge_*` methods remain available as a versioned extension for existing hosts and SDK tests.
@@ -144,6 +144,8 @@ Schema discovery:
 ```
 
 The schema response includes tool schemas, the `ContextPacket` wrapper contract, and the structured error contract. Golden fixtures live under `crates/mge-cli/tests/fixtures/mcp`.
+
+`mge_recall` accepts optional `min_score` for focused/broad calls when a host wants to suppress weak matches. It is off by default and full-scope recall still returns active/allowed memory in the requested scope.
 
 One-line local schema smoke:
 
@@ -208,7 +210,7 @@ There is no `mge_init` MCP tool in the current contract. This keeps the adapter 
 Errors are stable for SDKs:
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params: missing field `content`","tool_name":"mge_remember","recoverable":true,"protocol_version":"mge-jsonrpc-1","integration_schema_version":3,"details":{"error_kind":"invalid_params"}}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params: missing field `content`","tool_name":"mge_remember","recoverable":true,"protocol_version":"mge-jsonrpc-1","integration_schema_version":4,"details":{"error_kind":"invalid_params"}}}
 ```
 
 Important `details.error_kind` values:
@@ -283,7 +285,7 @@ from mge_sdk import MemoryGenomeClient
 client = MemoryGenomeClient(".memory-genome", passphrase_env="MGE_PASSPHRASE")
 client.init(profile="fast", encrypted=True)
 client.remember("Agent should use recalled context.", kind="procedure", scope="agent")
-packet = client.recall("agent context", mode="focused", scope="agent")
+packet = client.recall("agent context", mode="focused", scope="agent", min_score=20)
 client.checkpoint()
 client.seal()
 client.validate(deep=True)
@@ -337,6 +339,7 @@ client.remember("Agent should use recalled context.", {
 const packet = client.recall("agent context", {
   mode: "focused",
   scope: "agent",
+  minScore: 20,
 });
 client.checkpoint();
 client.seal();

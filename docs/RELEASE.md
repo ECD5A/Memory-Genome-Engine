@@ -227,7 +227,7 @@ Generated query difficulty can be selected independently:
 --query-profile mixed
 ```
 
-The report includes Hit/Recall/Precision@K, MRR@K, nDCG@K, and no-answer accuracy for hard negatives. Paraphrase fixtures retain scope/component anchors; they are not a semantic embedding benchmark. Hard negatives deliberately share a scope with unrelated records. The current retrieval contract ranks candidates and has no global semantic abstention threshold, so a non-empty result for such a query must not be interpreted as a verified answer.
+The report includes Hit/Recall/Precision@K, MRR@K, nDCG@K, and no-answer accuracy for hard negatives. Paraphrase fixtures retain scope/component anchors; they are not a semantic embedding benchmark. Hard negatives deliberately share a scope with unrelated records. Default retrieval ranks candidates without an automatic semantic abstention threshold, so a non-empty result for such a query must not be interpreted as a verified answer. Agent hosts that prefer silence over weak matches can opt in with `--min-score` / `min_score`.
 
 Generated fixtures are deterministic but synthetic. Local LongMemEval/LoCoMo adapters require user-supplied datasets; results measure retrieval, not final LLM answer quality, and must not be presented as cross-project claims without identical corpora and settings.
 

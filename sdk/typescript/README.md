@@ -47,3 +47,5 @@ node ../../examples/typescript_agent_host.ts
 - `MemoryGenomeProtocolError`: structured JSON-RPC/MCP adapter error.
 
 Use `resultOrThrowMcpError(response)` when talking directly to `mge-mcp-server`.
+
+`client.recall(..., { minScore: 20 })` can be used by agent hosts that prefer no memory over weak matches. The score floor is opt-in.

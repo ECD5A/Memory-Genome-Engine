@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 export const PROTOCOL_VERSION = "mge-jsonrpc-1";
-export const INTEGRATION_SCHEMA_VERSION = 3;
+export const INTEGRATION_SCHEMA_VERSION = 4;
 
 export type RecallMode = "focused" | "broad" | "full_scope" | "full-scope";
 
@@ -70,6 +70,7 @@ export interface RecallOptions {
   scope?: string;
   markers?: string[];
   maxItems?: number;
+  minScore?: number;
   kind?: string;
 }
 
@@ -86,6 +87,8 @@ export interface ContextMemoryItem {
 export interface ContextPacketDebug {
   recall_mode?: string;
   max_items?: number;
+  min_score?: number;
+  score_filtered_candidates?: number;
   index_kind?: string;
   returned_items?: number;
   total_recall_micros?: number;
@@ -280,6 +283,9 @@ export class MemoryGenomeClient {
       String(options.maxItems ?? 5),
       "--json",
     );
+    if (options.minScore !== undefined) {
+      args.push("--min-score", String(options.minScore));
+    }
     if (options.scope) {
       args.push("--scope", options.scope);
     }

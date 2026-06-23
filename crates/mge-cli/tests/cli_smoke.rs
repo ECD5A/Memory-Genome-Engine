@@ -58,6 +58,23 @@ fn cli_milestone_flow_outputs_context_stats_and_validation_json() {
         .unwrap()
         .contains("concise technical"));
 
+    let filtered_recall = run_mge_json(
+        &store,
+        &[
+            "recall",
+            "How should the agent answer technical questions?",
+            "--min-score",
+            "10000",
+            "--json",
+        ],
+    );
+    assert!(filtered_recall["relevant_memory"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(filtered_recall["debug"]["score_filtered_candidates"], 1);
+    assert_eq!(filtered_recall["debug"]["min_score"], 10000);
+
     run_mge(&store, &["seal"]);
 
     let stats = run_mge_json(&store, &["stats", "--json"]);
@@ -944,7 +961,7 @@ fn mcp_server_json_rpc_adapter_supports_agent_workflow() {
 
     assert_eq!(responses.len(), 9);
     assert_eq!(responses[0]["result"]["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(responses[0]["result"]["integration_schema_version"], 3);
+    assert_eq!(responses[0]["result"]["integration_schema_version"], 4);
     assert_eq!(responses[0]["result"]["tool"], "mge_remember");
     assert_eq!(responses[0]["result"]["ok"], true);
     assert_eq!(responses[0]["result"]["cell_id"], 1);
@@ -1018,7 +1035,7 @@ fn mcp_server_exposes_stable_schema_and_structured_errors() {
 
     let schema = &responses[0]["result"];
     assert_eq!(schema["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(schema["integration_schema_version"], 3);
+    assert_eq!(schema["integration_schema_version"], 4);
     for tool in [
         "mge_remember",
         "mge_remember_session",
@@ -1046,6 +1063,10 @@ fn mcp_server_exposes_stable_schema_and_structured_errors() {
             .as_str()
             .unwrap()
             .contains("environment variable")
+    );
+    assert_eq!(
+        schema["tools"]["mge_recall"]["input"]["properties"]["min_score"],
+        "optional integer threshold for focused/broad recall; full_scope ignores it"
     );
     assert!(schema["context_packet_contract"]["context"]["relevant_memory"].is_string());
     assert_eq!(
@@ -1288,7 +1309,7 @@ fn mcp_server_default_store_removes_repeated_path_arguments() {
         responses[4]["result"]["server_defaults"]["store_configured"],
         true
     );
-    assert_eq!(responses[4]["result"]["integration_schema_version"], 3);
+    assert_eq!(responses[4]["result"]["integration_schema_version"], 4);
 }
 
 #[test]
@@ -1706,7 +1727,7 @@ fn mcp_agent_session_fixture_runs_as_one_process() {
     assert_eq!(responses.len(), 10);
     assert_eq!(responses[0]["result"]["tool"], "mge_schema");
     assert_eq!(responses[0]["result"]["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(responses[0]["result"]["integration_schema_version"], 3);
+    assert_eq!(responses[0]["result"]["integration_schema_version"], 4);
     assert_eq!(responses[1]["result"]["tool"], "mge_remember");
     assert_eq!(responses[1]["result"]["cell_id"], 1);
     assert_eq!(

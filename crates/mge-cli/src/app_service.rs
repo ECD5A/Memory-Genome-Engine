@@ -129,6 +129,7 @@ impl AppService {
         let mut request = RecallRequest::new(query);
         request.mode = mode;
         request.max_items = input.max_items.max(1);
+        request.min_score = input.min_score;
         request.scope = non_empty(input.scope);
         request.markers = parse_marker_list(&input.markers);
         request.kind = non_empty(input.kind)
@@ -282,6 +283,7 @@ pub struct RecallInput {
     pub query: String,
     pub mode: RecallMode,
     pub max_items: usize,
+    pub min_score: Option<i64>,
     pub markers: String,
     pub scope: String,
     pub kind: String,
@@ -293,6 +295,7 @@ impl Default for RecallInput {
             query: String::new(),
             mode: RecallMode::Focused,
             max_items: 5,
+            min_score: None,
             markers: String::new(),
             scope: String::new(),
             kind: String::new(),

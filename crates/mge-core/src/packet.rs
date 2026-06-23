@@ -105,6 +105,10 @@ pub struct ContextDebugInfo {
     #[serde(default)]
     pub cells_ranked: usize,
     #[serde(default)]
+    pub score_filtered_candidates: usize,
+    #[serde(default)]
+    pub min_score: Option<i64>,
+    #[serde(default)]
     pub sealed_cells_skipped_before_token_scoring: usize,
     #[serde(default)]
     pub sealed_cells_token_scored: usize,

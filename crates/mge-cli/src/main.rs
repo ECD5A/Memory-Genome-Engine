@@ -174,6 +174,9 @@ enum Commands {
         #[arg(long, default_value_t = 5)]
         max_items: usize,
 
+        #[arg(long)]
+        min_score: Option<i64>,
+
         #[arg(long = "marker")]
         markers: Vec<String>,
 
@@ -529,6 +532,7 @@ fn main() -> Result<()> {
             query,
             mode,
             max_items,
+            min_score,
             markers,
             scope,
             kind,
@@ -552,6 +556,7 @@ fn main() -> Result<()> {
             let mut request = RecallRequest::new(query);
             request.mode = parsed_mode;
             request.max_items = max_items;
+            request.min_score = min_score;
             request.markers = markers;
             request.scope = scope;
             request.kind = kind.as_deref().map(MemoryKind::from_str).transpose()?;

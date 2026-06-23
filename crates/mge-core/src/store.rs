@@ -1087,6 +1087,14 @@ impl MemoryEngine {
             if let Some(marker) = &session_marker {
                 markers.push(marker.clone());
             }
+            let mut role_markers = BTreeSet::new();
+            for turn in &request.turns[chunk.start_turn..chunk.end_turn] {
+                let role = canonicalize_marker_value(&turn.role);
+                if !role.is_empty() {
+                    role_markers.insert(format!("role:{role}"));
+                }
+            }
+            markers.extend(role_markers);
             let subject = request.subject.as_ref().map_or_else(
                 || format!("Session context chunk {}/{}", chunk.index + 1, chunk_count),
                 |subject| format!("{subject} (chunk {}/{chunk_count})", chunk.index + 1),
@@ -1491,12 +1499,24 @@ impl MemoryEngine {
                 &scoring_caches_by_page_id,
             )?;
         }
+        let score_filtered_candidates = if let Some(min_score) = request.min_score {
+            if matches!(request.mode, RecallMode::Focused | RecallMode::Broad) {
+                let before = ranked.len();
+                ranked.retain(|candidate| candidate.score >= min_score);
+                before.saturating_sub(ranked.len())
+            } else {
+                0
+            }
+        } else {
+            0
+        };
         let reranking_micros = elapsed_micros(reranking_started);
 
         let max_items = request.effective_max_items(ranked.len());
         let debug = ContextDebugInfo {
             recall_mode: request.mode,
             max_items,
+            min_score: request.min_score,
             index_kind: self.manifest.index_kind,
             hot_total_cells,
             hot_candidate_cells,
@@ -1513,6 +1533,7 @@ impl MemoryEngine {
             cells_decoded,
             cells_filtered,
             cells_ranked,
+            score_filtered_candidates,
             sealed_cells_skipped_before_token_scoring,
             sealed_cells_token_scored,
             false_positive_candidate_pages,

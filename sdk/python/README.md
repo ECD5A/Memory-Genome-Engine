@@ -56,3 +56,5 @@ python examples/python_agent_host.py
 - `MgeProtocolError`: structured JSON-RPC/MCP adapter error.
 
 Use `result_or_raise_mcp_error(response)` when talking directly to `mge-mcp-server`.
+
+`client.recall(..., min_score=20)` can be used by agent hosts that prefer no memory over weak matches. The score floor is opt-in.

@@ -60,6 +60,8 @@ class ContextMemoryItem(TypedDict, total=False):
 class ContextPacketDebug(TypedDict, total=False):
     recall_mode: str
     max_items: int
+    min_score: int
+    score_filtered_candidates: int
     index_kind: str
     returned_items: int
     total_recall_micros: int
@@ -217,12 +219,15 @@ class MemoryGenomeClient:
         scope: str | None = None,
         markers: Iterable[str] = (),
         max_items: int = 5,
+        min_score: int | None = None,
         kind: str | None = None,
     ) -> ContextPacket:
         args = ["recall"]
         if query:
             args.append(query)
         args.extend(["--mode", mode, "--max-items", str(max_items), "--json"])
+        if min_score is not None:
+            args.extend(["--min-score", str(min_score)])
         if scope is not None:
             args.extend(["--scope", scope])
         if kind is not None:

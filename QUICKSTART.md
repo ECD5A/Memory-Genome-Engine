@@ -153,6 +153,8 @@ cargo run -p mge-cli -- remember-session \
   --turn "user=Keep the rollback requirement"
 ```
 
+Session chunks include `session:<id>`, `chunk:<n>`, and `role:<role>` markers for deterministic filtering.
+
 One-time Markdown import for migrating existing notes:
 
 ```bash
@@ -180,6 +182,14 @@ Use explicit markers for deterministic recall:
 ```bash
 cargo run -p mge-cli -- recall "answer style" --marker kind:user_preference --marker scope:global
 ```
+
+For agent hosts that prefer silence over weak matches, use an opt-in score floor:
+
+```bash
+cargo run -p mge-cli -- recall "answer style" --min-score 20
+```
+
+`--min-score` applies to focused/broad recall only. Full-scope still returns active/allowed memory inside the requested scope.
 
 ## Seal, Validate, Export
 

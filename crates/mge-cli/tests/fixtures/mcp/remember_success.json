@@ -5,7 +5,7 @@
     "ok": true,
     "tool": "mge_remember",
     "protocol_version": "mge-jsonrpc-1",
-    "integration_schema_version": 3,
+    "integration_schema_version": 4,
     "cell_id": 1,
     "scope": "contract_scope",
     "kind": "procedure",

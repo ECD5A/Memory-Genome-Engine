@@ -30,7 +30,7 @@ use serde_json::{json, Map, Value};
 
 const JSONRPC_VERSION: &str = "2.0";
 const PROTOCOL_VERSION: &str = "mge-jsonrpc-1";
-const INTEGRATION_SCHEMA_VERSION: u32 = 3;
+const INTEGRATION_SCHEMA_VERSION: u32 = 4;
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 
 #[derive(Debug, Parser)]
@@ -180,6 +180,8 @@ struct RecallParams {
     markers: Vec<String>,
     #[serde(default)]
     max_items: Option<usize>,
+    #[serde(default)]
+    min_score: Option<i64>,
     #[serde(default)]
     kind: Option<String>,
     #[serde(default)]
@@ -570,6 +572,7 @@ fn mge_recall(params: Value) -> Result<Value> {
     if let Some(max_items) = params.max_items {
         request.max_items = max_items;
     }
+    request.min_score = params.min_score;
     request.kind = params
         .kind
         .as_deref()
@@ -857,6 +860,7 @@ fn tool_schemas(config: &ServerConfig) -> Value {
                     "scope": "required for full_scope",
                     "markers": "array of marker strings",
                     "max_items": "optional positive integer",
+                    "min_score": "optional integer threshold for focused/broad recall; full_scope ignores it",
                     "kind": "optional memory kind string",
                     "include_deprecated": "boolean",
                     "include_secret_references": "boolean",
@@ -971,6 +975,7 @@ fn mcp_tools(config: &ServerConfig) -> Vec<Value> {
                     "scope": { "type": "string" },
                     "markers": { "type": "array", "items": { "type": "string" } },
                     "max_items": { "type": "integer", "minimum": 1 },
+                    "min_score": { "type": "integer" },
                     "kind": { "type": "string" },
                     "include_deprecated": { "type": "boolean", "default": false },
                     "include_secret_references": { "type": "boolean", "default": false },
