@@ -17,6 +17,7 @@ use mge_core::{
     InitOptions, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
     PageClustererKind, PageCodecKind, RecallMode, RecallRequest, RememberRequest, SecurityMode,
     SensitivityLevel, SessionChunkOptions, SessionTurn, TrustLevel,
+    DEFAULT_SESSION_CHUNK_MAX_BYTES, DEFAULT_SESSION_CHUNK_MAX_TURNS,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -38,6 +39,14 @@ struct Args {
     /// How conversation datasets are converted into memory records.
     #[arg(long, value_enum, default_value_t = IngestMode::RawTurn)]
     ingest_mode: IngestMode,
+
+    /// Maximum turns in a production session chunk.
+    #[arg(long, default_value_t = DEFAULT_SESSION_CHUNK_MAX_TURNS)]
+    session_chunk_max_turns: usize,
+
+    /// Maximum UTF-8 bytes in a production session chunk.
+    #[arg(long, default_value_t = DEFAULT_SESSION_CHUNK_MAX_BYTES)]
+    session_chunk_max_bytes: usize,
 
     /// Generated dataset profile.
     #[arg(long, value_enum, default_value_t = GeneratedProfile::Small)]
@@ -438,6 +447,10 @@ fn load_dataset(args: &Args) -> Result<EvalDataset> {
             InputFormat::Auto => detect_input_format(&bytes)?,
             explicit => explicit,
         };
+        let chunk_options = SessionChunkOptions {
+            max_turns: args.session_chunk_max_turns,
+            max_bytes: args.session_chunk_max_bytes,
+        };
         let mut dataset = match format {
             InputFormat::Auto => unreachable!("auto input format should be resolved"),
             InputFormat::Neutral => serde_json::from_slice(&bytes).with_context(|| {
@@ -452,12 +465,15 @@ fn load_dataset(args: &Args) -> Result<EvalDataset> {
                 args.max_memories,
                 args.max_queries,
                 args.ingest_mode,
+                chunk_options,
             )?,
             InputFormat::Locomo => convert_locomo(
                 &serde_json::from_slice(&bytes)?,
                 input.display().to_string(),
                 args.max_memories,
                 args.max_queries,
+                args.ingest_mode,
+                chunk_options,
             )?,
         };
         apply_limits(&mut dataset, args.max_memories, args.max_queries);
@@ -567,6 +583,7 @@ fn convert_longmemeval(
     max_memories: Option<usize>,
     max_queries: Option<usize>,
     ingest_mode: IngestMode,
+    chunk_options: SessionChunkOptions,
 ) -> Result<EvalDataset> {
     let instances = value
         .as_array()
@@ -686,9 +703,10 @@ fn convert_longmemeval(
             }
 
             if ingest_mode == IngestMode::SessionChunk {
-                for (chunk_index, chunk) in chunk_longmemeval_session(&converted_turns)?
-                    .into_iter()
-                    .enumerate()
+                for (chunk_index, chunk) in
+                    chunk_longmemeval_session(&converted_turns, chunk_options)?
+                        .into_iter()
+                        .enumerate()
                 {
                     let id =
                         format!("{question_id}:s{session_index}:{session_id}:chunk-{chunk_index}");
@@ -848,8 +866,10 @@ fn convert_longmemeval(
     Ok(EvalDataset {
         name: format!("longmemeval_{}", ingest_mode.as_str().replace('-', "_")),
         source: format!(
-            "{source}; ingest_mode: {}; skipped queries without evidence: {skipped_without_evidence}",
-            ingest_mode.as_str()
+            "{source}; ingest_mode: {}; session_chunk_max_turns: {}; session_chunk_max_bytes: {}; skipped queries without evidence: {skipped_without_evidence}",
+            ingest_mode.as_str(),
+            chunk_options.max_turns,
+            chunk_options.max_bytes
         ),
         memories,
         queries,
@@ -870,12 +890,15 @@ struct LongMemEvalChunk {
     has_answer: bool,
 }
 
-fn chunk_longmemeval_session(turns: &[LongMemEvalTurn]) -> Result<Vec<LongMemEvalChunk>> {
+fn chunk_longmemeval_session(
+    turns: &[LongMemEvalTurn],
+    options: SessionChunkOptions,
+) -> Result<Vec<LongMemEvalChunk>> {
     let production_turns = turns
         .iter()
         .map(|turn| SessionTurn::new(&turn.role, &turn.content))
         .collect::<Vec<_>>();
-    chunk_session_turns(&production_turns, SessionChunkOptions::default())?
+    chunk_session_turns(&production_turns, options)?
         .into_iter()
         .map(|chunk| {
             let has_answer = turns[chunk.start_turn..chunk.end_turn]
@@ -894,6 +917,8 @@ fn convert_locomo(
     source: String,
     max_memories: Option<usize>,
     max_queries: Option<usize>,
+    ingest_mode: IngestMode,
+    chunk_options: SessionChunkOptions,
 ) -> Result<EvalDataset> {
     let records = value
         .as_array()
@@ -910,15 +935,26 @@ fn convert_locomo(
         .unwrap_or_else(|| format!("locomo-{record_index}"));
         let scope = format!("locomo:{conversation_id}");
         let before = memories.len();
-        let mut dialog_to_memory = HashMap::new();
-        collect_locomo_memories(
+        let mut dialog_to_memories = HashMap::new();
+        let used_structured_sessions = collect_locomo_session_memories(
             record,
             &scope,
             &conversation_id,
-            "root",
+            ingest_mode,
+            chunk_options,
             &mut memories,
-            &mut dialog_to_memory,
-        );
+            &mut dialog_to_memories,
+        )?;
+        if !used_structured_sessions {
+            collect_locomo_memories(
+                record,
+                &scope,
+                &conversation_id,
+                "root",
+                &mut memories,
+                &mut dialog_to_memories,
+            );
+        }
         if memories.len() == before {
             continue;
         }
@@ -932,7 +968,7 @@ fn convert_locomo(
                 if let Some(evidence) = qa.get("evidence") {
                     collect_locomo_relevant_ids(
                         evidence,
-                        &dialog_to_memory,
+                        &dialog_to_memories,
                         &memories,
                         &mut relevant_ids,
                     );
@@ -966,11 +1002,211 @@ fn convert_locomo(
     }
 
     Ok(EvalDataset {
-        name: "locomo_converted".to_string(),
-        source: format!("{source}; skipped queries without evidence: {skipped_without_evidence}"),
+        name: format!("locomo_{}", ingest_mode.as_str().replace('-', "_")),
+        source: format!(
+            "{source}; ingest_mode: {}; session_chunk_max_turns: {}; session_chunk_max_bytes: {}; skipped queries without evidence: {skipped_without_evidence}",
+            ingest_mode.as_str(),
+            chunk_options.max_turns,
+            chunk_options.max_bytes
+        ),
         memories,
         queries,
     })
+}
+
+#[derive(Clone, Debug)]
+struct LocomoTurn {
+    dialog_id: String,
+    speaker: String,
+    content: String,
+}
+
+fn collect_locomo_session_memories(
+    record: &Value,
+    scope: &str,
+    conversation_id: &str,
+    ingest_mode: IngestMode,
+    chunk_options: SessionChunkOptions,
+    memories: &mut Vec<EvalMemory>,
+    dialog_to_memories: &mut HashMap<String, Vec<String>>,
+) -> Result<bool> {
+    let conversation = record.get("conversation").unwrap_or(record);
+    let Some(object) = conversation.as_object() else {
+        return Ok(false);
+    };
+    let mut sessions = object
+        .iter()
+        .filter_map(|(key, value)| {
+            let index = key.strip_prefix("session_")?.parse::<usize>().ok()?;
+            Some((index, key.as_str(), value.as_array()?.as_slice()))
+        })
+        .collect::<Vec<_>>();
+    sessions.sort_unstable_by_key(|(index, _, _)| *index);
+
+    let mut used_sessions = false;
+    for (_, session_key, items) in sessions {
+        let turns = items
+            .iter()
+            .enumerate()
+            .filter_map(|(turn_index, turn)| {
+                let content = string_field(turn, &["text", "content", "message", "utterance"])?;
+                if !is_safe_memory_text(&content) {
+                    return None;
+                }
+                let speaker = string_field(turn, &["speaker", "role", "name"])
+                    .unwrap_or_else(|| "speaker".to_string());
+                let dialog_id = string_field(turn, &["dialog_id", "dia_id", "id", "turn_id"])
+                    .unwrap_or_else(|| format!("{session_key}:{turn_index}"));
+                Some(LocomoTurn {
+                    dialog_id,
+                    speaker,
+                    content,
+                })
+            })
+            .collect::<Vec<_>>();
+        if turns.is_empty() {
+            continue;
+        }
+        used_sessions = true;
+        let session_marker = format!("session:{}", safe_marker_value(session_key));
+
+        if matches!(
+            ingest_mode,
+            IngestMode::SessionDoc | IngestMode::SessionPlusTurn
+        ) {
+            let id = format!("{conversation_id}:{session_key}:session");
+            let text = turns
+                .iter()
+                .map(|turn| format!("{}: {}", turn.speaker, turn.content))
+                .collect::<Vec<_>>()
+                .join("\n");
+            memories.push(locomo_memory(
+                id.clone(),
+                scope,
+                format!("locomo session {session_key}"),
+                text,
+                vec![
+                    "benchmark:locomo".to_string(),
+                    "memory_granularity:session".to_string(),
+                    session_marker.clone(),
+                ],
+            ));
+            if ingest_mode == IngestMode::SessionDoc {
+                for turn in &turns {
+                    map_locomo_dialog(dialog_to_memories, &turn.dialog_id, &id);
+                }
+            }
+        }
+
+        if ingest_mode == IngestMode::SessionChunk {
+            let production_turns = turns
+                .iter()
+                .map(|turn| SessionTurn::new(&turn.speaker, &turn.content))
+                .collect::<Vec<_>>();
+            for chunk in chunk_session_turns(&production_turns, chunk_options)? {
+                let id = format!("{conversation_id}:{session_key}:chunk-{}", chunk.index);
+                let mut markers = vec![
+                    "benchmark:locomo".to_string(),
+                    "memory_granularity:session_chunk".to_string(),
+                    session_marker.clone(),
+                ];
+                markers.extend(
+                    turns[chunk.start_turn..chunk.end_turn]
+                        .iter()
+                        .map(|turn| format!("role:{}", safe_marker_value(&turn.speaker)))
+                        .collect::<BTreeSet<_>>(),
+                );
+                memories.push(locomo_memory(
+                    id.clone(),
+                    scope,
+                    format!("locomo context block {session_key}"),
+                    chunk.text,
+                    markers,
+                ));
+                for turn in &turns[chunk.start_turn..chunk.end_turn] {
+                    map_locomo_dialog(dialog_to_memories, &turn.dialog_id, &id);
+                }
+            }
+        }
+
+        if ingest_mode == IngestMode::KeyFact {
+            for turn in &turns {
+                for (fact_index, fact) in split_key_facts(&turn.content).into_iter().enumerate() {
+                    let id = format!("{conversation_id}:{}:fact-{fact_index}", turn.dialog_id);
+                    memories.push(locomo_memory(
+                        id.clone(),
+                        scope,
+                        format!("locomo key fact {} {session_key}", turn.speaker),
+                        fact,
+                        vec![
+                            "benchmark:locomo".to_string(),
+                            "memory_granularity:key_fact".to_string(),
+                            session_marker.clone(),
+                            format!("role:{}", safe_marker_value(&turn.speaker)),
+                            format!("dialog:{}", safe_marker_value(&turn.dialog_id)),
+                        ],
+                    ));
+                    map_locomo_dialog(dialog_to_memories, &turn.dialog_id, &id);
+                }
+            }
+        }
+
+        if matches!(
+            ingest_mode,
+            IngestMode::RawTurn | IngestMode::SessionPlusTurn
+        ) {
+            for turn in turns {
+                let id = format!("{conversation_id}:{}", turn.dialog_id);
+                memories.push(locomo_memory(
+                    id.clone(),
+                    scope,
+                    format!("locomo {} {}", turn.speaker, turn.dialog_id),
+                    turn.content,
+                    vec![
+                        "benchmark:locomo".to_string(),
+                        "memory_granularity:turn".to_string(),
+                        session_marker.clone(),
+                        format!("speaker:{}", safe_marker_value(&turn.speaker)),
+                        format!("dialog:{}", safe_marker_value(&turn.dialog_id)),
+                    ],
+                ));
+                map_locomo_dialog(dialog_to_memories, &turn.dialog_id, &id);
+            }
+        }
+    }
+
+    Ok(used_sessions)
+}
+
+fn locomo_memory(
+    id: String,
+    scope: &str,
+    subject: String,
+    text: String,
+    markers: Vec<String>,
+) -> EvalMemory {
+    EvalMemory {
+        id,
+        scope: scope.to_string(),
+        subject: Some(subject),
+        text,
+        markers,
+        kind: "project_fact".to_string(),
+        status: "active".to_string(),
+        trust: "user_confirmed".to_string(),
+        sensitivity: "private".to_string(),
+    }
+}
+
+fn map_locomo_dialog(
+    dialog_to_memories: &mut HashMap<String, Vec<String>>,
+    dialog_id: &str,
+    memory_id: &str,
+) {
+    let mapped = dialog_to_memories.entry(dialog_id.to_string()).or_default();
+    if !mapped.iter().any(|existing| existing == memory_id) {
+        mapped.push(memory_id.to_string());
+    }
 }
 
 fn collect_locomo_memories(
@@ -979,7 +1215,7 @@ fn collect_locomo_memories(
     conversation_id: &str,
     path: &str,
     memories: &mut Vec<EvalMemory>,
-    dialog_to_memory: &mut HashMap<String, String>,
+    dialog_to_memories: &mut HashMap<String, Vec<String>>,
 ) {
     match value {
         Value::Array(items) => {
@@ -990,7 +1226,7 @@ fn collect_locomo_memories(
                     conversation_id,
                     &format!("{path}.{index}"),
                     memories,
-                    dialog_to_memory,
+                    dialog_to_memories,
                 );
             }
         }
@@ -1002,7 +1238,7 @@ fn collect_locomo_memories(
                     let dialog_id = string_field(value, &["dialog_id", "dia_id", "id", "turn_id"])
                         .unwrap_or_else(|| path.to_string());
                     let id = format!("{conversation_id}:{dialog_id}");
-                    dialog_to_memory.insert(dialog_id.clone(), id.clone());
+                    map_locomo_dialog(dialog_to_memories, &dialog_id, &id);
                     memories.push(EvalMemory {
                         id,
                         scope: scope.to_string(),
@@ -1035,7 +1271,7 @@ fn collect_locomo_memories(
                     conversation_id,
                     &format!("{path}.{key}"),
                     memories,
-                    dialog_to_memory,
+                    dialog_to_memories,
                 );
             }
         }
@@ -1045,14 +1281,14 @@ fn collect_locomo_memories(
 
 fn collect_locomo_relevant_ids(
     evidence: &Value,
-    dialog_to_memory: &HashMap<String, String>,
+    dialog_to_memories: &HashMap<String, Vec<String>>,
     memories: &[EvalMemory],
     output: &mut Vec<String>,
 ) {
     match evidence {
         Value::Array(items) => {
             for item in items {
-                collect_locomo_relevant_ids(item, dialog_to_memory, memories, output);
+                collect_locomo_relevant_ids(item, dialog_to_memories, memories, output);
             }
         }
         Value::Object(object) => {
@@ -1060,18 +1296,18 @@ fn collect_locomo_relevant_ids(
                 if let Some(id) = object
                     .get(key)
                     .and_then(value_to_compact_string)
-                    .and_then(|dialog_id| dialog_to_memory.get(&dialog_id).cloned())
+                    .and_then(|dialog_id| dialog_to_memories.get(&dialog_id))
                 {
-                    output.push(id);
+                    output.extend(id.iter().cloned());
                 }
             }
             for nested in object.values() {
-                collect_locomo_relevant_ids(nested, dialog_to_memory, memories, output);
+                collect_locomo_relevant_ids(nested, dialog_to_memories, memories, output);
             }
         }
         Value::String(text) => {
-            if let Some(id) = dialog_to_memory.get(text) {
-                output.push(id.clone());
+            if let Some(ids) = dialog_to_memories.get(text) {
+                output.extend(ids.iter().cloned());
                 return;
             }
             let needle = text.trim();
@@ -1086,8 +1322,8 @@ fn collect_locomo_relevant_ids(
         }
         Value::Number(_) | Value::Bool(_) => {
             if let Some(key) = value_to_compact_string(evidence) {
-                if let Some(id) = dialog_to_memory.get(&key) {
-                    output.push(id.clone());
+                if let Some(ids) = dialog_to_memories.get(&key) {
+                    output.extend(ids.iter().cloned());
                 }
             }
         }
@@ -1318,6 +1554,13 @@ fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
         notes.push(format!(
             "Generated query profile: {}; paraphrase queries retain scope/component anchors, while hard negatives deliberately share a scope with unrelated memories.",
             args.query_profile.as_str()
+        ));
+    } else {
+        notes.push(format!(
+            "Conversation ingest mode: {}; session chunks use max_turns={} and max_bytes={}.",
+            args.ingest_mode.as_str(),
+            args.session_chunk_max_turns,
+            args.session_chunk_max_bytes
         ));
     }
     if !experimental_rankers.is_empty() {
@@ -3185,9 +3428,15 @@ mod tests {
                 ]]
             }
         ]);
-        let dataset =
-            convert_longmemeval(&value, "test".to_string(), None, None, IngestMode::RawTurn)
-                .expect("convert");
+        let dataset = convert_longmemeval(
+            &value,
+            "test".to_string(),
+            None,
+            None,
+            IngestMode::RawTurn,
+            SessionChunkOptions::default(),
+        )
+        .expect("convert");
         validate_dataset(&dataset).unwrap();
         assert_eq!(dataset.memories.len(), 2);
         assert_eq!(dataset.queries.len(), 1);
@@ -3220,6 +3469,7 @@ mod tests {
             None,
             None,
             IngestMode::SessionDoc,
+            SessionChunkOptions::default(),
         )
         .expect("convert");
         validate_dataset(&dataset).unwrap();
@@ -3246,6 +3496,7 @@ mod tests {
             None,
             None,
             IngestMode::SessionChunk,
+            SessionChunkOptions::default(),
         )
         .expect("convert");
         validate_dataset(&dataset).unwrap();
@@ -3279,6 +3530,7 @@ mod tests {
             None,
             None,
             IngestMode::SessionChunk,
+            SessionChunkOptions::default(),
         )
         .expect("convert");
 
@@ -3302,9 +3554,15 @@ mod tests {
                 ]]
             }
         ]);
-        let dataset =
-            convert_longmemeval(&value, "test".to_string(), None, None, IngestMode::KeyFact)
-                .expect("convert");
+        let dataset = convert_longmemeval(
+            &value,
+            "test".to_string(),
+            None,
+            None,
+            IngestMode::KeyFact,
+            SessionChunkOptions::default(),
+        )
+        .expect("convert");
         validate_dataset(&dataset).unwrap();
         assert_eq!(dataset.memories.len(), 2);
         assert!(dataset.queries[0]
@@ -3327,11 +3585,125 @@ mod tests {
                 ]
             }
         ]);
-        let dataset = convert_locomo(&value, "test".to_string(), None, None).expect("convert");
+        let dataset = convert_locomo(
+            &value,
+            "test".to_string(),
+            None,
+            None,
+            IngestMode::RawTurn,
+            SessionChunkOptions::default(),
+        )
+        .expect("convert");
         validate_dataset(&dataset).unwrap();
         assert_eq!(dataset.memories.len(), 2);
         assert_eq!(dataset.queries.len(), 1);
         assert_eq!(dataset.queries[0].relevant_ids.len(), 1);
+        assert_eq!(dataset.name, "locomo_raw_turn");
+    }
+
+    #[test]
+    fn converts_locomo_session_chunks_with_production_boundaries() {
+        let turns = (0..10)
+            .map(|index| {
+                serde_json::json!({
+                    "dia_id": format!("D1:{}", index + 1),
+                    "speaker": if index % 2 == 0 { "Alice" } else { "Bob" },
+                    "text": format!("Conversation turn {index} contains durable context.")
+                })
+            })
+            .collect::<Vec<_>>();
+        let value = serde_json::json!([{
+            "sample_id": "c1",
+            "conversation": { "session_1": turns },
+            "qa": [{
+                "question": "What was in the final turn?",
+                "evidence": ["D1:10"],
+                "category": 1
+            }]
+        }]);
+
+        let dataset = convert_locomo(
+            &value,
+            "test".to_string(),
+            None,
+            None,
+            IngestMode::SessionChunk,
+            SessionChunkOptions::default(),
+        )
+        .expect("convert");
+        validate_dataset(&dataset).unwrap();
+
+        assert_eq!(dataset.name, "locomo_session_chunk");
+        assert_eq!(dataset.memories.len(), 2);
+        assert_eq!(dataset.queries[0].relevant_ids.len(), 1);
+        assert!(dataset.queries[0].relevant_ids[0].ends_with(":chunk-1"));
+        assert!(dataset.memories[1].text.contains("Conversation turn 9"));
+        assert!(dataset.memories[1]
+            .markers
+            .contains(&"memory_granularity:session_chunk".to_string()));
+    }
+
+    #[test]
+    fn converts_locomo_session_doc_and_key_fact_evidence() {
+        let value = serde_json::json!([{
+            "sample_id": "c1",
+            "conversation": {
+                "session_1": [
+                    {"dia_id": "D1:1", "speaker": "Alice", "text": "The notebook is blue. The folder is red."},
+                    {"dia_id": "D1:2", "speaker": "Bob", "text": "The meeting starts at noon."}
+                ]
+            },
+            "qa": [{
+                "question": "What color is the notebook?",
+                "evidence": ["D1:1"],
+                "category": 1
+            }]
+        }]);
+
+        let session = convert_locomo(
+            &value,
+            "test".to_string(),
+            None,
+            None,
+            IngestMode::SessionDoc,
+            SessionChunkOptions::default(),
+        )
+        .expect("session doc");
+        validate_dataset(&session).unwrap();
+        assert_eq!(session.memories.len(), 1);
+        assert_eq!(session.queries[0].relevant_ids.len(), 1);
+        assert!(session.queries[0].relevant_ids[0].ends_with(":session"));
+
+        let facts = convert_locomo(
+            &value,
+            "test".to_string(),
+            None,
+            None,
+            IngestMode::KeyFact,
+            SessionChunkOptions::default(),
+        )
+        .expect("key facts");
+        validate_dataset(&facts).unwrap();
+        assert_eq!(facts.memories.len(), 3);
+        assert_eq!(facts.queries[0].relevant_ids.len(), 2);
+        assert!(facts.queries[0]
+            .relevant_ids
+            .iter()
+            .all(|id| id.contains(":fact-")));
+
+        let session_plus_turn = convert_locomo(
+            &value,
+            "test".to_string(),
+            None,
+            None,
+            IngestMode::SessionPlusTurn,
+            SessionChunkOptions::default(),
+        )
+        .expect("session plus turn");
+        validate_dataset(&session_plus_turn).unwrap();
+        assert_eq!(session_plus_turn.memories.len(), 3);
+        assert_eq!(session_plus_turn.queries[0].relevant_ids.len(), 1);
+        assert!(session_plus_turn.queries[0].relevant_ids[0].ends_with(":D1:1"));
     }
 
     #[test]
