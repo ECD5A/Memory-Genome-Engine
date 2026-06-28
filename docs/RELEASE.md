@@ -300,7 +300,7 @@ cargo run --locked --release --manifest-path tools/agent-memory-eval/Cargo.toml 
 
 cargo run --locked --release --manifest-path tools/agent-memory-eval/Cargo.toml -- \
   --input <locomo10.json> --input-format locomo \
-  --top-k 5 --repeats 1 --index both --modes focused-broad \
+  --ingest-mode raw-turn --top-k 5 --repeats 1 --index both --modes focused-broad \
   --baselines bm25 --output json --report <REPORT.json>
 ```
 
@@ -323,6 +323,18 @@ LoCoMo converted into 5,881 memories and 1,977 evidence-bearing queries; nine qu
 | MGE Exact sealed | broad | 0.544 | 0.499 | 0.402 | 0.411 |
 | MGE BinaryFuse sealed | broad | 0.544 | 0.499 | 0.402 | 0.411 |
 | Eval-only BM25 | focused | 0.545 | 0.499 | 0.415 | 0.421 |
+
+The LoCoMo adapter also measures ingestion granularity with the production session chunker. On the same file and strict focused top-5 run, the local trade-off was:
+
+| Ingestion | Memories | Hit@5 | Recall@5 | MRR@5 | nDCG@5 | Average context tokens |
+|---|---:|---:|---:|---:|---:|---:|
+| Raw turn | 5,881 | 0.533 | 0.489 | 0.393 | 0.402 | 295 |
+| Session chunk, 2 turns | 3,010 | 0.626 | 0.574 | 0.488 | 0.492 | 462 |
+| Session chunk, 4 turns | 1,570 | 0.737 | 0.686 | 0.575 | 0.586 | 788 |
+| Session chunk, 8 turns | 848 | 0.797 | 0.747 | 0.640 | 0.649 | 1,407 |
+| Whole session | 272 | 0.861 | 0.810 | 0.698 | 0.710 | 3,715 |
+
+This is a granularity trade-off inside MGE, not a competitor comparison. Whole-session ingestion scores highest but returns much larger context. Four-turn chunks are the measured compact recommendation; the production default remains eight turns because it preserves the quality-first behavior. Override it in the eval harness with `--session-chunk-max-turns 4`; `--session-chunk-max-bytes` controls the independent byte cap.
 
 LongMemEval-S converted into 85,253 session chunks and 500 queries:
 

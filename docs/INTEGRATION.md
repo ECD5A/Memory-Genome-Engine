@@ -179,6 +179,8 @@ printf '%s\n' '{"jsonrpc":"2.0","id":"schema","method":"mge_schema","params":{}}
 - optional `max_bytes`, default `4096`
 - the same kind/scope/trust/status/sensitivity/passphrase fields as `mge_remember`
 
+The default eight-turn chunk is the quality-first setting. Local strict top-5 LoCoMo adapter measurements found four turns to be a useful token/quality knee for compact conversational context. Hosts can set `max_turns: 4` when context budget matters more; this is workload guidance, not a universal replacement for the default.
+
 `mge_recall` input:
 
 - `store_path`
