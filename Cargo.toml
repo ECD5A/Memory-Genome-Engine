@@ -15,7 +15,7 @@ repository = "https://github.com/ECD5A/Memory-Genome-Engine"
 [workspace.dependencies]
 anyhow = "1.0"
 argon2 = "0.5"
-chacha20poly1305 = "0.10"
+chacha20poly1305 = "0.11"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4.5", features = ["derive"] }
 crossterm = "0.29"
