@@ -1352,6 +1352,80 @@ fn checkpoint_seal_reopen_and_rebuild_soak_preserves_all_cells() {
 }
 
 #[test]
+fn repeated_checkpoint_seal_and_reopen_cycles_preserve_all_cells() {
+    const CYCLES: usize = 6;
+    const CELLS_PER_HALF: usize = 12;
+
+    let dir = tempdir().unwrap();
+    let mut observed_ids = Vec::with_capacity(CYCLES * CELLS_PER_HALF * 2);
+
+    for cycle in 0..CYCLES {
+        let mut engine = if cycle == 0 {
+            MemoryEngine::init_at(dir.path()).unwrap()
+        } else {
+            MemoryEngine::open_at(dir.path()).unwrap()
+        };
+
+        for index in 0..CELLS_PER_HALF {
+            let cell = remember_text_cell(
+                &mut engine,
+                "multi-cycle-soak",
+                MemoryStatus::Active,
+                TrustLevel::ToolObserved,
+                &format!("cycle {cycle} durable cell {index}"),
+                &[format!("tag:cycle_{cycle}")],
+            );
+            observed_ids.push(cell.id);
+        }
+        engine.checkpoint().unwrap();
+        drop(engine);
+
+        let mut engine = MemoryEngine::open_at(dir.path()).unwrap();
+        assert_eq!(engine.stats().unwrap().hot_cells, CELLS_PER_HALF);
+        for index in CELLS_PER_HALF..(CELLS_PER_HALF * 2) {
+            let cell = remember_text_cell(
+                &mut engine,
+                "multi-cycle-soak",
+                MemoryStatus::Active,
+                TrustLevel::ToolObserved,
+                &format!("cycle {cycle} durable cell {index}"),
+                &[format!("tag:cycle_{cycle}")],
+            );
+            observed_ids.push(cell.id);
+        }
+        engine.checkpoint().unwrap();
+        let seal = engine.seal().unwrap();
+        assert_eq!(seal.hot_cells_sealed, CELLS_PER_HALF * 2);
+        assert!(engine.validate_deep().unwrap().ok);
+    }
+
+    let expected_cells = CYCLES * CELLS_PER_HALF * 2;
+    assert_eq!(
+        observed_ids,
+        (1..=expected_cells as u64).collect::<Vec<_>>()
+    );
+
+    let engine = MemoryEngine::open_at(dir.path()).unwrap();
+    let stats = engine.stats().unwrap();
+    assert_eq!(stats.hot_cells, 0);
+    assert_eq!(stats.sealed_cells, expected_cells);
+
+    let mut request = RecallRequest::new("");
+    request.mode = RecallMode::FullScope;
+    request.scope = Some("multi-cycle-soak".to_string());
+    let before_rebuild = engine.recall(request.clone()).unwrap();
+    assert_eq!(before_rebuild.relevant_memory.len(), expected_cells);
+
+    engine.rebuild_catalog_and_indexes().unwrap();
+    assert!(engine.validate_deep().unwrap().ok);
+    let after_rebuild = engine.recall(request).unwrap();
+    assert_eq!(
+        after_rebuild.relevant_memory,
+        before_rebuild.relevant_memory
+    );
+}
+
+#[test]
 fn full_scope_recall_uses_hot_ram_and_sealed_pages_together() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
