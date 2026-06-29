@@ -23,6 +23,21 @@ const client = new MemoryGenomeClient(".memory-genome", {
 });
 ```
 
+Store a short agent session with deterministic production chunking:
+
+```typescript
+client.rememberSession(
+  [
+    { role: "user", content: "Keep release rollback steps." },
+    { role: "assistant", content: "Validate before publishing." },
+  ],
+  { scope: "release", sessionId: "release-review", maxTurns: 4 },
+);
+const packet = client.recall("release rollback", { scope: "release", maxItems: 5 });
+```
+
+Four-turn chunks are the measured compact option; the SDK default remains the quality-first eight turns.
+
 ## Optional Type Check
 
 If `tsc` is available locally:
@@ -49,3 +64,7 @@ node ../../examples/typescript_agent_host.ts
 Use `resultOrThrowMcpError(response)` when talking directly to `mge-mcp-server`.
 
 `client.recall(..., { minScore: 20 })` can be used by agent hosts that prefer no memory over weak matches. The score floor is opt-in.
+
+## Feedback
+
+Use the [integration report](https://github.com/ECD5A/Memory-Genome-Engine/issues/new?template=integration_report.yml) for a tested host workflow, the [general feedback form](https://github.com/ECD5A/Memory-Genome-Engine/issues/new?template=general_feedback.yml) for short usability notes, or [Q&A](https://github.com/ECD5A/Memory-Genome-Engine/discussions/categories/q-a) for setup help.

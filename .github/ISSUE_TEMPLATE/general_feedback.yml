@@ -1,0 +1,35 @@
+name: General feedback
+description: Share first-use friction, a small idea, or general product feedback.
+title: "feedback: "
+labels:
+  - feedback
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Short feedback is welcome. For a reproducible defect use the bug form; for open discussion use the linked Discussions categories.
+
+        Do not include passphrases, secrets, private memory, private corpus data, or sensitive filesystem paths.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Feedback
+      description: What worked, felt unclear, or should improve?
+      placeholder: "I tried MGE with ... and noticed ..."
+    validations:
+      required: true
+  - type: input
+    id: surface
+    attributes:
+      label: Surface used (optional)
+      placeholder: "CLI, TUI, MCP, Python SDK, TypeScript SDK, docs, release archive ..."
+  - type: input
+    id: environment
+    attributes:
+      label: Environment (optional)
+      placeholder: "MGE version, agent host, OS, terminal ..."
+  - type: textarea
+    id: details
+    attributes:
+      label: Additional context (optional)
+      description: Screenshots and sanitized logs are welcome when they help explain the feedback.

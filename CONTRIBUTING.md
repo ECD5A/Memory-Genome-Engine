@@ -13,7 +13,9 @@ Memory Genome Engine is a local-first Rust project. Keep changes small, measurab
 
 ## Preview Feedback Checklist
 
-When reporting preview feedback, include:
+Short first-use feedback is welcome through the [general feedback form](https://github.com/ECD5A/Memory-Genome-Engine/issues/new?template=general_feedback.yml). Questions and early ideas belong in [Discussions](https://github.com/ECD5A/Memory-Genome-Engine/discussions); they do not need a complete bug reproduction or design proposal.
+
+For a reproducible bug or integration report, include what is available from this checklist:
 
 - OS and terminal used.
 - Install path used: release archive, source checkout, or local install script.

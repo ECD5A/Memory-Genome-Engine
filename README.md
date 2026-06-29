@@ -124,6 +124,8 @@ See [Integration](docs/INTEGRATION.md) for encrypted host setup, schemas, struct
 
 ## Community
 
+- [General feedback](https://github.com/ECD5A/Memory-Genome-Engine/issues/new?template=general_feedback.yml)
+- [Ideas and questions](https://github.com/ECD5A/Memory-Genome-Engine/discussions)
 - [License](LICENSE)
 - [Notice](NOTICE)
 - [Security policy](SECURITY.md)

@@ -124,6 +124,8 @@ node examples/typescript_agent_host.ts
 
 ## Сообщество
 
+- [Общая обратная связь](https://github.com/ECD5A/Memory-Genome-Engine/issues/new?template=general_feedback.yml)
+- [Идеи и вопросы](https://github.com/ECD5A/Memory-Genome-Engine/discussions)
 - [Лицензия](LICENSE)
 - [Уведомление об авторских правах](NOTICE)
 - [Политика безопасности](SECURITY.md)
