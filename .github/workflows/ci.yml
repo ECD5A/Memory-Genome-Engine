@@ -2,9 +2,27 @@ name: CI
 
 on:
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "assets/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/FUNDING.yml"
+      - ".gitattributes"
+      - ".gitignore"
+      - "LICENSE"
+      - "NOTICE"
   push:
     branches:
       - main
+    paths-ignore:
+      - "**/*.md"
+      - "assets/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/FUNDING.yml"
+      - ".gitattributes"
+      - ".gitignore"
+      - "LICENSE"
+      - "NOTICE"
 
 permissions:
   contents: read
