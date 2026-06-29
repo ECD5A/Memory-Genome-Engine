@@ -88,6 +88,14 @@ struct Args {
     #[arg(long, default_value_t = 64)]
     candidate_pool: usize,
 
+    /// Dev-only UTF-8 byte budget for selected memory content (packet overhead excluded).
+    #[arg(long)]
+    max_context_bytes: Option<usize>,
+
+    /// Dev-only maximum selected memories sharing the same session marker.
+    #[arg(long)]
+    max_results_per_session: Option<usize>,
+
     /// Output format.
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     output: OutputFormat,
@@ -214,6 +222,8 @@ enum MgeRankerSelection {
     RuntimeGlobal,
     RuntimeGlobalRrf,
     WeightedRuntimeGlobalRrf,
+    FullTfRrf,
+    LexicalExperiments,
     All,
 }
 
@@ -228,6 +238,7 @@ enum ExperimentalRanker {
     RuntimeGlobalBm25,
     RuntimeGlobalRrf,
     WeightedRuntimeGlobalRrf2,
+    FullTfRuntimeGlobalRrf,
 }
 
 impl ExperimentalRanker {
@@ -242,6 +253,7 @@ impl ExperimentalRanker {
             Self::RuntimeGlobalBm25 => "candidate_runtime_global_bm25",
             Self::RuntimeGlobalRrf => "candidate_runtime_global_rrf",
             Self::WeightedRuntimeGlobalRrf2 => "candidate_weighted_runtime_global_rrf_2",
+            Self::FullTfRuntimeGlobalRrf => "candidate_full_tf_runtime_global_rrf",
         }
     }
 }
@@ -333,6 +345,7 @@ struct RunSummary {
     p95_latency_micros: u64,
     avg_context_bytes: usize,
     avg_context_tokens_estimate: usize,
+    avg_candidate_items: f64,
     avg_returned_items: f64,
     avg_items_at_k: f64,
     avg_hot_candidates: f64,
@@ -388,6 +401,7 @@ struct AbstentionAnalysis {
 #[derive(Clone, Debug, Default)]
 struct QueryResult {
     returned_ids: Vec<String>,
+    candidate_items: usize,
     top_score: Option<i64>,
     latency_micros: u64,
     store_open_micros: u64,
@@ -402,6 +416,25 @@ struct QueryResult {
     cell_filtering_micros: u64,
     reranking_micros: u64,
     context_packet_build_micros: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ExperimentalOutputPolicy {
+    candidate_pool: usize,
+    max_context_bytes: Option<usize>,
+    max_results_per_session: Option<usize>,
+}
+
+impl ExperimentalOutputPolicy {
+    fn from_args(args: &Args) -> Option<Self> {
+        (args.max_context_bytes.is_some() || args.max_results_per_session.is_some()).then_some(
+            Self {
+                candidate_pool: args.candidate_pool.max(args.top_k),
+                max_context_bytes: args.max_context_bytes,
+                max_results_per_session: args.max_results_per_session,
+            },
+        )
+    }
 }
 
 fn main() -> Result<()> {
@@ -419,6 +452,14 @@ fn main() -> Result<()> {
     }
     if args.candidate_pool == 0 {
         return Err(anyhow!("--candidate-pool must be greater than zero"));
+    }
+    if args.max_context_bytes == Some(0) {
+        return Err(anyhow!("--max-context-bytes must be greater than zero"));
+    }
+    if args.max_results_per_session == Some(0) {
+        return Err(anyhow!(
+            "--max-results-per-session must be greater than zero"
+        ));
     }
 
     let dataset = load_dataset(&args)?;
@@ -1416,6 +1457,7 @@ fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
     let mut runs = Vec::new();
     let experimental_rankers = selected_experimental_rankers(args.mge_rankers);
     let experimental_bm25 = (!experimental_rankers.is_empty()).then(|| Bm25Index::build(&dataset));
+    let experimental_output_policy = ExperimentalOutputPolicy::from_args(args);
 
     let indexes = selected_indexes(args.index);
     let modes = selected_modes(args.modes);
@@ -1496,6 +1538,18 @@ fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
                 "sealed_repeated",
                 index_kind,
             )?);
+            if let Some(policy) = experimental_output_policy {
+                runs.push(evaluate_mge_output_policy(
+                    &reopened,
+                    &dataset,
+                    &cell_to_eval_id,
+                    *mode,
+                    args.top_k,
+                    args.repeats,
+                    index_kind,
+                    policy,
+                )?);
+            }
             if let Some(bm25) = &experimental_bm25 {
                 for ranker in &experimental_rankers {
                     runs.push(evaluate_mge_experimental_reranker(
@@ -1567,6 +1621,15 @@ fn run_eval(args: &Args, dataset: EvalDataset) -> Result<EvalReport> {
         notes.push(format!(
             "Dev-only rerank experiments use an expanded MGE output pool of {} items; their latency includes building that oversized ContextPacket and is not a production estimate.",
             args.candidate_pool.max(args.top_k)
+        ));
+    }
+    if let Some(policy) = experimental_output_policy {
+        notes.push(format!(
+            "Dev-only output policy selects at most {} items from {} candidates with max_context_bytes={:?} (memory content only) and max_results_per_session={:?}; it does not change production recall.",
+            args.top_k,
+            policy.candidate_pool,
+            policy.max_context_bytes,
+            policy.max_results_per_session
         ));
     }
 
@@ -1641,6 +1704,132 @@ fn evaluate_mge(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn evaluate_mge_output_policy(
+    engine: &MemoryEngine,
+    dataset: &EvalDataset,
+    cell_to_eval_id: &HashMap<u64, String>,
+    mode: RecallMode,
+    top_k: usize,
+    repeats: usize,
+    index_kind: IndexKind,
+    policy: ExperimentalOutputPolicy,
+) -> Result<RunSummary> {
+    let memory_by_id = dataset
+        .memories
+        .iter()
+        .map(|memory| (memory.id.as_str(), memory))
+        .collect::<HashMap<_, _>>();
+    let mut results = Vec::with_capacity(dataset.queries.len() * repeats);
+
+    for query in &dataset.queries {
+        for _ in 0..repeats {
+            let mut request = RecallRequest::new(query.query.clone());
+            request.mode = mode;
+            request.scope = query.scope.clone();
+            request.max_items = policy.candidate_pool;
+            let started = Instant::now();
+            let packet = engine.recall(request)?;
+            let latency_micros = elapsed_micros(started);
+            let candidates = packet
+                .debug
+                .score_details
+                .iter()
+                .take(packet.relevant_memory.len())
+                .filter_map(|score| cell_to_eval_id.get(&score.cell_id).cloned())
+                .collect::<Vec<_>>();
+            let returned_ids = select_budgeted_output(
+                &candidates,
+                &memory_by_id,
+                top_k,
+                policy.max_context_bytes,
+                policy.max_results_per_session,
+            );
+            let context_bytes = returned_ids
+                .iter()
+                .filter_map(|id| memory_by_id.get(id.as_str()))
+                .map(|memory| memory.text.len())
+                .sum();
+
+            results.push(QueryResult {
+                candidate_items: candidates.len(),
+                top_score: packet
+                    .debug
+                    .score_details
+                    .first()
+                    .map(|detail| detail.score),
+                returned_ids,
+                latency_micros,
+                context_bytes,
+                hot_candidates: packet.debug.hot_candidate_cells,
+                pages_loaded: packet.debug.loaded_pages,
+                pages_pruned: packet.debug.pages_pruned_by_metadata,
+                cells_scanned: packet.debug.cells_scanned,
+                page_read_micros: packet.debug.page_file_read_load_micros,
+                page_decode_micros: packet.debug.page_decode_micros,
+                scoring_cache_build_micros: packet.debug.scoring_cache_build_micros,
+                cell_filtering_micros: packet.debug.cell_filtering_micros,
+                reranking_micros: packet.debug.reranking_micros,
+                context_packet_build_micros: packet.debug.context_packet_build_micros,
+                ..QueryResult::default()
+            });
+        }
+    }
+
+    Ok(summarize_run(
+        format!("mge_{}_output_policy", index_kind.as_str()),
+        "sealed_repeated_experimental".to_string(),
+        index_kind.as_str().to_string(),
+        mode.as_str().to_string(),
+        top_k,
+        repeats,
+        &dataset.queries,
+        &results,
+    ))
+}
+
+fn select_budgeted_output(
+    candidates: &[String],
+    memory_by_id: &HashMap<&str, &EvalMemory>,
+    top_k: usize,
+    max_context_bytes: Option<usize>,
+    max_results_per_session: Option<usize>,
+) -> Vec<String> {
+    let mut selected = Vec::with_capacity(top_k.min(candidates.len()));
+    let mut selected_bytes = 0usize;
+    let mut session_counts = HashMap::<String, usize>::new();
+
+    for id in candidates {
+        if selected.len() >= top_k {
+            break;
+        }
+        let Some(memory) = memory_by_id.get(id.as_str()) else {
+            continue;
+        };
+        let session = memory
+            .markers
+            .iter()
+            .find_map(|marker| marker.strip_prefix("session:"));
+        if let (Some(limit), Some(session)) = (max_results_per_session, session) {
+            if session_counts.get(session).copied().unwrap_or(0) >= limit {
+                continue;
+            }
+        }
+        let next_bytes = selected_bytes.saturating_add(memory.text.len());
+        if max_context_bytes.is_some_and(|limit| next_bytes > limit) {
+            continue;
+        }
+
+        selected_bytes = next_bytes;
+        if let Some(session) = session {
+            *session_counts.entry(session.to_string()).or_insert(0) += 1;
+        }
+        selected.push(id.clone());
+    }
+
+    selected
+}
+
+#[allow(clippy::too_many_arguments)]
 fn evaluate_mge_experimental_reranker(
     engine: &MemoryEngine,
     dataset: &EvalDataset,
@@ -1683,6 +1872,9 @@ fn evaluate_mge_experimental_reranker(
                 | ExperimentalRanker::WeightedRuntimeGlobalRrf2 => {
                     bm25.rank_candidates_runtime_global(query, &current)
                 }
+                ExperimentalRanker::FullTfRuntimeGlobalRrf => {
+                    bm25.rank_candidates_full_tf_runtime_global(query, &current)
+                }
                 ExperimentalRanker::LocalBm25
                 | ExperimentalRanker::LocalRrf
                 | ExperimentalRanker::WeightedLocalRrf2
@@ -1696,7 +1888,8 @@ fn evaluate_mge_experimental_reranker(
                 | ExperimentalRanker::RuntimeGlobalBm25 => lexical,
                 ExperimentalRanker::Rrf
                 | ExperimentalRanker::LocalRrf
-                | ExperimentalRanker::RuntimeGlobalRrf => {
+                | ExperimentalRanker::RuntimeGlobalRrf
+                | ExperimentalRanker::FullTfRuntimeGlobalRrf => {
                     reciprocal_rank_fusion(&current, &lexical)
                 }
                 ExperimentalRanker::WeightedLocalRrf2 => {
@@ -1709,6 +1902,7 @@ fn evaluate_mge_experimental_reranker(
                     reciprocal_rank_fusion_weighted(&current, &lexical, 2.0, 1.0)
                 }
             };
+            let candidate_items = current.len();
             returned_ids.truncate(top_k);
             let context_bytes = returned_ids
                 .iter()
@@ -1717,6 +1911,7 @@ fn evaluate_mge_experimental_reranker(
                 .sum();
             results.push(QueryResult {
                 returned_ids,
+                candidate_items,
                 latency_micros: elapsed_micros(started),
                 context_bytes,
                 hot_candidates: packet.debug.hot_candidate_cells,
@@ -1821,6 +2016,7 @@ fn evaluate_mge_query(
         }
     }
     Ok(QueryResult {
+        candidate_items: packet.relevant_memory.len(),
         returned_ids,
         top_score: packet
             .debug
@@ -2103,6 +2299,13 @@ fn selected_experimental_rankers(selection: MgeRankerSelection) -> Vec<Experimen
         MgeRankerSelection::WeightedRuntimeGlobalRrf => {
             vec![ExperimentalRanker::WeightedRuntimeGlobalRrf2]
         }
+        MgeRankerSelection::FullTfRrf => {
+            vec![ExperimentalRanker::FullTfRuntimeGlobalRrf]
+        }
+        MgeRankerSelection::LexicalExperiments => vec![
+            ExperimentalRanker::RuntimeGlobalRrf,
+            ExperimentalRanker::FullTfRuntimeGlobalRrf,
+        ],
         MgeRankerSelection::All => vec![
             ExperimentalRanker::Bm25,
             ExperimentalRanker::Rrf,
@@ -2113,6 +2316,7 @@ fn selected_experimental_rankers(selection: MgeRankerSelection) -> Vec<Experimen
             ExperimentalRanker::RuntimeGlobalBm25,
             ExperimentalRanker::RuntimeGlobalRrf,
             ExperimentalRanker::WeightedRuntimeGlobalRrf2,
+            ExperimentalRanker::FullTfRuntimeGlobalRrf,
         ],
     }
 }
@@ -2121,11 +2325,14 @@ fn selected_experimental_rankers(selection: MgeRankerSelection) -> Vec<Experimen
 struct Bm25Index {
     docs: Vec<Bm25Doc>,
     runtime_docs: Vec<Bm25Doc>,
+    full_runtime_docs: Vec<Bm25Doc>,
     doc_index_by_id: HashMap<String, usize>,
     document_frequency: HashMap<String, usize>,
     avg_doc_len: f64,
     runtime_document_frequency: HashMap<String, usize>,
     runtime_avg_doc_len: f64,
+    full_runtime_document_frequency: HashMap<String, usize>,
+    full_runtime_avg_doc_len: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -2140,11 +2347,14 @@ impl Bm25Index {
     fn build(dataset: &EvalDataset) -> Self {
         let mut docs = Vec::with_capacity(dataset.memories.len());
         let mut runtime_docs = Vec::with_capacity(dataset.memories.len());
+        let mut full_runtime_docs = Vec::with_capacity(dataset.memories.len());
         let mut doc_index_by_id = HashMap::with_capacity(dataset.memories.len());
         let mut document_frequency = HashMap::<String, usize>::new();
         let mut runtime_document_frequency = HashMap::<String, usize>::new();
+        let mut full_runtime_document_frequency = HashMap::<String, usize>::new();
         let mut total_doc_len = 0usize;
         let mut runtime_total_doc_len = 0usize;
+        let mut full_runtime_total_doc_len = 0usize;
 
         for memory in &dataset.memories {
             let tokens = memory_tokens(memory);
@@ -2180,6 +2390,22 @@ impl Bm25Index {
                 length: runtime_length,
                 term_frequency: runtime_term_frequency,
             });
+
+            let full_runtime_tokens = full_runtime_memory_tokens(memory);
+            let full_runtime_term_frequency = token_frequencies(&full_runtime_tokens);
+            for token in full_runtime_term_frequency.keys() {
+                *full_runtime_document_frequency
+                    .entry(token.clone())
+                    .or_insert(0) += 1;
+            }
+            let full_runtime_length = full_runtime_tokens.len();
+            full_runtime_total_doc_len += full_runtime_length;
+            full_runtime_docs.push(Bm25Doc {
+                id: memory.id.clone(),
+                scope: memory.scope.clone(),
+                length: full_runtime_length,
+                term_frequency: full_runtime_term_frequency,
+            });
         }
 
         let avg_doc_len = if docs.is_empty() {
@@ -2192,14 +2418,19 @@ impl Bm25Index {
         } else {
             runtime_total_doc_len as f64 / runtime_docs.len() as f64
         };
+        let full_runtime_avg_doc_len =
+            average_length(full_runtime_total_doc_len, dataset.memories.len());
         Self {
             docs,
             runtime_docs,
+            full_runtime_docs,
             doc_index_by_id,
             document_frequency,
             avg_doc_len,
             runtime_document_frequency,
             runtime_avg_doc_len,
+            full_runtime_document_frequency,
+            full_runtime_avg_doc_len,
         }
     }
 
@@ -2319,6 +2550,24 @@ impl Bm25Index {
         scored.into_iter().map(|(id, _, _)| id).collect()
     }
 
+    fn rank_candidates_full_tf_runtime_global(
+        &self,
+        query: &EvalQuery,
+        candidate_ids: &[String],
+    ) -> Vec<String> {
+        let query_terms = tokenize_keywords(&query.query)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        rank_bm25_candidates(
+            candidate_ids,
+            &self.doc_index_by_id,
+            &self.full_runtime_docs,
+            &query_terms,
+            &self.full_runtime_document_frequency,
+            self.full_runtime_avg_doc_len,
+        )
+    }
+
     fn rank_candidates_local(&self, query: &EvalQuery, candidate_ids: &[String]) -> Vec<String> {
         let query_terms = tokenize_keywords(&query.query)
             .into_iter()
@@ -2380,6 +2629,47 @@ impl Bm25Index {
         });
         scored.into_iter().map(|(id, _, _)| id).collect()
     }
+}
+
+fn rank_bm25_candidates(
+    candidate_ids: &[String],
+    doc_index_by_id: &HashMap<String, usize>,
+    docs: &[Bm25Doc],
+    query_terms: &BTreeSet<String>,
+    document_frequency: &HashMap<String, usize>,
+    average_document_length: f64,
+) -> Vec<String> {
+    let doc_count = docs.len() as f64;
+    let mut scored = candidate_ids
+        .iter()
+        .enumerate()
+        .filter_map(|(original_rank, id)| {
+            let doc = doc_index_by_id.get(id).and_then(|index| docs.get(*index))?;
+            let score = query_terms
+                .iter()
+                .filter_map(|term| {
+                    let tf = doc.term_frequency.get(term).copied()?;
+                    let df = document_frequency.get(term).copied().unwrap_or(0);
+                    Some(bm25_term_score(
+                        doc_count,
+                        df as f64,
+                        tf,
+                        doc.length,
+                        average_document_length,
+                    ))
+                })
+                .sum::<f64>();
+            Some((id.clone(), score, original_rank))
+        })
+        .collect::<Vec<_>>();
+    scored.sort_by(|left, right| {
+        right
+            .1
+            .total_cmp(&left.1)
+            .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    scored.into_iter().map(|(id, _, _)| id).collect()
 }
 
 fn reciprocal_rank_fusion(current: &[String], lexical: &[String]) -> Vec<String> {
@@ -2617,6 +2907,40 @@ fn runtime_memory_tokens(memory: &EvalMemory) -> Vec<String> {
     tokens
 }
 
+fn full_runtime_memory_tokens(memory: &EvalMemory) -> Vec<String> {
+    let mut tokens = memory
+        .subject
+        .as_deref()
+        .map(tokenize_keywords_with_frequency)
+        .unwrap_or_default();
+    tokens.extend(tokenize_keywords_with_frequency(&memory.text));
+    tokens
+}
+
+fn tokenize_keywords_with_frequency(input: &str) -> Vec<String> {
+    input
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .flat_map(tokenize_keywords)
+        .collect()
+}
+
+fn token_frequencies(tokens: &[String]) -> HashMap<String, usize> {
+    let mut frequencies = HashMap::new();
+    for token in tokens {
+        *frequencies.entry(token.clone()).or_insert(0) += 1;
+    }
+    frequencies
+}
+
+fn average_length(total: usize, documents: usize) -> f64 {
+    if documents == 0 {
+        0.0
+    } else {
+        total as f64 / documents as f64
+    }
+}
+
 fn bm25_term_score(
     doc_count: f64,
     document_frequency: f64,
@@ -2706,6 +3030,7 @@ fn summarize_run(
     let mut metrics = RetrievalMetricAccumulator::default();
     let mut category_metrics = BTreeMap::<String, RetrievalMetricAccumulator>::new();
     let mut context_bytes_sum = 0usize;
+    let mut candidate_items_sum = 0usize;
     let mut returned_items_sum = 0usize;
     let mut items_at_k_sum = 0usize;
     let mut hot_candidates_sum = 0usize;
@@ -2735,6 +3060,11 @@ fn summarize_run(
                 .or_default()
                 .record(query, result, top_k);
             context_bytes_sum += result.context_bytes;
+            candidate_items_sum += if result.candidate_items == 0 {
+                result.returned_ids.len()
+            } else {
+                result.candidate_items
+            };
             returned_items_sum += result.returned_ids.len();
             items_at_k_sum += result.returned_ids.len().min(top_k);
             hot_candidates_sum += result.hot_candidates;
@@ -2793,6 +3123,7 @@ fn summarize_run(
         p95_latency_micros: percentile(&latencies, 95.0),
         avg_context_bytes: context_bytes_sum / samples,
         avg_context_tokens_estimate: (context_bytes_sum / samples).div_ceil(4),
+        avg_candidate_items: candidate_items_sum as f64 / samples as f64,
         avg_returned_items: returned_items_sum as f64 / samples as f64,
         avg_items_at_k: items_at_k_sum as f64 / samples as f64,
         avg_hot_candidates: hot_candidates_sum as f64 / samples as f64,
@@ -3747,6 +4078,13 @@ mod tests {
     }
 
     #[test]
+    fn full_tf_runtime_tokens_preserve_repeated_terms() {
+        let tokens = tokenize_keywords_with_frequency("Memory memory memories are durable");
+        assert_eq!(tokens.iter().filter(|token| *token == "memory").count(), 3);
+        assert!(tokens.contains(&"durable".to_string()));
+    }
+
+    #[test]
     fn reciprocal_rank_fusion_keeps_candidate_set_deterministic() {
         let current = vec!["a".to_string(), "b".to_string(), "c".to_string()];
         let lexical = vec!["c".to_string(), "b".to_string(), "a".to_string()];
@@ -3924,6 +4262,59 @@ mod tests {
         assert_eq!(summary.recall_at_k, 0.0);
         assert_eq!(summary.mrr_at_k, 0.0);
         assert_eq!(summary.ndcg_at_k, 0.0);
+    }
+
+    #[test]
+    fn output_policy_respects_byte_and_session_budgets() {
+        let memories = [
+            EvalMemory {
+                id: "a1".to_string(),
+                scope: "test".to_string(),
+                subject: None,
+                text: "123456".to_string(),
+                markers: vec!["session:a".to_string()],
+                kind: default_kind(),
+                status: default_status(),
+                trust: default_trust(),
+                sensitivity: default_sensitivity(),
+            },
+            EvalMemory {
+                id: "a2".to_string(),
+                scope: "test".to_string(),
+                subject: None,
+                text: "abcdef".to_string(),
+                markers: vec!["session:a".to_string()],
+                kind: default_kind(),
+                status: default_status(),
+                trust: default_trust(),
+                sensitivity: default_sensitivity(),
+            },
+            EvalMemory {
+                id: "b1".to_string(),
+                scope: "test".to_string(),
+                subject: None,
+                text: "uvwxyz".to_string(),
+                markers: vec!["session:b".to_string()],
+                kind: default_kind(),
+                status: default_status(),
+                trust: default_trust(),
+                sensitivity: default_sensitivity(),
+            },
+        ];
+        let memory_by_id = memories
+            .iter()
+            .map(|memory| (memory.id.as_str(), memory))
+            .collect::<HashMap<_, _>>();
+        let candidates = vec!["a1".to_string(), "a2".to_string(), "b1".to_string()];
+
+        assert_eq!(
+            select_budgeted_output(&candidates, &memory_by_id, 5, Some(12), Some(1)),
+            vec!["a1".to_string(), "b1".to_string()]
+        );
+        assert_eq!(
+            select_budgeted_output(&candidates, &memory_by_id, 5, Some(6), None),
+            vec!["a1".to_string()]
+        );
     }
 
     #[test]
