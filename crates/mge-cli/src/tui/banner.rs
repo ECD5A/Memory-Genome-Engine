@@ -50,7 +50,8 @@ fn full_banner_lines(language: Language) -> Vec<Line<'static>> {
         .unwrap_or_default();
     let mut lines = BANNER_LINES
         .iter()
-        .map(|line| Line::from(rainbow_banner_spans(line, banner_width)))
+        .enumerate()
+        .map(|(row, line)| Line::from(bright_diagonal_banner_spans(line, row)))
         .collect::<Vec<_>>();
     lines.push(Line::from(""));
     lines.push(Line::from(subtitle_spans(
@@ -127,15 +128,31 @@ fn centered_rainbow_spans(text: &str, available_width: usize) -> Vec<Span<'stati
     spans
 }
 
-fn rainbow_banner_spans(line: &str, banner_width: usize) -> Vec<Span<'static>> {
+fn bright_diagonal_banner_spans(line: &str, row: usize) -> Vec<Span<'static>> {
     let mut spans = vec![Span::raw(BANNER_LEFT_PAD.to_string())];
     spans.extend(line.chars().enumerate().map(|(column, ch)| {
         Span::styled(
             ch.to_string(),
-            Style::default().fg(rainbow_color(column, banner_width + 24)),
+            Style::default().fg(bright_diagonal_color(column, row)),
         )
     }));
     spans
+}
+
+fn bright_diagonal_color(column: usize, row: usize) -> Color {
+    const PALETTE: &[(u8, u8, u8)] = &[
+        (90, 255, 255),
+        (20, 195, 255),
+        (95, 105, 255),
+        (185, 65, 255),
+        (255, 45, 235),
+        (255, 80, 135),
+        (255, 215, 65),
+    ];
+
+    let band = ((column + row * 10) / 16) % PALETTE.len();
+    let (red, green, blue) = PALETTE[band];
+    Color::Rgb(red, green, blue)
 }
 
 fn rainbow_color(position: usize, width: usize) -> Color {
@@ -217,11 +234,11 @@ mod tests {
     }
 
     #[test]
-    fn banner_bottom_uses_same_horizontal_gradient_as_top() {
+    fn banner_uses_bright_diagonal_color_bands() {
         let lines = banner_lines(Language::En, full_banner_min_width());
-        let top_color = lines[0].spans[5].style.fg;
-        let bottom_color = lines[5].spans[5].style.fg;
-        assert_eq!(top_color, bottom_color);
+        assert_eq!(lines[0].spans[7].style.fg, Some(Color::Rgb(90, 255, 255)));
+        assert_eq!(lines[1].spans[7].style.fg, Some(Color::Rgb(20, 195, 255)));
+        assert_ne!(lines[0].spans[7].style.fg, lines[1].spans[7].style.fg);
     }
 
     #[test]
