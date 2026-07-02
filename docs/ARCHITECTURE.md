@@ -154,6 +154,10 @@ The manifest stores the default codec/compression for newly sealed pages. Each `
 
 `mge mark` writes soft status overrides into `manifest.mgm` for memory maintenance. It can hide or reject hot and sealed cells during recall without rewriting sealed page payloads; `--status active` clears the override.
 
+`mge supersede` implements explicit append-and-supersede versioning. It appends a replacement cell, adds a link to the prior cell, records the typed `old -> replacement` relation in `manifest.mgm`, and applies an effective `superseded` status to the old cell. Sealed payloads remain immutable. A pending manifest intent makes the operation crash-consistent: reopen rolls back an intent with no durable replacement or finalizes it when the replacement is present. Existing manifests decode with empty supersession maps through `serde(default)`.
+
+Contradiction detection is intentionally outside the storage engine. The caller decides that two memories conflict; MGE guarantees version history, scope consistency, recovery, validation, and default/audit recall behavior.
+
 `mge validate` is a read-only storage consistency check. It verifies manifest/catalog/index kind alignment, page file readability, binary headers, payload checksums, page metadata, marker summaries, page checksums, marker dictionary consistency and references, cell links, candidate-index coverage, derived lexical statistics, and orphan storage files. It reports wrong magic, wrong file kind, unsupported version, truncated payload, and corrupted payload errors. It does not repair or rewrite store data.
 
 ## Page Clustering

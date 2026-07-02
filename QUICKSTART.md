@@ -214,6 +214,15 @@ cargo run -p mge-cli -- mark 1 --status active
 
 `rejected`, `deprecated`, and `superseded` overrides hide memory from normal recall. `active` clears the override. Sealed page payloads are not rewritten.
 
+Replace a stale fact or decision while preserving its history:
+
+```bash
+cargo run -p mge-cli -- supersede 1 "Use protocol version two" \
+  --kind decision --scope my_project --subject "agent protocol" --json
+```
+
+The replacement is appended as a new `MemoryCell`, links to cell `1`, and marks cell `1` as effectively `superseded`. Default recall returns only the replacement; `--include-deprecated` includes historical versions. Scope must match. MGE does not guess semantic contradictions automatically.
+
 `mge doctor` is read-only by default. Use `--deep` only when you explicitly want validation work:
 
 ```bash

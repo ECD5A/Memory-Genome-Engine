@@ -51,6 +51,18 @@ packet = client.recall("release rollback", scope="release", max_items=5)
 
 Four-turn chunks are the measured compact option; the SDK default remains the quality-first eight turns.
 
+Replace a stale memory without erasing history:
+
+```python
+result = client.supersede(
+    1,
+    "Use protocol version two",
+    kind="decision",
+    scope="release",
+    subject="agent protocol",
+)
+```
+
 ## Editable Install
 
 No package has been published. For local development only:

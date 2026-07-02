@@ -24,6 +24,7 @@ Memory Genome Engine gives AI agents durable, local-first project memory they ca
 - Keeps recent memory in fast L1 Hot RAM with durable binary persistence.
 - Seals older memory into immutable binary pages with candidate indexes.
 - Supports focused, broad, and full-scope recall.
+- Versions contradictory facts and decisions through explicit, history-preserving supersession.
 - Imports existing Markdown notes as one-time migration input and supports soft memory status maintenance.
 - Provides CLI, TUI, an MCP-compatible stdio server, Python SDK, and TypeScript SDK.
 - Supports opt-in encrypted stores for hot payloads, snapshots, and sealed page payloads.
@@ -62,6 +63,7 @@ mge setup codex
 mge setup claude-code
 mge setup cursor
 mge remember "User prefers concise technical answers" --kind user_preference --scope global --trust user_confirmed
+mge supersede 1 "User now prefers detailed answers" --kind user_preference --scope global
 mge recall "How should the agent answer technical questions?"
 mge seal
 mge validate --deep

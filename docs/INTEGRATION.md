@@ -115,7 +115,7 @@ Contract:
 - JSON-RPC version: `2.0`
 - supported MCP protocol revision: `2025-06-18` (with `2024-11-05` negotiation support)
 - `protocol_version`: `mge-jsonrpc-1`
-- `integration_schema_version`: `4`
+- `integration_schema_version`: `5`
 
 Each input line is one JSON-RPC request:
 
@@ -126,7 +126,7 @@ Each input line is one JSON-RPC request:
 Each output line is one JSON-RPC response:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"ok":true,"tool":"mge_stats","protocol_version":"mge-jsonrpc-1","integration_schema_version":4,"stats":{}}}
+{"jsonrpc":"2.0","id":1,"result":{"ok":true,"tool":"mge_stats","protocol_version":"mge-jsonrpc-1","integration_schema_version":5,"stats":{}}}
 ```
 
 Standard MCP hosts use `initialize`, `notifications/initialized`, `ping`, `tools/list`, and `tools/call`. Notifications do not produce JSON-RPC responses. `tools/call` returns text content plus `structuredContent` and `isError`. Direct `mge_*` methods remain available as a versioned extension for existing hosts and SDK tests.
@@ -181,6 +181,15 @@ printf '%s\n' '{"jsonrpc":"2.0","id":"schema","method":"mge_schema","params":{}}
 
 The default eight-turn chunk is the quality-first setting. Local strict top-5 LoCoMo adapter measurements found four turns to be a useful token/quality knee for compact conversational context. Hosts can set `max_turns: 4` when context budget matters more; this is workload guidance, not a universal replacement for the default.
 
+`mge_supersede` input:
+
+- `store_path`
+- `superseded_cell_id`
+- replacement `content`, `kind`, and matching `scope`
+- optional `subject`, markers, trust, sensitivity, status, source, links, and `passphrase_env`
+
+The tool appends a replacement and makes the old cell `superseded` for default recall while retaining it for audit recall with `include_deprecated`. It does not infer contradictions automatically. Integration schema version `5` adds this tool without changing `mge-jsonrpc-1`.
+
 `mge_recall` input:
 
 - `store_path`
@@ -212,7 +221,7 @@ There is no `mge_init` MCP tool in the current contract. This keeps the adapter 
 Errors are stable for SDKs:
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params: missing field `content`","tool_name":"mge_remember","recoverable":true,"protocol_version":"mge-jsonrpc-1","integration_schema_version":4,"details":{"error_kind":"invalid_params"}}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params: missing field `content`","tool_name":"mge_remember","recoverable":true,"protocol_version":"mge-jsonrpc-1","integration_schema_version":5,"details":{"error_kind":"invalid_params"}}}
 ```
 
 Important `details.error_kind` values:

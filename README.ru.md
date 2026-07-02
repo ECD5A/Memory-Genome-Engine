@@ -24,6 +24,7 @@ Memory Genome Engine предоставляет ИИ-агентам постоя
 - Держит активную память в быстром слое L1 Hot RAM и сохраняет её в бинарный журнал.
 - Переносит накопленную память в неизменяемые запечатанные страницы с индексами кандидатов.
 - Поддерживает режимы поиска `focused`, `broad` и `full-scope`.
+- Версионирует противоречащие факты и решения через явное supersession с сохранением истории.
 - Импортирует существующие Markdown-заметки и позволяет безопасно менять статус записей.
 - Предоставляет CLI, TUI, локальный MCP-совместимый stdio-сервер, Python SDK и TypeScript SDK.
 - Поддерживает создаваемые по запросу зашифрованные хранилища для активных записей, снимков и содержимого запечатанных страниц.
@@ -62,6 +63,7 @@ mge setup codex
 mge setup claude-code
 mge setup cursor
 mge remember "User prefers concise technical answers" --kind user_preference --scope global --trust user_confirmed
+mge supersede 1 "User now prefers detailed answers" --kind user_preference --scope global
 mge recall "How should the agent answer technical questions?"
 mge seal
 mge validate --deep

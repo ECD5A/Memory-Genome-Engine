@@ -412,7 +412,7 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 
 `.github/workflows/release.yml` runs only for `v*` tags. It verifies format, workspace and eval tests, strict clippy, rustdoc, and Rust 1.95 compatibility with the locked dependency graph. It then builds checksummed product archives for Windows x86-64, Linux x86-64, macOS Apple Silicon, and macOS Intel, uploads them as workflow artifacts, and creates or updates a **draft** GitHub Release with one combined `SHA256SUMS`. The workflow includes only `mge` and `mge-mcp-server`; SDK packages and development benchmark binaries are not published. A maintainer must review checksums, notes, and every platform result before publishing the draft.
 
-Rust crates, the development eval harness, and both repository-local SDK manifests use version `0.1.2`. Integration schema version `4` is independent from package versioning.
+Rust crates, the development eval harness, and both repository-local SDK manifests use version `0.1.2`. Integration schema version `5` is independent from package versioning and adds explicit memory supersession.
 
 ## Package Publishing Plan
 

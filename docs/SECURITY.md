@@ -73,7 +73,7 @@ Encrypted when initialized with key metadata:
 Plaintext by design in the current security model:
 
 - binary frame headers: magic, file kind, version, codec id, payload length, checksum;
-- manifest safe metadata, security mode, KDF salt/parameters, AEAD scheme/version;
+- manifest safe metadata, including status overrides and supersession relationships, security mode, KDF salt/parameters, AEAD scheme/version;
 - marker dictionary: `dictionary/markers.mgd`;
 - indexes and page catalog: `indexes/*.mgi`;
 - derived lexical token fingerprints and document frequencies: `indexes/lexical_stats.mgi`;
@@ -93,7 +93,7 @@ Current encrypted mode protects payload bytes first:
 
 The following metadata remains plaintext by design:
 
-- manifest safe metadata, including security mode, storage versions, default codec/compression, index kind, and key-derivation parameters;
+- manifest safe metadata, including supersession history, security mode, storage versions, default codec/compression, index kind, and key-derivation parameters;
 - marker dictionary: `dictionary/markers.mgd`;
 - page catalog summaries and candidate index files: `indexes/*.mgi`;
 - encoded page sizes and binary frame sizes;
@@ -106,6 +106,7 @@ Plaintext metadata risks:
 - deterministic lexical fingerprints and their frequencies can support dictionary guessing;
 - file, project, and scope markers can reveal project structure;
 - kind/status/sensitivity/trust summaries can leak categories such as decisions, task states, rejected/deprecated memory, or secret-reference presence;
+- supersession relationships reveal that one memory version replaced another, although cell payloads remain encrypted;
 - index size, page count, page sizes, and encoded sizes leak rough memory volume and growth patterns;
 - access pattern, timing, and repeated recall locality are not hidden by at-rest encryption;
 - Markdown export is intentionally human-readable and should be treated as plaintext disclosure.
