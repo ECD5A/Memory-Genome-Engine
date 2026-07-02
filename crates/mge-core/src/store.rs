@@ -1247,6 +1247,13 @@ impl MemoryEngine {
         let original_status = self.find_cell_status(cell_id)?;
         let previous_override = self.manifest.status_overrides.get(&cell_id).copied();
 
+        if self.manifest.superseded_by.contains_key(&cell_id) && status != MemoryStatus::Superseded
+        {
+            return Err(MgeError::InvalidInput(format!(
+                "cell {cell_id} is part of a typed supersession and must remain superseded"
+            )));
+        }
+
         if status == MemoryStatus::Active {
             let removed = self.manifest.status_overrides.remove(&cell_id).is_some();
             if removed {

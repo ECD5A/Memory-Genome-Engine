@@ -2145,6 +2145,12 @@ fn supersession_rejects_ambiguous_or_repeated_replacements() {
     );
     repeated.scope = "scope_a".to_string();
     assert!(engine.supersede(original.id, repeated).is_err());
+    assert!(engine
+        .set_status_override(original.id, MemoryStatus::Active)
+        .is_err());
+    assert!(engine
+        .set_status_override(original.id, MemoryStatus::Rejected)
+        .is_err());
 }
 
 #[test]
