@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "id": "supersede_success",
+  "result": {
+    "ok": true,
+    "tool": "mge_supersede",
+    "protocol_version": "mge-jsonrpc-1",
+    "integration_schema_version": 5,
+    "superseded_cell_id": 1,
+    "replacement_cell_id": 2,
+    "previous_status": "active",
+    "effective_status": "superseded",
+    "pages_rewritten": false,
+    "json_runtime_storage": false
+  }
+}

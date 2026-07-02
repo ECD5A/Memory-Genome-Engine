@@ -47,6 +47,13 @@ class SessionRememberResult(TypedDict):
     cells: list[Mapping[str, Any]]
 
 
+class SupersessionResult(TypedDict):
+    superseded_cell_id: int
+    replacement_cell: Mapping[str, Any]
+    previous_status: str
+    pages_rewritten: bool
+
+
 class ContextMemoryItem(TypedDict, total=False):
     kind: str
     content: str
@@ -210,6 +217,42 @@ class MemoryGenomeClient:
         if match is None:
             raise RuntimeError(f"could not parse remembered cell id from: {output!r}")
         return int(match.group(1))
+
+    def supersede(
+        self,
+        cell_id: int,
+        content: str,
+        *,
+        kind: str,
+        scope: str,
+        markers: Iterable[str] = (),
+        trust: str = "agent_inferred",
+        sensitivity: str = "private",
+        status: str = "active",
+        subject: str | None = None,
+    ) -> SupersessionResult:
+        args = [
+            "supersede",
+            str(cell_id),
+            content,
+            "--kind",
+            kind,
+            "--scope",
+            scope,
+            "--trust",
+            trust,
+            "--sensitivity",
+            sensitivity,
+            "--status",
+            status,
+            "--json",
+        ]
+        if subject is not None:
+            args.extend(["--subject", subject])
+        for marker in markers:
+            args.extend(["--marker", marker])
+        args.extend(self._security_args())
+        return cast(SupersessionResult, self._run_json(args))
 
     def recall(
         self,
@@ -397,6 +440,7 @@ __all__ = [
     "SessionTurnInput",
     "SecurityConfig",
     "StoreStats",
+    "SupersessionResult",
     "ValidationReport",
     "result_or_raise_mcp_error",
 ]

@@ -295,6 +295,86 @@ fn cli_import_markdown_and_mark_memory() {
 }
 
 #[test]
+fn cli_supersede_preserves_history_and_updates_default_recall() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    run_mge(&store, &["init"]);
+    run_mge(
+        &store,
+        &[
+            "remember",
+            "Use protocol version one",
+            "--kind",
+            "decision",
+            "--subject",
+            "agent protocol",
+            "--scope",
+            "project_alpha",
+        ],
+    );
+    run_mge(&store, &["seal"]);
+
+    let report = run_mge_json(
+        &store,
+        &[
+            "supersede",
+            "1",
+            "Use protocol version two",
+            "--kind",
+            "decision",
+            "--subject",
+            "agent protocol",
+            "--scope",
+            "project_alpha",
+            "--json",
+        ],
+    );
+    assert_eq!(report["superseded_cell_id"], 1);
+    assert_eq!(report["replacement_cell"]["id"], 2);
+    assert_eq!(report["pages_rewritten"], false);
+
+    let current = run_mge_json(
+        &store,
+        &[
+            "recall",
+            "--mode",
+            "full-scope",
+            "--scope",
+            "project_alpha",
+            "--json",
+        ],
+    );
+    assert_eq!(current["relevant_memory"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        current["relevant_memory"][0]["content"],
+        "Use protocol version two"
+    );
+
+    let history = run_mge_json(
+        &store,
+        &[
+            "recall",
+            "--mode",
+            "full-scope",
+            "--scope",
+            "project_alpha",
+            "--include-deprecated",
+            "--json",
+        ],
+    );
+    assert_eq!(history["relevant_memory"].as_array().unwrap().len(), 2);
+    assert!(history["relevant_memory"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["status"] == "superseded"));
+    assert_eq!(
+        run_mge_json(&store, &["validate", "--deep", "--json"])["ok"],
+        true
+    );
+}
+
+#[test]
 fn cli_recall_modes_support_broad_and_full_scope() {
     let dir = tempdir().unwrap();
     let store = dir.path().join(".memory-genome");
@@ -961,7 +1041,7 @@ fn mcp_server_json_rpc_adapter_supports_agent_workflow() {
 
     assert_eq!(responses.len(), 9);
     assert_eq!(responses[0]["result"]["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(responses[0]["result"]["integration_schema_version"], 4);
+    assert_eq!(responses[0]["result"]["integration_schema_version"], 5);
     assert_eq!(responses[0]["result"]["tool"], "mge_remember");
     assert_eq!(responses[0]["result"]["ok"], true);
     assert_eq!(responses[0]["result"]["cell_id"], 1);
@@ -1011,6 +1091,80 @@ fn mcp_server_json_rpc_adapter_supports_agent_workflow() {
 }
 
 #[test]
+fn mcp_supersede_updates_recall_without_erasing_history() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join(".memory-genome");
+    run_mge(&store, &["init"]);
+    let store_path = store.to_string_lossy().to_string();
+    let responses = run_mcp_json_lines(&[
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "mge_remember",
+            "params": {
+                "store_path": store_path,
+                "content": "Use protocol version one",
+                "kind": "decision",
+                "scope": "project_alpha",
+                "subject": "agent protocol"
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "mge_supersede",
+            "params": {
+                "store_path": store.to_string_lossy(),
+                "superseded_cell_id": 1,
+                "content": "Use protocol version two",
+                "kind": "decision",
+                "scope": "project_alpha",
+                "subject": "agent protocol"
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "mge_recall",
+            "params": {
+                "store_path": store.to_string_lossy(),
+                "mode": "full_scope",
+                "scope": "project_alpha"
+            }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "mge_recall",
+            "params": {
+                "store_path": store.to_string_lossy(),
+                "mode": "full_scope",
+                "scope": "project_alpha",
+                "include_deprecated": true
+            }
+        }),
+    ]);
+
+    assert_eq!(responses[1]["result"]["tool"], "mge_supersede");
+    assert_eq!(responses[1]["result"]["replacement_cell_id"], 2);
+    assert_eq!(responses[1]["result"]["effective_status"], "superseded");
+    assert_eq!(
+        responses[2]["result"]["context_packet"]["relevant_memory"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        responses[3]["result"]["context_packet"]["relevant_memory"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
 fn mcp_server_exposes_stable_schema_and_structured_errors() {
     let responses = run_mcp_json_lines(&[
         json!({
@@ -1035,9 +1189,10 @@ fn mcp_server_exposes_stable_schema_and_structured_errors() {
 
     let schema = &responses[0]["result"];
     assert_eq!(schema["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(schema["integration_schema_version"], 4);
+    assert_eq!(schema["integration_schema_version"], 5);
     for tool in [
         "mge_remember",
+        "mge_supersede",
         "mge_remember_session",
         "mge_recall",
         "mge_seal",
@@ -1309,7 +1464,7 @@ fn mcp_server_default_store_removes_repeated_path_arguments() {
         responses[4]["result"]["server_defaults"]["store_configured"],
         true
     );
-    assert_eq!(responses[4]["result"]["integration_schema_version"], 4);
+    assert_eq!(responses[4]["result"]["integration_schema_version"], 5);
 }
 
 #[test]
@@ -1727,7 +1882,7 @@ fn mcp_agent_session_fixture_runs_as_one_process() {
     assert_eq!(responses.len(), 10);
     assert_eq!(responses[0]["result"]["tool"], "mge_schema");
     assert_eq!(responses[0]["result"]["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(responses[0]["result"]["integration_schema_version"], 4);
+    assert_eq!(responses[0]["result"]["integration_schema_version"], 5);
     assert_eq!(responses[1]["result"]["tool"], "mge_remember");
     assert_eq!(responses[1]["result"]["cell_id"], 1);
     assert_eq!(
@@ -2131,6 +2286,18 @@ fn mcp_contract_golden_outputs_are_stable() {
             "method": "mge_unknown_tool",
             "params": {}
         }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "supersede_success",
+            "method": "mge_supersede",
+            "params": {
+                "store_path": store_path.clone(),
+                "superseded_cell_id": 1,
+                "content": "Agent contract replacement memory",
+                "kind": "procedure",
+                "scope": "contract_scope"
+            }
+        }),
     ]));
 
     assert_golden(
@@ -2164,6 +2331,10 @@ fn mcp_contract_golden_outputs_are_stable() {
     assert_golden(
         "structured_error",
         &normalize_mcp_response_for_golden(&responses[8]),
+    );
+    assert_golden(
+        "supersede_success",
+        &normalize_mcp_response_for_golden(&responses[9]),
     );
 }
 
@@ -2698,6 +2869,7 @@ fn assert_golden(name: &str, actual: &Value) {
 fn golden_fixture(name: &str) -> &'static str {
     match name {
         "remember_success" => include_str!("fixtures/mcp/remember_success.json"),
+        "supersede_success" => include_str!("fixtures/mcp/supersede_success.json"),
         "recall_focused_success" => include_str!("fixtures/mcp/recall_focused_success.json"),
         "recall_broad_success" => include_str!("fixtures/mcp/recall_broad_success.json"),
         "recall_full_scope_success" => include_str!("fixtures/mcp/recall_full_scope_success.json"),
@@ -2747,6 +2919,17 @@ fn normalize_mcp_response_for_golden(response: &Value) -> Value {
                 "scope": result["scope"],
                 "kind": result["kind"],
                 "status": result["status"],
+                "json_runtime_storage": result["json_runtime_storage"]
+            }),
+        ),
+        "mge_supersede" => json_with_result_fields(
+            base,
+            json!({
+                "superseded_cell_id": result["superseded_cell_id"],
+                "replacement_cell_id": result["replacement_cell_id"],
+                "previous_status": result["previous_status"],
+                "effective_status": result["effective_status"],
+                "pages_rewritten": result["pages_rewritten"],
                 "json_runtime_storage": result["json_runtime_storage"]
             }),
         ),

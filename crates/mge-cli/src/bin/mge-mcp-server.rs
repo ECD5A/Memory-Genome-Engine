@@ -30,7 +30,7 @@ use serde_json::{json, Map, Value};
 
 const JSONRPC_VERSION: &str = "2.0";
 const PROTOCOL_VERSION: &str = "mge-jsonrpc-1";
-const INTEGRATION_SCHEMA_VERSION: u32 = 4;
+const INTEGRATION_SCHEMA_VERSION: u32 = 5;
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 
 #[derive(Debug, Parser)]
@@ -112,6 +112,33 @@ struct RememberParams {
     #[serde(default = "default_kind")]
     kind: String,
     #[serde(default = "default_scope")]
+    scope: String,
+    #[serde(default)]
+    markers: Vec<String>,
+    #[serde(default = "default_trust")]
+    trust: String,
+    #[serde(default = "default_sensitivity")]
+    sensitivity: String,
+    #[serde(default = "default_status")]
+    status: String,
+    #[serde(default)]
+    subject: Option<String>,
+    #[serde(default)]
+    source_type: Option<String>,
+    #[serde(default)]
+    source_ref: Option<String>,
+    #[serde(default)]
+    links: Vec<CellId>,
+    #[serde(default)]
+    passphrase_env: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SupersedeParams {
+    store_path: PathBuf,
+    superseded_cell_id: CellId,
+    content: String,
+    kind: String,
     scope: String,
     #[serde(default)]
     markers: Vec<String>,
@@ -303,6 +330,7 @@ fn handle_request(
         "notifications/initialized" | "notifications/cancelled" => Ok(json!({})),
         "mge_schema" => Ok(mge_schema(config)),
         "mge_remember"
+        | "mge_supersede"
         | "mge_remember_session"
         | "mge_recall"
         | "mge_seal"
@@ -385,6 +413,7 @@ fn call_named_tool(
     match name {
         "mge_schema" => Ok(mge_schema(config)),
         "mge_remember" => with_tool(name, mge_remember(params_with_defaults(params, config))),
+        "mge_supersede" => with_tool(name, mge_supersede(params_with_defaults(params, config))),
         "mge_remember_session" => with_tool(
             name,
             mge_remember_session(params_with_defaults(params, config)),
@@ -514,6 +543,37 @@ fn mge_remember(params: Value) -> Result<Value> {
             "scope": cell.scope,
             "kind": cell.kind,
             "status": cell.status,
+            "json_runtime_storage": false
+        }),
+    ))
+}
+
+fn mge_supersede(params: Value) -> Result<Value> {
+    let params: SupersedeParams = parse_params(params)?;
+    let mut engine = open_engine(&params.store_path, params.passphrase_env.as_deref())?;
+    let mut replacement = RememberRequest::new(
+        MemoryKind::from_str(&params.kind)?,
+        MemoryValue::Text(params.content),
+    );
+    replacement.scope = params.scope;
+    replacement.markers = params.markers;
+    replacement.trust = TrustLevel::from_str(&params.trust)?;
+    replacement.sensitivity = SensitivityLevel::from_str(&params.sensitivity)?;
+    replacement.status = MemoryStatus::from_str(&params.status)?;
+    replacement.subject = params.subject;
+    replacement.source = parse_memory_source(params.source_type, params.source_ref)?;
+    replacement.links = params.links;
+
+    let report = engine.supersede(params.superseded_cell_id, replacement)?;
+    Ok(tool_result(
+        "mge_supersede",
+        true,
+        json!({
+            "superseded_cell_id": report.superseded_cell_id,
+            "replacement_cell_id": report.replacement_cell.id,
+            "previous_status": report.previous_status,
+            "effective_status": "superseded",
+            "pages_rewritten": report.pages_rewritten,
             "json_runtime_storage": false
         }),
     ))
@@ -805,6 +865,8 @@ fn is_invalid_enum_value(message: &str) -> bool {
 
 fn tool_schemas(config: &ServerConfig) -> Value {
     let remember_required = required_fields(config, &["content"]);
+    let supersede_required =
+        required_fields(config, &["superseded_cell_id", "content", "kind", "scope"]);
     let session_required = required_fields(config, &["turns"]);
     let store_required = required_fields(config, &[]);
     json!({
@@ -828,6 +890,28 @@ fn tool_schemas(config: &ServerConfig) -> Value {
                 }
             },
             "output": ["ok", "tool", "protocol_version", "integration_schema_version", "cell_id", "scope", "kind", "status", "json_runtime_storage"]
+        },
+        "mge_supersede": {
+            "input": {
+                "required": supersede_required,
+                "properties": {
+                    "store_path": "string path to existing Memory Genome store",
+                    "superseded_cell_id": "existing CellId replaced by the new version",
+                    "content": "replacement memory content",
+                    "kind": "replacement memory kind string",
+                    "scope": "scope matching the superseded cell",
+                    "markers": "array of marker strings",
+                    "trust": "trust level string, default agent_inferred",
+                    "sensitivity": "sensitivity level string, default private",
+                    "status": "active | temporary | unverified | verified; default active",
+                    "subject": "optional subject matching the superseded cell",
+                    "source_type": "optional source type; requires source_ref",
+                    "source_ref": "optional source reference; requires source_type",
+                    "links": "additional linked CellId numbers",
+                    "passphrase_env": "optional environment variable name used to unlock encrypted stores"
+                }
+            },
+            "output": ["ok", "tool", "protocol_version", "integration_schema_version", "superseded_cell_id", "replacement_cell_id", "previous_status", "effective_status", "pages_rewritten", "json_runtime_storage"]
         },
         "mge_remember_session": {
             "input": {
@@ -920,6 +1004,30 @@ fn mcp_tools(config: &ServerConfig) -> Vec<Value> {
                     "trust": { "type": "string", "default": "agent_inferred" },
                     "sensitivity": { "type": "string", "default": "private" },
                     "status": { "type": "string", "default": "active" },
+                    "subject": { "type": "string" },
+                    "source_type": { "type": "string" },
+                    "source_ref": { "type": "string" },
+                    "links": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
+                    "passphrase_env": { "type": "string" }
+                }
+            }),
+        ),
+        mcp_tool(
+            "mge_supersede",
+            "Append a replacement memory version and hide the superseded cell from default recall.",
+            json!({
+                "type": "object",
+                "required": required_fields(config, &["superseded_cell_id", "content", "kind", "scope"]),
+                "properties": {
+                    "store_path": { "type": "string" },
+                    "superseded_cell_id": { "type": "integer", "minimum": 1 },
+                    "content": { "type": "string", "minLength": 1 },
+                    "kind": { "type": "string" },
+                    "scope": { "type": "string", "minLength": 1 },
+                    "markers": { "type": "array", "items": { "type": "string" } },
+                    "trust": { "type": "string", "default": "agent_inferred" },
+                    "sensitivity": { "type": "string", "default": "private" },
+                    "status": { "type": "string", "enum": ["active", "temporary", "unverified", "verified"], "default": "active" },
                     "subject": { "type": "string" },
                     "source_type": { "type": "string" },
                     "source_ref": { "type": "string" },

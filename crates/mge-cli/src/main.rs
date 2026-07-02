@@ -116,6 +116,59 @@ enum Commands {
         #[arg(long)]
         passphrase_env: Option<String>,
     },
+    Supersede {
+        cell_id: CellId,
+
+        text: Option<String>,
+
+        #[arg(long)]
+        kind: String,
+
+        #[arg(long)]
+        subject: Option<String>,
+
+        #[arg(long)]
+        value: Option<String>,
+
+        #[arg(long = "json-value")]
+        json_value: Option<String>,
+
+        #[arg(long = "reference-value")]
+        reference_value: Option<String>,
+
+        #[arg(long = "timestamp-value")]
+        timestamp_value: Option<String>,
+
+        #[arg(long)]
+        scope: String,
+
+        #[arg(long, default_value = "agent_inferred")]
+        trust: String,
+
+        #[arg(long, default_value = "active")]
+        status: String,
+
+        #[arg(long, default_value = "private")]
+        sensitivity: String,
+
+        #[arg(long = "marker")]
+        markers: Vec<String>,
+
+        #[arg(long = "source-type")]
+        source_type: Option<String>,
+
+        #[arg(long = "source-ref")]
+        source_ref: Option<String>,
+
+        #[arg(long = "link")]
+        links: Vec<CellId>,
+
+        #[arg(long)]
+        json: bool,
+
+        #[arg(long)]
+        passphrase_env: Option<String>,
+    },
     RememberSession {
         #[arg(long = "turn", required = true)]
         turns: Vec<String>,
@@ -476,6 +529,49 @@ fn main() -> Result<()> {
 
             let cell = engine.remember(request)?;
             println!("Remembered cell {}", cell.id);
+        }
+        Commands::Supersede {
+            cell_id,
+            text,
+            kind,
+            subject,
+            value,
+            json_value,
+            reference_value,
+            timestamp_value,
+            scope,
+            trust,
+            status,
+            sensitivity,
+            markers,
+            source_type,
+            source_ref,
+            links,
+            json,
+            passphrase_env,
+        } => {
+            let mut engine = open_engine(&cli.store, passphrase_env.as_deref())?;
+            let memory_value =
+                parse_memory_value(text, value, json_value, reference_value, timestamp_value)?;
+            let mut replacement = RememberRequest::new(MemoryKind::from_str(&kind)?, memory_value);
+            replacement.subject = subject;
+            replacement.scope = scope;
+            replacement.trust = TrustLevel::from_str(&trust)?;
+            replacement.status = MemoryStatus::from_str(&status)?;
+            replacement.sensitivity = SensitivityLevel::from_str(&sensitivity)?;
+            replacement.markers = markers;
+            replacement.source = parse_memory_source(source_type, source_ref)?;
+            replacement.links = links;
+
+            let report = engine.supersede(cell_id, replacement)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "Superseded cell {} with cell {} (pages rewritten: {})",
+                    report.superseded_cell_id, report.replacement_cell.id, report.pages_rewritten
+                );
+            }
         }
         Commands::RememberSession {
             turns,

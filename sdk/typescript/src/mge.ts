@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 export const PROTOCOL_VERSION = "mge-jsonrpc-1";
-export const INTEGRATION_SCHEMA_VERSION = 4;
+export const INTEGRATION_SCHEMA_VERSION = 5;
 
 export type RecallMode = "focused" | "broad" | "full_scope" | "full-scope";
 
@@ -39,6 +39,23 @@ export interface RememberOptions {
   sensitivity?: string;
   status?: string;
   subject?: string;
+}
+
+export interface SupersedeOptions {
+  kind: string;
+  scope: string;
+  markers?: string[];
+  trust?: string;
+  sensitivity?: string;
+  status?: string;
+  subject?: string;
+}
+
+export interface SupersessionResult {
+  superseded_cell_id: number;
+  replacement_cell: Record<string, unknown>;
+  previous_status: string;
+  pages_rewritten: boolean;
 }
 
 export interface SessionTurnInput {
@@ -231,6 +248,37 @@ export class MemoryGenomeClient {
       throw new Error(`could not parse remembered cell id from: ${output}`);
     }
     return Number(match[1]);
+  }
+
+  supersede(
+    cellId: number,
+    content: string,
+    options: SupersedeOptions,
+  ): SupersessionResult {
+    const args = [
+      "supersede",
+      String(cellId),
+      content,
+      "--kind",
+      options.kind,
+      "--scope",
+      options.scope,
+      "--trust",
+      options.trust ?? "agent_inferred",
+      "--sensitivity",
+      options.sensitivity ?? "private",
+      "--status",
+      options.status ?? "active",
+      "--json",
+    ];
+    if (options.subject) {
+      args.push("--subject", options.subject);
+    }
+    for (const marker of options.markers ?? []) {
+      args.push("--marker", marker);
+    }
+    args.push(...this.securityArgs());
+    return this.runJson(args);
   }
 
   rememberSession(
