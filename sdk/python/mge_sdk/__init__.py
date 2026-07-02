@@ -264,6 +264,8 @@ class MemoryGenomeClient:
         max_items: int = 5,
         min_score: int | None = None,
         kind: str | None = None,
+        include_deprecated: bool = False,
+        include_secret_references: bool = False,
     ) -> ContextPacket:
         args = ["recall"]
         if query:
@@ -275,6 +277,10 @@ class MemoryGenomeClient:
             args.extend(["--scope", scope])
         if kind is not None:
             args.extend(["--kind", kind])
+        if include_deprecated:
+            args.append("--include-deprecated")
+        if include_secret_references:
+            args.append("--include-secret-references")
         for marker in markers:
             args.extend(["--marker", marker])
         args.extend(self._security_args())

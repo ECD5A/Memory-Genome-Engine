@@ -46,6 +46,11 @@ const result = client.supersede(1, "Use protocol version two", {
   scope: "release",
   subject: "agent protocol",
 });
+const history = client.recall("", {
+  mode: "full_scope",
+  scope: "release",
+  includeDeprecated: true,
+});
 ```
 
 ## Optional Type Check

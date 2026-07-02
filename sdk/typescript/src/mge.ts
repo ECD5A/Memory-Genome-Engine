@@ -89,6 +89,8 @@ export interface RecallOptions {
   maxItems?: number;
   minScore?: number;
   kind?: string;
+  includeDeprecated?: boolean;
+  includeSecretReferences?: boolean;
 }
 
 export interface ContextMemoryItem {
@@ -339,6 +341,12 @@ export class MemoryGenomeClient {
     }
     if (options.kind) {
       args.push("--kind", options.kind);
+    }
+    if (options.includeDeprecated) {
+      args.push("--include-deprecated");
+    }
+    if (options.includeSecretReferences) {
+      args.push("--include-secret-references");
     }
     for (const marker of options.markers ?? []) {
       args.push("--marker", marker);

@@ -61,6 +61,7 @@ result = client.supersede(
     scope="release",
     subject="agent protocol",
 )
+history = client.recall("", mode="full_scope", scope="release", include_deprecated=True)
 ```
 
 ## Editable Install
