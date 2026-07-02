@@ -115,7 +115,7 @@ Contract:
 - JSON-RPC version: `2.0`
 - supported MCP protocol revision: `2025-06-18` (with `2024-11-05` negotiation support)
 - `protocol_version`: `mge-jsonrpc-1`
-- `integration_schema_version`: `5`
+- `integration_schema_version`: `6`
 
 Each input line is one JSON-RPC request:
 
@@ -126,7 +126,7 @@ Each input line is one JSON-RPC request:
 Each output line is one JSON-RPC response:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"ok":true,"tool":"mge_stats","protocol_version":"mge-jsonrpc-1","integration_schema_version":5,"stats":{}}}
+{"jsonrpc":"2.0","id":1,"result":{"ok":true,"tool":"mge_stats","protocol_version":"mge-jsonrpc-1","integration_schema_version":6,"stats":{}}}
 ```
 
 Standard MCP hosts use `initialize`, `notifications/initialized`, `ping`, `tools/list`, and `tools/call`. Notifications do not produce JSON-RPC responses. `tools/call` returns text content plus `structuredContent` and `isError`. Direct `mge_*` methods remain available as a versioned extension for existing hosts and SDK tests.
@@ -188,7 +188,9 @@ The default eight-turn chunk is the quality-first setting. Local strict top-5 Lo
 - replacement `content`, `kind`, and matching `scope`
 - optional `subject`, markers, trust, sensitivity, status, source, links, and `passphrase_env`
 
-The tool appends a replacement and makes the old cell `superseded` for default recall while retaining it for audit recall with `include_deprecated`. It does not infer contradictions automatically. Integration schema version `5` adds this tool without changing `mge-jsonrpc-1`.
+The tool appends a replacement and makes the old cell `superseded` for default recall while retaining it for audit recall with `include_deprecated` until compaction. It does not infer contradictions automatically.
+
+`mge_compact` is dry-run unless `apply: true`. It reports and can physically remove confirmed superseded, deprecated, and rejected cells, rebuild pages/indexes, and delete completed hot-log archives. `archive_path` optionally creates a complete binary pre-prune store snapshot; `temporary_older_than_days` opts temporary memory into age-based deletion. Integration schema version `6` adds compaction without changing `mge-jsonrpc-1`.
 
 `mge_recall` input:
 
@@ -210,6 +212,7 @@ Store tools:
 - `mge_stats`
 - `mge_validate`
 - `mge_rebuild_indexes`
+- `mge_compact`
 - `mge_export_markdown`
 
 All store tools accept an optional `store_path` override when the server was started with `--store`; otherwise it is required. Encrypted stores similarly accept a per-call `passphrase_env` override. `mge_validate` accepts `deep`; `mge_export_markdown` accepts optional `output_path`.
@@ -221,7 +224,7 @@ There is no `mge_init` MCP tool in the current contract. This keeps the adapter 
 Errors are stable for SDKs:
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params: missing field `content`","tool_name":"mge_remember","recoverable":true,"protocol_version":"mge-jsonrpc-1","integration_schema_version":5,"details":{"error_kind":"invalid_params"}}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params: missing field `content`","tool_name":"mge_remember","recoverable":true,"protocol_version":"mge-jsonrpc-1","integration_schema_version":6,"details":{"error_kind":"invalid_params"}}}
 ```
 
 Important `details.error_kind` values:

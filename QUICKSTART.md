@@ -221,7 +221,28 @@ cargo run -p mge-cli -- supersede 1 "Use protocol version two" \
   --kind decision --scope my_project --subject "agent protocol" --json
 ```
 
-The replacement is appended as a new `MemoryCell`, links to cell `1`, and marks cell `1` as effectively `superseded`. Default recall returns only the replacement; `--include-deprecated` includes historical versions. Scope must match. MGE does not guess semantic contradictions automatically.
+The replacement is appended as a new `MemoryCell`, links to cell `1`, and marks cell `1` as effectively `superseded`. Default recall returns only the replacement; `--include-deprecated` includes historical versions until physical compaction. Scope must match. MGE does not guess semantic contradictions automatically.
+
+Analyze reclaimable memory without changing the store:
+
+```bash
+cargo run -p mge-cli -- compact --json
+```
+
+After reviewing the report, permanently prune confirmed superseded, deprecated, and rejected cells:
+
+```bash
+cargo run -p mge-cli -- compact --apply
+```
+
+Compaction seals pending hot cells, rebuilds pages/indexes with the current cells, validates the result, and removes completed `hot/archive/*.mgl` files. It keeps untyped superseded cells when no valid replacement exists. Optional safety snapshot and temporary-memory TTL:
+
+```bash
+cargo run -p mge-cli -- compact --apply --archive ../mge-before-compact
+cargo run -p mge-cli -- compact --apply --temporary-older-than-days 30
+```
+
+The archive is a complete binary store snapshot, not an automatic permanent history. It stays encrypted when the source store is encrypted. Without `--archive`, only temporary transaction rollback files exist and are deleted after successful deep validation.
 
 `mge doctor` is read-only by default. Use `--deep` only when you explicitly want validation work:
 

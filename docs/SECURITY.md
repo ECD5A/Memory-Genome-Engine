@@ -107,6 +107,7 @@ Plaintext metadata risks:
 - file, project, and scope markers can reveal project structure;
 - kind/status/sensitivity/trust summaries can leak categories such as decisions, task states, rejected/deprecated memory, or secret-reference presence;
 - supersession relationships reveal that one memory version replaced another, although cell payloads remain encrypted;
+- compaction counters reveal how many obsolete cells/pages were removed;
 - index size, page count, page sizes, and encoded sizes leak rough memory volume and growth patterns;
 - access pattern, timing, and repeated recall locality are not hidden by at-rest encryption;
 - Markdown export is intentionally human-readable and should be treated as plaintext disclosure.
@@ -119,6 +120,12 @@ Why this remains plaintext now:
 - performance would regress sharply if encrypted stores had to decode every page for every query;
 - existing stores and tools rely on the current dictionary/index/catalog boundaries;
 - changing metadata privacy correctly requires a deliberate index design, not a hidden storage tweak.
+
+## Compaction And Deletion
+
+Compaction permanently removes eligible payloads from the active store after rebuilding and validating replacement pages. It also deletes completed hot-log archives. This reduces normal filesystem exposure but is not a secure-erasure guarantee for SSD wear leveling, filesystem snapshots, cloud-synced folders, or external backups.
+
+`mge compact` is a dry run. `mge compact --apply` performs deletion. `--archive <path>` explicitly creates a complete pre-prune binary store snapshot; encrypted source payloads remain encrypted, while an archive of an unencrypted store remains unencrypted. Archive paths must be outside the active store. MGE does not create a permanent history archive by default.
 
 ### Metadata Privacy Design Options
 

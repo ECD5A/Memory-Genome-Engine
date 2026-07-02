@@ -53,6 +53,17 @@ const history = client.recall("", {
 });
 ```
 
+Physical cleanup is explicit and dry-run by default:
+
+```typescript
+const plan = client.compact();
+if (plan.cells_pruned > 0) {
+  client.compact({ apply: true });
+}
+```
+
+Use `archivePath` for a complete binary pre-prune snapshot or `temporaryOlderThanDays` to opt temporary memory into TTL cleanup.
+
 ## Optional Type Check
 
 If `tsc` is available locally:

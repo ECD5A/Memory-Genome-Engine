@@ -149,6 +149,7 @@ They check:
 - `mge setup --help`;
 - unencrypted CLI workflow on a temporary store;
 - encrypted workflow through `MGE_RELEASE_SMOKE_PASSPHRASE`;
+- supersession plus dry-run/applied compaction for unencrypted and encrypted stores;
 - MCP JSON-RPC schema and `mge_stats`;
 - Python SDK example when `python` is available;
 - TypeScript SDK example when `node` can run it;
@@ -412,7 +413,7 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 
 `.github/workflows/release.yml` runs only for `v*` tags. It verifies format, workspace and eval tests, strict clippy, rustdoc, and Rust 1.95 compatibility with the locked dependency graph. It then builds checksummed product archives for Windows x86-64, Linux x86-64, macOS Apple Silicon, and macOS Intel, uploads them as workflow artifacts, and creates or updates a **draft** GitHub Release with one combined `SHA256SUMS`. The workflow includes only `mge` and `mge-mcp-server`; SDK packages and development benchmark binaries are not published. A maintainer must review checksums, notes, and every platform result before publishing the draft.
 
-Rust crates, the development eval harness, and both repository-local SDK manifests use version `0.1.3`. Integration schema version `5` is independent from package versioning and adds explicit memory supersession.
+Rust crates, the development eval harness, and both repository-local SDK manifests use version `0.1.3`. Integration schema version `6` is independent from package versioning and adds physical compaction after explicit memory supersession.
 
 ## Package Publishing Plan
 
@@ -430,9 +431,11 @@ Current recommendation: GitHub release assets are enough for the public preview.
 
 ## GitHub v0.1.3 Release
 
-Create `v0.1.3` from a clean `main` commit after the checklist above passes. This additive release introduces explicit append-and-supersede versioning across the Rust core, CLI, MCP adapter, and thin SDKs. It preserves binary page formats, the hot-to-sealed lifecycle, default recall modes, and compatibility with existing manifests.
+Create `v0.1.3` from a clean `main` commit after the checklist above passes. This additive release introduces explicit append-and-supersede versioning and crash-safe physical compaction across the Rust core, CLI, TUI, MCP adapter, and thin SDKs. It preserves binary page formats, the hot-to-sealed lifecycle, default recall modes, and compatibility with existing manifests.
 
-The release does not infer semantic contradictions automatically. The caller chooses when a durable memory should be superseded; MGE records the typed old-to-new relation, excludes the old version from default recall, and retains both versions for audit recall. Pending supersession intents are reconciled after interruption.
+The release does not infer semantic contradictions automatically. The caller chooses when a durable memory should be superseded; MGE records the typed old-to-new relation and excludes the old version from default recall. History remains available to audit recall until `mge compact --apply` physically removes confirmed obsolete payloads. Compaction is dry-run by default, supports an explicit pre-prune binary archive, deletes completed hot-log archives, and reconciles interrupted page swaps on writable reopen.
+
+Local release-mode verification used 50 large obsolete decisions plus 50 compact replacements. Applied compaction reduced that temporary store from 385,732 to 6,956 bytes (`-98.2%`), cells from 100 to 50, and pages from 3 to 1 in 62 ms; all 50 current cells remained recallable and deep validation passed. This deliberately garbage-heavy fixture demonstrates cleanup behavior, not a universal storage ratio. A separate three-pair synthetic A/B against the earlier `v0.1.3` tag kept normal Exact recall measurements within `-3.7%` to `+3.0%` run variance.
 
 Recommended assets:
 

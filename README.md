@@ -66,8 +66,12 @@ mge remember "User prefers concise technical answers" --kind user_preference --s
 mge supersede 1 "User now prefers detailed answers" --kind user_preference --scope global
 mge recall "How should the agent answer technical questions?"
 mge seal
+mge compact                 # dry-run only
+mge compact --apply         # physically prune confirmed obsolete memory
 mge validate --deep
 ```
+
+`supersede` fixes the active version seen by recall. `compact` later removes confirmed superseded, deprecated, and rejected payloads plus completed hot-log archives. Temporary memory is retained unless an explicit age threshold is supplied.
 
 `mge setup codex`, `mge setup claude-code`, and `mge setup cursor` register the local `mge-mcp-server` for those hosts. `mge setup generic-mcp` prints a portable stdio configuration for other tools.
 

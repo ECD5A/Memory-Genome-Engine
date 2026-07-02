@@ -64,6 +64,16 @@ result = client.supersede(
 history = client.recall("", mode="full_scope", scope="release", include_deprecated=True)
 ```
 
+Physical cleanup is explicit and dry-run by default:
+
+```python
+plan = client.compact()
+if plan["cells_pruned"] > 0:
+    result = client.compact(apply=True)
+```
+
+Use `archive_path=...` for a complete binary pre-prune snapshot or `temporary_older_than_days=30` to opt temporary memory into TTL cleanup.
+
 ## Editable Install
 
 No package has been published. For local development only:
