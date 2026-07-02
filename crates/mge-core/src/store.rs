@@ -198,6 +198,20 @@ pub struct Manifest {
     pub superseded_by: BTreeMap<CellId, CellId>,
     #[serde(default)]
     pub pending_supersessions: BTreeMap<CellId, CellId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_compaction: Option<CompactionTransaction>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CompactionTransaction {
+    original_catalog: PageCatalog,
+    original_next_page_id: PageId,
+    original_status_overrides: BTreeMap<CellId, MemoryStatus>,
+    original_superseded_by: BTreeMap<CellId, CellId>,
+    old_page_files: Vec<String>,
+    new_page_files: Vec<String>,
+    pruned_cell_ids: Vec<CellId>,
+    committed_next_page_id: PageId,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -252,6 +266,73 @@ pub struct SupersessionReport {
     pub replacement_cell: MemoryCell,
     pub previous_status: MemoryStatus,
     pub pages_rewritten: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CompactionOptions {
+    pub apply: bool,
+    pub archive_path: Option<PathBuf>,
+    pub temporary_older_than_days: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CompactionReport {
+    pub applied: bool,
+    pub cells_scanned: usize,
+    pub cells_pruned: usize,
+    pub superseded_pruned: usize,
+    pub deprecated_pruned: usize,
+    pub rejected_pruned: usize,
+    pub temporary_pruned: usize,
+    pub blocked_superseded: usize,
+    pub pages_before: usize,
+    pub pages_after: usize,
+    pub pages_rewritten: usize,
+    pub links_rewritten: usize,
+    pub marker_entries_prunable: usize,
+    pub marker_entries_pruned: usize,
+    pub hot_cells_sealed: usize,
+    pub hot_archives_pending: usize,
+    pub hot_archive_bytes: u64,
+    pub hot_archives_removed: usize,
+    pub bytes_before: u64,
+    pub bytes_after: u64,
+    pub bytes_reclaimed: u64,
+    pub estimated_prunable_cell_bytes: u64,
+    pub archive_path: Option<PathBuf>,
+}
+
+impl CompactionReport {
+    pub fn to_human_text(&self) -> String {
+        format!(
+            "compaction applied: {}\ncells scanned: {}\ncells pruned: {}\nsuperseded pruned: {}\ndeprecated pruned: {}\nrejected pruned: {}\ntemporary pruned: {}\nblocked superseded: {}\npages before: {}\npages after: {}\npages rewritten: {}\nlinks rewritten: {}\nmarker entries prunable: {}\nmarker entries pruned: {}\nhot cells sealed: {}\nhot archives pending: {}\nhot archive bytes: {}\nhot archives removed: {}\nbytes before: {}\nbytes after: {}\nbytes reclaimed: {}\nestimated prunable cell bytes: {}\narchive path: {}\n",
+            self.applied,
+            self.cells_scanned,
+            self.cells_pruned,
+            self.superseded_pruned,
+            self.deprecated_pruned,
+            self.rejected_pruned,
+            self.temporary_pruned,
+            self.blocked_superseded,
+            self.pages_before,
+            self.pages_after,
+            self.pages_rewritten,
+            self.links_rewritten,
+            self.marker_entries_prunable,
+            self.marker_entries_pruned,
+            self.hot_cells_sealed,
+            self.hot_archives_pending,
+            self.hot_archive_bytes,
+            self.hot_archives_removed,
+            self.bytes_before,
+            self.bytes_after,
+            self.bytes_reclaimed,
+            self.estimated_prunable_cell_bytes,
+            self.archive_path
+                .as_ref()
+                .map_or_else(|| "none".to_string(), |path| path.display().to_string())
+        )
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -590,6 +671,24 @@ struct RebuildPageRead {
     entry: PageCatalogEntry,
 }
 
+#[derive(Debug)]
+struct CompactionPlan {
+    cells_scanned: usize,
+    kept_cells: Vec<MemoryCell>,
+    pruned_cell_ids: BTreeSet<CellId>,
+    superseded_pruned: usize,
+    deprecated_pruned: usize,
+    rejected_pruned: usize,
+    temporary_pruned: usize,
+    blocked_superseded: usize,
+    pages_before: usize,
+    links_rewritten: usize,
+    estimated_prunable_cell_bytes: u64,
+    hot_archives_pending: usize,
+    hot_archive_bytes: u64,
+    marker_entries_prunable: usize,
+}
+
 #[derive(Clone, Debug)]
 struct RankedCellHandle {
     source: RankedCellSource,
@@ -744,6 +843,7 @@ impl MemoryEngine {
                 status_overrides: BTreeMap::new(),
                 superseded_by: BTreeMap::new(),
                 pending_supersessions: BTreeMap::new(),
+                pending_compaction: None,
             };
             binary::write_messagepack_file(&manifest_path, FileKind::Manifest, &manifest)?;
         }
@@ -888,6 +988,10 @@ impl MemoryEngine {
             session_key,
         };
         engine.reconcile_pending_supersessions(truncate_bad_hot_tail)?;
+        engine.reconcile_pending_compaction(truncate_bad_hot_tail)?;
+        if truncate_bad_hot_tail {
+            engine.cleanup_stale_compaction_backups()?;
+        }
         Ok(engine)
     }
 
@@ -1170,6 +1274,301 @@ impl MemoryEngine {
 
     pub fn superseded_by(&self, cell_id: CellId) -> Option<CellId> {
         self.manifest.superseded_by.get(&cell_id).copied()
+    }
+
+    pub fn compact(&mut self, options: CompactionOptions) -> Result<CompactionReport> {
+        self.ensure_payload_unlocked()?;
+        if self.manifest.pending_compaction.is_some() {
+            return Err(MgeError::StorageFormat(
+                "store contains an unreconciled compaction transaction; reopen it before compacting"
+                    .to_string(),
+            ));
+        }
+
+        let bytes_before = store_size_bytes(&self.root)?;
+        let mut plan = self.build_compaction_plan(options.temporary_older_than_days)?;
+        let estimated_pages_after = build_pages_with_kind(
+            &plan.kept_cells,
+            1,
+            self.manifest.page_clusterer,
+            PageBuildOptions::default(),
+        )
+        .len();
+        if !options.apply {
+            return Ok(compaction_report_from_plan(
+                &plan,
+                false,
+                estimated_pages_after,
+                0,
+                0,
+                bytes_before,
+                bytes_before,
+                options.archive_path,
+            ));
+        }
+
+        let seal_report = self.seal()?;
+        let validation = self.validate_deep()?;
+        if !validation.ok {
+            return Err(MgeError::StorageFormat(format!(
+                "refusing to compact an invalid store: {}",
+                validation.errors.join("; ")
+            )));
+        }
+        plan = self.build_compaction_plan(options.temporary_older_than_days)?;
+
+        let archive_path = match options.archive_path {
+            Some(path) => {
+                self.create_compaction_archive(&path)?;
+                Some(path)
+            }
+            None => None,
+        };
+
+        let pages_after = if plan.pruned_cell_ids.is_empty() {
+            plan.pages_before
+        } else {
+            self.execute_compaction(&plan)?
+        };
+        self.prune_unused_markers()?;
+        let hot_archives_removed = self.remove_completed_hot_archives()?;
+        let bytes_after = store_size_bytes(&self.root)?;
+
+        Ok(compaction_report_from_plan(
+            &plan,
+            true,
+            pages_after,
+            seal_report.hot_cells_sealed,
+            hot_archives_removed,
+            bytes_before,
+            bytes_after,
+            archive_path,
+        ))
+    }
+
+    fn build_compaction_plan(
+        &self,
+        temporary_older_than_days: Option<u64>,
+    ) -> Result<CompactionPlan> {
+        let pages = self.load_all_pages()?;
+        let mut cells = self.hot.all_cells();
+        cells.extend(pages.iter().flat_map(|page| page.cells.iter().cloned()));
+        let all_cell_ids = cells.iter().map(|cell| cell.id).collect::<BTreeSet<_>>();
+        let temporary_cutoff = temporary_older_than_days.map(|days| {
+            let seconds = days.saturating_mul(24 * 60 * 60);
+            current_timestamp().saturating_sub(i64::try_from(seconds).unwrap_or(i64::MAX))
+        });
+
+        let mut pruned_cell_ids = BTreeSet::new();
+        let mut superseded_pruned = 0;
+        let mut deprecated_pruned = 0;
+        let mut rejected_pruned = 0;
+        let mut temporary_pruned = 0;
+        let mut blocked_superseded = 0;
+        let mut estimated_prunable_cell_bytes = 0_u64;
+
+        for cell in &cells {
+            let effective_status = self.effective_status(cell);
+            let prune = match effective_status {
+                MemoryStatus::Superseded => {
+                    let valid_replacement = self
+                        .manifest
+                        .superseded_by
+                        .get(&cell.id)
+                        .is_some_and(|replacement| all_cell_ids.contains(replacement));
+                    if valid_replacement {
+                        superseded_pruned += 1;
+                    } else {
+                        blocked_superseded += 1;
+                    }
+                    valid_replacement
+                }
+                MemoryStatus::Deprecated => {
+                    deprecated_pruned += 1;
+                    true
+                }
+                MemoryStatus::Rejected => {
+                    rejected_pruned += 1;
+                    true
+                }
+                MemoryStatus::Temporary => temporary_cutoff.is_some_and(|cutoff| {
+                    let expired = cell.updated_at <= cutoff;
+                    if expired {
+                        temporary_pruned += 1;
+                    }
+                    expired
+                }),
+                _ => false,
+            };
+            if prune {
+                pruned_cell_ids.insert(cell.id);
+                let encoded_len = rmp_serde::to_vec_named(cell)?.len();
+                estimated_prunable_cell_bytes = estimated_prunable_cell_bytes
+                    .saturating_add(u64::try_from(encoded_len).unwrap_or(u64::MAX));
+            }
+        }
+
+        let mut links_rewritten = 0;
+        let mut kept_cells = Vec::with_capacity(cells.len().saturating_sub(pruned_cell_ids.len()));
+        for mut cell in cells {
+            if pruned_cell_ids.contains(&cell.id) {
+                continue;
+            }
+            let original_links = cell.links.clone();
+            let mut links = Vec::with_capacity(original_links.len());
+            for link in original_links.iter().copied() {
+                if let Some(resolved) = resolve_compacted_link(
+                    link,
+                    cell.id,
+                    &pruned_cell_ids,
+                    &self.manifest.superseded_by,
+                ) {
+                    if !links.contains(&resolved) {
+                        links.push(resolved);
+                    }
+                }
+            }
+            if links != original_links {
+                links_rewritten += 1;
+                cell.links = links;
+            }
+            kept_cells.push(cell);
+        }
+
+        let (hot_archives_pending, hot_archive_bytes) = self.completed_hot_archive_stats()?;
+        let mut retained_marker_ids = BTreeSet::new();
+        for cell in &kept_cells {
+            cell.for_each_marker_id_for_indexing(|marker_id| {
+                retained_marker_ids.insert(marker_id);
+            });
+        }
+        let retained_dictionary_entries = self
+            .dictionary
+            .debug_view()
+            .iter()
+            .filter(|entry| retained_marker_ids.contains(&entry.id))
+            .count();
+        let marker_entries_prunable = self
+            .dictionary
+            .len()
+            .saturating_sub(retained_dictionary_entries);
+        Ok(CompactionPlan {
+            cells_scanned: kept_cells.len().saturating_add(pruned_cell_ids.len()),
+            kept_cells,
+            pruned_cell_ids,
+            superseded_pruned,
+            deprecated_pruned,
+            rejected_pruned,
+            temporary_pruned,
+            blocked_superseded,
+            pages_before: pages.len(),
+            links_rewritten,
+            estimated_prunable_cell_bytes,
+            hot_archives_pending,
+            hot_archive_bytes,
+            marker_entries_prunable,
+        })
+    }
+
+    fn execute_compaction(&mut self, plan: &CompactionPlan) -> Result<usize> {
+        let original_catalog = self.load_page_catalog()?;
+        let mut new_pages = build_pages_with_kind(
+            &plan.kept_cells,
+            self.manifest.next_page_id,
+            self.manifest.page_clusterer,
+            PageBuildOptions::default(),
+        );
+        for page in &mut new_pages {
+            attach_page_checksum(page)?;
+        }
+        let committed_next_page_id = new_pages
+            .iter()
+            .map(|page| page.page_id.saturating_add(1))
+            .max()
+            .unwrap_or(self.manifest.next_page_id)
+            .max(self.manifest.next_page_id);
+        let transaction = CompactionTransaction {
+            original_catalog: original_catalog.clone(),
+            original_next_page_id: self.manifest.next_page_id,
+            original_status_overrides: self.manifest.status_overrides.clone(),
+            original_superseded_by: self.manifest.superseded_by.clone(),
+            old_page_files: original_catalog
+                .pages
+                .iter()
+                .map(|entry| entry.file.clone())
+                .collect(),
+            new_page_files: new_pages
+                .iter()
+                .map(|page| page_file_name(page.page_id))
+                .collect(),
+            pruned_cell_ids: plan.pruned_cell_ids.iter().copied().collect(),
+            committed_next_page_id,
+        };
+
+        for file in &transaction.new_page_files {
+            if self.pages_dir().join(file).exists() {
+                return Err(MgeError::StorageFormat(format!(
+                    "refusing to overwrite compaction file {file}"
+                )));
+            }
+        }
+        for file in &transaction.old_page_files {
+            let backup = compaction_backup_file(file);
+            if self.pages_dir().join(&backup).exists() {
+                return Err(MgeError::StorageFormat(format!(
+                    "refusing to overwrite compaction backup {backup}"
+                )));
+            }
+        }
+
+        self.manifest.pending_compaction = Some(transaction.clone());
+        self.manifest.updated_at = current_timestamp();
+        self.save_manifest()?;
+
+        let operation = (|| -> Result<()> {
+            let mut new_catalog = PageCatalog {
+                index_kind: self.manifest.index_kind,
+                pages: Vec::with_capacity(new_pages.len()),
+            };
+            for page in &new_pages {
+                let encoded_size_bytes = self.write_page(page)?;
+                new_catalog
+                    .pages
+                    .push(self.page_catalog_entry_for_page(page, encoded_size_bytes)?);
+            }
+            self.save_page_catalog(&new_catalog)?;
+            self.rebuild_candidate_indexes_for_pages(&new_pages)?;
+            self.rebuild_lexical_stats_for_pages(&new_pages)?;
+            self.apply_compaction_manifest(&transaction);
+            self.save_manifest()?;
+
+            self.move_old_pages_to_compaction_backup(&transaction)?;
+            self.clear_runtime_page_caches();
+            let validation = self.validate_deep()?;
+            if !validation.ok {
+                return Err(MgeError::StorageFormat(format!(
+                    "compacted store failed deep validation: {}",
+                    validation.errors.join("; ")
+                )));
+            }
+            self.manifest.pending_compaction = None;
+            self.manifest.updated_at = current_timestamp();
+            self.save_manifest()?;
+            Ok(())
+        })();
+
+        if let Err(error) = operation {
+            if let Err(rollback_error) = self.rollback_compaction(&transaction) {
+                return Err(MgeError::StorageFormat(format!(
+                    "compaction failed: {error}; rollback failed: {rollback_error}"
+                )));
+            }
+            return Err(error);
+        }
+
+        self.delete_compaction_backups(&transaction)?;
+
+        Ok(new_pages.len())
     }
 
     pub fn remember_session(
@@ -2478,6 +2877,281 @@ impl MemoryEngine {
         Ok(())
     }
 
+    fn reconcile_pending_compaction(&mut self, persist: bool) -> Result<()> {
+        let Some(transaction) = self.manifest.pending_compaction.clone() else {
+            return Ok(());
+        };
+        if !persist {
+            return Err(MgeError::StorageFormat(
+                "store requires writable recovery of an interrupted compaction".to_string(),
+            ));
+        }
+
+        let catalog = self.load_page_catalog()?;
+        let catalog_files = catalog
+            .pages
+            .iter()
+            .map(|entry| entry.file.as_str())
+            .collect::<BTreeSet<_>>();
+        let committed = transaction
+            .new_page_files
+            .iter()
+            .all(|file| catalog_files.contains(file.as_str()))
+            && catalog.pages.len() == transaction.new_page_files.len();
+
+        if !committed {
+            return self.rollback_compaction(&transaction);
+        }
+
+        let operation = (|| -> Result<()> {
+            self.apply_compaction_manifest(&transaction);
+            self.move_old_pages_to_compaction_backup(&transaction)?;
+            self.clear_runtime_page_caches();
+            let pages = self.load_all_pages()?;
+            self.rebuild_candidate_indexes_for_pages(&pages)?;
+            self.rebuild_lexical_stats_for_pages(&pages)?;
+            self.save_manifest()?;
+            let validation = self.validate_deep()?;
+            if !validation.ok {
+                return Err(MgeError::StorageFormat(format!(
+                    "interrupted compacted store failed deep validation: {}",
+                    validation.errors.join("; ")
+                )));
+            }
+            self.manifest.pending_compaction = None;
+            self.manifest.updated_at = current_timestamp();
+            self.save_manifest()?;
+            Ok(())
+        })();
+
+        if let Err(error) = operation {
+            if let Err(rollback_error) = self.rollback_compaction(&transaction) {
+                return Err(MgeError::StorageFormat(format!(
+                    "compaction recovery failed: {error}; rollback failed: {rollback_error}"
+                )));
+            }
+            return Err(error);
+        }
+        self.delete_compaction_backups(&transaction)?;
+        Ok(())
+    }
+
+    fn apply_compaction_manifest(&mut self, transaction: &CompactionTransaction) {
+        let pruned = transaction
+            .pruned_cell_ids
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        self.manifest
+            .status_overrides
+            .retain(|cell_id, _| !pruned.contains(cell_id));
+        self.manifest
+            .superseded_by
+            .retain(|old, replacement| !pruned.contains(old) && !pruned.contains(replacement));
+        self.manifest.next_page_id = transaction.committed_next_page_id;
+        self.manifest.updated_at = current_timestamp();
+    }
+
+    fn move_old_pages_to_compaction_backup(
+        &self,
+        transaction: &CompactionTransaction,
+    ) -> Result<()> {
+        for file in &transaction.old_page_files {
+            let original = self.pages_dir().join(file);
+            let backup = self.pages_dir().join(compaction_backup_file(file));
+            if backup.exists() {
+                continue;
+            }
+            if original.exists() {
+                fs::rename(&original, &backup)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn restore_compaction_backups(&self, transaction: &CompactionTransaction) -> Result<()> {
+        for file in &transaction.old_page_files {
+            let original = self.pages_dir().join(file);
+            let backup = self.pages_dir().join(compaction_backup_file(file));
+            if backup.exists() {
+                if original.exists() {
+                    return Err(MgeError::StorageFormat(format!(
+                        "both original and compaction backup exist for {file}"
+                    )));
+                }
+                fs::rename(&backup, &original)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn delete_compaction_backups(&self, transaction: &CompactionTransaction) -> Result<()> {
+        for file in &transaction.old_page_files {
+            let backup = self.pages_dir().join(compaction_backup_file(file));
+            if backup.exists() {
+                fs::remove_file(backup)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn cleanup_stale_compaction_backups(&self) -> Result<()> {
+        if self.manifest.pending_compaction.is_some() || !self.pages_dir().exists() {
+            return Ok(());
+        }
+        for entry in fs::read_dir(self.pages_dir())? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".mgp.compact-backup")
+            {
+                fs::remove_file(entry.path())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn rollback_compaction(&mut self, transaction: &CompactionTransaction) -> Result<()> {
+        self.restore_compaction_backups(transaction)?;
+        self.manifest.status_overrides = transaction.original_status_overrides.clone();
+        self.manifest.superseded_by = transaction.original_superseded_by.clone();
+        self.manifest.next_page_id = transaction.original_next_page_id;
+        self.save_page_catalog(&transaction.original_catalog)?;
+        self.clear_runtime_page_caches();
+        let original_pages = self.load_all_pages()?;
+        self.rebuild_candidate_indexes_for_pages(&original_pages)?;
+        self.rebuild_lexical_stats_for_pages(&original_pages)?;
+        for file in &transaction.new_page_files {
+            let path = self.pages_dir().join(file);
+            if path.exists() {
+                fs::remove_file(path)?;
+            }
+        }
+        self.manifest.pending_compaction = None;
+        self.manifest.updated_at = current_timestamp();
+        self.save_manifest()?;
+        Ok(())
+    }
+
+    fn clear_runtime_page_caches(&self) {
+        *self.page_cache.borrow_mut() = DecodedPageCache::new(DECODED_PAGE_CACHE_CAPACITY);
+        self.page_catalog_cache.borrow_mut().take();
+        self.candidate_index_cache.borrow_mut().take();
+        self.lexical_stats_cache.borrow_mut().take();
+    }
+
+    fn create_compaction_archive(&self, destination: &Path) -> Result<()> {
+        let root = fs::canonicalize(&self.root)?;
+        if destination.exists() {
+            return Err(MgeError::InvalidInput(format!(
+                "compaction archive destination already exists: {}",
+                destination.display()
+            )));
+        }
+        let file_name = destination.file_name().ok_or_else(|| {
+            MgeError::InvalidInput("compaction archive path must name a directory".to_string())
+        })?;
+        let parent = destination
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent)?;
+        let parent = fs::canonicalize(parent)?;
+        let destination = parent.join(file_name);
+        if destination.starts_with(&root) {
+            return Err(MgeError::InvalidInput(
+                "compaction archive must be outside the store root".to_string(),
+            ));
+        }
+
+        let partial = parent.join(format!(
+            ".{}.partial-{}-{}",
+            file_name.to_string_lossy(),
+            std::process::id(),
+            current_timestamp()
+        ));
+        if partial.exists() {
+            return Err(MgeError::InvalidInput(format!(
+                "compaction archive staging path already exists: {}",
+                partial.display()
+            )));
+        }
+        fs::create_dir(&partial)?;
+        let result = (|| -> Result<()> {
+            fs::copy(root.join(MANIFEST_FILE), partial.join(MANIFEST_FILE))?;
+            for directory in ["dictionary", "hot", "pages", "indexes"] {
+                copy_directory_tree(&root.join(directory), &partial.join(directory))?;
+            }
+            fs::rename(&partial, &destination)?;
+            Ok(())
+        })();
+        if result.is_err() && partial.exists() {
+            let _ = fs::remove_dir_all(&partial);
+        }
+        result
+    }
+
+    fn remove_completed_hot_archives(&self) -> Result<usize> {
+        let archive_dir = self.root.join("hot").join("archive");
+        if !archive_dir.exists() {
+            return Ok(0);
+        }
+        let mut removed = 0;
+        for entry in fs::read_dir(&archive_dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                fs::remove_file(entry.path())?;
+                removed += 1;
+            }
+        }
+        if fs::read_dir(&archive_dir)?.next().is_none() {
+            fs::remove_dir(&archive_dir)?;
+        }
+        Ok(removed)
+    }
+
+    fn completed_hot_archive_stats(&self) -> Result<(usize, u64)> {
+        let archive_dir = self.root.join("hot").join("archive");
+        if !archive_dir.exists() {
+            return Ok((0, 0));
+        }
+        let mut files = 0;
+        let mut bytes = 0_u64;
+        for entry in fs::read_dir(archive_dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                files += 1;
+                bytes = bytes.saturating_add(entry.metadata()?.len());
+            }
+        }
+        Ok((files, bytes))
+    }
+
+    fn prune_unused_markers(&mut self) -> Result<usize> {
+        let mut retained = BTreeSet::new();
+        for cell in self.hot.all_cells() {
+            cell.for_each_marker_id_for_indexing(|marker_id| {
+                retained.insert(marker_id);
+            });
+        }
+        for page in self.load_all_pages()? {
+            for cell in page.cells {
+                cell.for_each_marker_id_for_indexing(|marker_id| {
+                    retained.insert(marker_id);
+                });
+            }
+        }
+        let removed = self.dictionary.retain_marker_ids(&retained);
+        if removed > 0 {
+            self.dictionary.save_to_path(self.markers_path())?;
+        }
+        Ok(removed)
+    }
+
     fn effective_status(&self, cell: &MemoryCell) -> MemoryStatus {
         self.manifest
             .status_overrides
@@ -3472,6 +4146,94 @@ impl MemoryEngine {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn compaction_report_from_plan(
+    plan: &CompactionPlan,
+    applied: bool,
+    pages_after: usize,
+    hot_cells_sealed: usize,
+    hot_archives_removed: usize,
+    bytes_before: u64,
+    bytes_after: u64,
+    archive_path: Option<PathBuf>,
+) -> CompactionReport {
+    CompactionReport {
+        applied,
+        cells_scanned: plan.cells_scanned,
+        cells_pruned: plan.pruned_cell_ids.len(),
+        superseded_pruned: plan.superseded_pruned,
+        deprecated_pruned: plan.deprecated_pruned,
+        rejected_pruned: plan.rejected_pruned,
+        temporary_pruned: plan.temporary_pruned,
+        blocked_superseded: plan.blocked_superseded,
+        pages_before: plan.pages_before,
+        pages_after,
+        pages_rewritten: if applied && !plan.pruned_cell_ids.is_empty() {
+            plan.pages_before
+        } else {
+            0
+        },
+        links_rewritten: plan.links_rewritten,
+        marker_entries_prunable: plan.marker_entries_prunable,
+        marker_entries_pruned: if applied {
+            plan.marker_entries_prunable
+        } else {
+            0
+        },
+        hot_cells_sealed,
+        hot_archives_pending: plan.hot_archives_pending,
+        hot_archive_bytes: plan.hot_archive_bytes,
+        hot_archives_removed,
+        bytes_before,
+        bytes_after,
+        bytes_reclaimed: bytes_before.saturating_sub(bytes_after),
+        estimated_prunable_cell_bytes: plan.estimated_prunable_cell_bytes,
+        archive_path,
+    }
+}
+
+fn resolve_compacted_link(
+    mut link: CellId,
+    owner: CellId,
+    pruned: &BTreeSet<CellId>,
+    superseded_by: &BTreeMap<CellId, CellId>,
+) -> Option<CellId> {
+    let mut visited = BTreeSet::new();
+    while pruned.contains(&link) {
+        if !visited.insert(link) {
+            return None;
+        }
+        let replacement = superseded_by.get(&link).copied()?;
+        link = replacement;
+    }
+    (link != owner).then_some(link)
+}
+
+fn compaction_backup_file(file: &str) -> String {
+    format!("{file}.compact-backup")
+}
+
+fn copy_directory_tree(source: &Path, destination: &Path) -> Result<()> {
+    fs::create_dir_all(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let target = destination.join(entry.file_name());
+        if file_type.is_symlink() {
+            return Err(MgeError::InvalidInput(format!(
+                "refusing to archive symlink {}",
+                entry.path().display()
+            )));
+        }
+        if file_type.is_dir() {
+            copy_directory_tree(&entry.path(), &target)?;
+        } else if file_type.is_file() {
+            fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
 impl Store for MemoryEngine {
     fn remember(&mut self, request: RememberRequest) -> Result<MemoryCell> {
         MemoryEngine::remember(self, request)
@@ -3487,6 +4249,172 @@ impl Store for MemoryEngine {
 
     fn stats(&self) -> Result<StoreStats> {
         MemoryEngine::stats(self)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod compaction_recovery_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn reopen_finishes_committed_compaction_transaction() {
+        let dir = tempdir().unwrap();
+        let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+        let mut old = RememberRequest::new(
+            MemoryKind::ProjectFact,
+            MemoryValue::Text("old recovery value".to_string()),
+        );
+        old.scope = "recovery".to_string();
+        let old = engine.remember(old).unwrap();
+        engine.seal().unwrap();
+        let mut replacement = RememberRequest::new(
+            MemoryKind::ProjectFact,
+            MemoryValue::Text("current recovery value".to_string()),
+        );
+        replacement.scope = "recovery".to_string();
+        let replacement = engine
+            .supersede(old.id, replacement)
+            .unwrap()
+            .replacement_cell;
+        engine.seal().unwrap();
+
+        let plan = engine.build_compaction_plan(None).unwrap();
+        let original_catalog = engine.load_page_catalog().unwrap();
+        let mut new_pages = build_pages_with_kind(
+            &plan.kept_cells,
+            engine.manifest.next_page_id,
+            engine.manifest.page_clusterer,
+            PageBuildOptions::default(),
+        );
+        for page in &mut new_pages {
+            attach_page_checksum(page).unwrap();
+        }
+        let committed_next_page_id = new_pages
+            .iter()
+            .map(|page| page.page_id.saturating_add(1))
+            .max()
+            .unwrap();
+        let transaction = CompactionTransaction {
+            original_catalog: original_catalog.clone(),
+            original_next_page_id: engine.manifest.next_page_id,
+            original_status_overrides: engine.manifest.status_overrides.clone(),
+            original_superseded_by: engine.manifest.superseded_by.clone(),
+            old_page_files: original_catalog
+                .pages
+                .iter()
+                .map(|entry| entry.file.clone())
+                .collect(),
+            new_page_files: new_pages
+                .iter()
+                .map(|page| page_file_name(page.page_id))
+                .collect(),
+            pruned_cell_ids: plan.pruned_cell_ids.iter().copied().collect(),
+            committed_next_page_id,
+        };
+        engine.manifest.pending_compaction = Some(transaction);
+        engine.save_manifest().unwrap();
+        let mut new_catalog = PageCatalog {
+            index_kind: engine.manifest.index_kind,
+            pages: Vec::new(),
+        };
+        for page in &new_pages {
+            let size = engine.write_page(page).unwrap();
+            new_catalog
+                .pages
+                .push(engine.page_catalog_entry_for_page(page, size).unwrap());
+        }
+        engine.save_page_catalog(&new_catalog).unwrap();
+        drop(engine);
+
+        let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+        assert!(reopened.manifest.pending_compaction.is_none());
+        assert!(reopened.find_cell(old.id).is_err());
+        assert_eq!(
+            reopened.find_cell(replacement.id).unwrap().id,
+            replacement.id
+        );
+        assert!(reopened.validate_deep().unwrap().ok);
+        assert!(!fs::read_dir(dir.path().join("pages"))
+            .unwrap()
+            .flatten()
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .contains("compact-backup")));
+    }
+
+    #[test]
+    fn reopen_rolls_back_uncommitted_compaction_transaction() {
+        let dir = tempdir().unwrap();
+        let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+        let mut old = RememberRequest::new(
+            MemoryKind::ProjectFact,
+            MemoryValue::Text("old rollback value".to_string()),
+        );
+        old.scope = "rollback".to_string();
+        let old = engine.remember(old).unwrap();
+        engine.seal().unwrap();
+        let mut replacement = RememberRequest::new(
+            MemoryKind::ProjectFact,
+            MemoryValue::Text("current rollback value".to_string()),
+        );
+        replacement.scope = "rollback".to_string();
+        let replacement = engine
+            .supersede(old.id, replacement)
+            .unwrap()
+            .replacement_cell;
+        engine.seal().unwrap();
+
+        let plan = engine.build_compaction_plan(None).unwrap();
+        let original_catalog = engine.load_page_catalog().unwrap();
+        let mut new_pages = build_pages_with_kind(
+            &plan.kept_cells,
+            engine.manifest.next_page_id,
+            engine.manifest.page_clusterer,
+            PageBuildOptions::default(),
+        );
+        for page in &mut new_pages {
+            attach_page_checksum(page).unwrap();
+        }
+        let transaction = CompactionTransaction {
+            original_catalog: original_catalog.clone(),
+            original_next_page_id: engine.manifest.next_page_id,
+            original_status_overrides: engine.manifest.status_overrides.clone(),
+            original_superseded_by: engine.manifest.superseded_by.clone(),
+            old_page_files: original_catalog
+                .pages
+                .iter()
+                .map(|entry| entry.file.clone())
+                .collect(),
+            new_page_files: new_pages
+                .iter()
+                .map(|page| page_file_name(page.page_id))
+                .collect(),
+            pruned_cell_ids: plan.pruned_cell_ids.iter().copied().collect(),
+            committed_next_page_id: new_pages
+                .iter()
+                .map(|page| page.page_id.saturating_add(1))
+                .max()
+                .unwrap(),
+        };
+        engine.manifest.pending_compaction = Some(transaction);
+        engine.save_manifest().unwrap();
+        for page in &new_pages {
+            engine.write_page(page).unwrap();
+        }
+        drop(engine);
+
+        let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+        assert!(reopened.manifest.pending_compaction.is_none());
+        assert_eq!(reopened.find_cell(old.id).unwrap().id, old.id);
+        assert_eq!(
+            reopened.find_cell(replacement.id).unwrap().id,
+            replacement.id
+        );
+        assert_eq!(reopened.superseded_by(old.id), Some(replacement.id));
+        assert!(reopened.validate_deep().unwrap().ok);
     }
 }
 

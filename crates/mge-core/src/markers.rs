@@ -13,7 +13,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -94,6 +94,13 @@ impl MarkerDictionary {
                 marker: marker.clone(),
             })
             .collect()
+    }
+
+    pub fn retain_marker_ids(&mut self, retained: &BTreeSet<MarkerId>) -> usize {
+        let before = self.id_to_marker.len();
+        self.id_to_marker.retain(|id, _| retained.contains(id));
+        self.marker_to_id.retain(|_, id| retained.contains(id));
+        before.saturating_sub(self.id_to_marker.len())
     }
 
     pub fn consistency_errors(&self) -> Vec<String> {

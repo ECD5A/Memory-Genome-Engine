@@ -41,14 +41,14 @@ pub struct MemoryPage {
     pub checksum: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PageCatalog {
     #[serde(default)]
     pub index_kind: IndexKind,
     pub pages: Vec<PageCatalogEntry>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PageCatalogEntry {
     pub page_id: PageId,
     pub file: String,

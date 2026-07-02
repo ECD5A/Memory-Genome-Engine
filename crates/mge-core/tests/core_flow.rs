@@ -9,12 +9,12 @@ use mge_core::{
     build_context_packet, build_pages_from_cells, build_pages_with_clusterer, canonicalize_marker,
     marker_strings_for_cell_fields, score_cell_debug, tokenize_keywords, AgentCapabilities,
     AgentCapability, AuditEvent, AuditLogger, BinaryFusePageIndex, CandidateIndexData,
-    CandidatePageIndex, CompressionKind, Compressor, ContextDebugInfo, DurabilityPolicy,
-    ExactMarkerPageIndex, HotCandidateQuery, HotMemoryLayer, HotStore, IndexKind, InitOptions,
-    MarkerGenome, MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemorySource, MemoryStatus,
-    MemoryValue, MessagePackPageCodec, NoopAuditLogger, PageBuildOptions, PageCatalog,
-    PageCatalogEntry, PageClustererKind, PageCodec, PageCodecKind, QueryMode, RecallMode,
-    RecallPolicy, RecallRequest, RememberRequest, ScopeKindClusterer, SecurityMode,
+    CandidatePageIndex, CompactionOptions, CompressionKind, Compressor, ContextDebugInfo,
+    DurabilityPolicy, ExactMarkerPageIndex, HotCandidateQuery, HotMemoryLayer, HotStore, IndexKind,
+    InitOptions, MarkerGenome, MarkerOverlapClusterer, MemoryEngine, MemoryKind, MemorySource,
+    MemoryStatus, MemoryValue, MessagePackPageCodec, NoopAuditLogger, PageBuildOptions,
+    PageCatalog, PageCatalogEntry, PageClustererKind, PageCodec, PageCodecKind, QueryMode,
+    RecallMode, RecallPolicy, RecallRequest, RememberRequest, ScopeKindClusterer, SecurityMode,
     SensitivityLevel, SessionChunkOptions, SessionRememberRequest, SessionTurn,
     StorageConfigUpdate, TrustLevel, ZstdCompression,
 };
@@ -3962,6 +3962,300 @@ fn synthetic_binary_fuse_candidates_cover_exact_candidates() {
     }
 }
 
+#[test]
+fn compaction_physically_prunes_confirmed_obsolete_memory() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let old = remember_text_cell(
+        &mut engine,
+        "compact",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        &format!("obsolete database decision {}", "x".repeat(32 * 1024)),
+        &["tag:obsolete_only".to_string()],
+    );
+    remember_text_cell(
+        &mut engine,
+        "compact",
+        MemoryStatus::Deprecated,
+        TrustLevel::UserConfirmed,
+        "deprecated cleanup fact",
+        &[],
+    );
+    remember_text_cell(
+        &mut engine,
+        "compact",
+        MemoryStatus::Rejected,
+        TrustLevel::UserConfirmed,
+        "rejected cleanup fact",
+        &[],
+    );
+    engine.seal().unwrap();
+
+    let mut replacement = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text("Current database decision is SQLite".to_string()),
+    );
+    replacement.scope = "compact".to_string();
+    replacement.trust = TrustLevel::UserConfirmed;
+    let replacement = engine
+        .supersede(old.id, replacement)
+        .unwrap()
+        .replacement_cell;
+
+    let dry_run = engine.compact(CompactionOptions::default()).unwrap();
+    assert!(!dry_run.applied);
+    assert_eq!(dry_run.cells_pruned, 3);
+    assert_eq!(dry_run.superseded_pruned, 1);
+    assert_eq!(dry_run.deprecated_pruned, 1);
+    assert_eq!(dry_run.rejected_pruned, 1);
+
+    let report = engine
+        .compact(CompactionOptions {
+            apply: true,
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(report.applied);
+    assert_eq!(report.cells_pruned, 3);
+    assert!(report.bytes_reclaimed > 0);
+    assert!(report.marker_entries_pruned > 0);
+    assert!(report.hot_archives_removed > 0);
+    assert_eq!(engine.superseded_by(old.id), None);
+    assert!(engine.validate_deep().unwrap().ok);
+    assert!(!dir.path().join("manifest.json").exists());
+    assert!(!dir
+        .path()
+        .join("indexes")
+        .join("page_catalog.json")
+        .exists());
+
+    let export = engine.export_json().unwrap();
+    assert!(!export_contains_cell_id(&export, old.id));
+    assert!(export_contains_cell_id(&export, replacement.id));
+    let mut recall = RecallRequest::new("SQLite database decision");
+    recall.scope = Some("compact".to_string());
+    let packet = engine.recall(recall).unwrap();
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert!(packet.relevant_memory[0].content.contains("SQLite"));
+}
+
+#[test]
+fn compaction_archive_preserves_pre_prune_store() {
+    let dir = tempdir().unwrap();
+    let archive_parent = tempdir().unwrap();
+    let archive = archive_parent.path().join("before-compaction");
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let old = remember_text_cell(
+        &mut engine,
+        "archive",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "Old deployment region is west",
+        &[],
+    );
+    engine.seal().unwrap();
+    let mut replacement = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text("Current deployment region is east".to_string()),
+    );
+    replacement.scope = "archive".to_string();
+    engine.supersede(old.id, replacement).unwrap();
+
+    let report = engine
+        .compact(CompactionOptions {
+            apply: true,
+            archive_path: Some(archive.clone()),
+            temporary_older_than_days: None,
+        })
+        .unwrap();
+    assert_eq!(report.archive_path.as_deref(), Some(archive.as_path()));
+    assert!(archive.join("manifest.mgm").exists());
+    assert!(engine.validate_deep().unwrap().ok);
+    drop(engine);
+
+    let archived = MemoryEngine::open_at(&archive).unwrap();
+    assert!(archived.validate_deep().unwrap().ok);
+    let mut audit = RecallRequest::new("Old deployment region west");
+    audit.scope = Some("archive".to_string());
+    audit.policy.include_deprecated = true;
+    assert!(archived
+        .recall(audit)
+        .unwrap()
+        .relevant_memory
+        .iter()
+        .any(|item| item.content.contains("west")));
+}
+
+#[test]
+fn compaction_keeps_untyped_superseded_memory_for_safety() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let cell = remember_text_cell(
+        &mut engine,
+        "manual-status",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "manually superseded without a replacement",
+        &[],
+    );
+    engine.seal().unwrap();
+    engine
+        .set_status_override(cell.id, MemoryStatus::Superseded)
+        .unwrap();
+
+    let report = engine
+        .compact(CompactionOptions {
+            apply: true,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(report.cells_pruned, 0);
+    assert_eq!(report.blocked_superseded, 1);
+    assert!(export_contains_cell_id(
+        &engine.export_json().unwrap(),
+        cell.id
+    ));
+}
+
+#[test]
+fn compaction_prunes_expired_temporary_memory_only_when_requested() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let temporary = remember_text_cell(
+        &mut engine,
+        "temporary",
+        MemoryStatus::Temporary,
+        TrustLevel::AgentInferred,
+        "temporary scratch memory",
+        &[],
+    );
+    engine.seal().unwrap();
+
+    assert_eq!(
+        engine
+            .compact(CompactionOptions::default())
+            .unwrap()
+            .cells_pruned,
+        0
+    );
+    let report = engine
+        .compact(CompactionOptions {
+            apply: true,
+            archive_path: None,
+            temporary_older_than_days: Some(0),
+        })
+        .unwrap();
+    assert_eq!(report.temporary_pruned, 1);
+    assert!(!export_contains_cell_id(
+        &engine.export_json().unwrap(),
+        temporary.id
+    ));
+}
+
+#[test]
+fn encrypted_compaction_and_archive_require_the_original_key() {
+    let dir = tempdir().unwrap();
+    let archive_parent = tempdir().unwrap();
+    let archive = archive_parent.path().join("encrypted-before-compaction");
+    let passphrase = "compaction-test-passphrase";
+    let mut engine = MemoryEngine::init_with_options_and_passphrase(
+        dir.path(),
+        InitOptions {
+            page_codec: PageCodecKind::MessagePack,
+            compression: CompressionKind::Zstd,
+            index_kind: IndexKind::ExactMarkerPage,
+            page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Safe,
+            security_mode: SecurityMode::Encrypted,
+        },
+        Some(passphrase),
+    )
+    .unwrap();
+    let old = remember_text_cell(
+        &mut engine,
+        "encrypted-compact",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "old encrypted deployment secret context",
+        &[],
+    );
+    engine.seal().unwrap();
+    let mut replacement = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text("current encrypted deployment context".to_string()),
+    );
+    replacement.scope = "encrypted-compact".to_string();
+    engine.supersede(old.id, replacement).unwrap();
+    let report = engine
+        .compact(CompactionOptions {
+            apply: true,
+            archive_path: Some(archive.clone()),
+            temporary_older_than_days: None,
+        })
+        .unwrap();
+    assert_eq!(report.cells_pruned, 1);
+    assert!(engine.validate_deep().unwrap().ok);
+    drop(engine);
+
+    assert!(MemoryEngine::open_at_with_passphrase(dir.path(), Some("wrong-passphrase")).is_err());
+    let current = MemoryEngine::open_at_with_passphrase(dir.path(), Some(passphrase)).unwrap();
+    assert!(current.validate_deep().unwrap().ok);
+    drop(current);
+    assert!(MemoryEngine::open_at_with_passphrase(&archive, Some("wrong-passphrase")).is_err());
+    let archived = MemoryEngine::open_at_with_passphrase(&archive, Some(passphrase)).unwrap();
+    assert!(archived.validate_deep().unwrap().ok);
+}
+
+#[test]
+fn binary_fuse_recall_and_rebuild_work_after_compaction() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_with_options(
+        dir.path(),
+        InitOptions {
+            page_codec: PageCodecKind::MessagePack,
+            compression: CompressionKind::Zstd,
+            index_kind: IndexKind::BinaryFusePage,
+            page_clusterer: PageClustererKind::ScopeKind,
+            durability: DurabilityPolicy::Balanced,
+            security_mode: SecurityMode::Unencrypted,
+        },
+    )
+    .unwrap();
+    let old = remember_text_cell(
+        &mut engine,
+        "binary-compact",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "old binary fuse decision",
+        &["tag:binary_compact".to_string()],
+    );
+    engine.seal().unwrap();
+    let mut replacement = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text("current binary fuse decision".to_string()),
+    );
+    replacement.scope = "binary-compact".to_string();
+    replacement.markers = vec!["tag:binary_compact".to_string()];
+    engine.supersede(old.id, replacement).unwrap();
+    engine
+        .compact(CompactionOptions {
+            apply: true,
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert!(engine.validate_deep().unwrap().ok);
+    let rebuild = engine.rebuild_catalog_and_indexes().unwrap();
+    assert!(rebuild.binary_fuse_index_written);
+    let mut recall = RecallRequest::new("current binary fuse decision");
+    recall.scope = Some("binary-compact".to_string());
+    let packet = engine.recall(recall).unwrap();
+    assert_eq!(packet.debug.index_kind, IndexKind::BinaryFusePage);
+    assert_eq!(packet.relevant_memory.len(), 1);
+    assert!(packet.relevant_memory[0].content.contains("current"));
+}
+
 fn assert_page_storage_error_after_corruption(
     mutate: impl FnOnce(&mut Vec<u8>),
     expected_message: &str,
@@ -4087,6 +4381,21 @@ fn file_contains_bytes(path: &Path, needle: &[u8]) -> bool {
     haystack
         .windows(needle.len())
         .any(|window| window == needle)
+}
+
+fn export_contains_cell_id(export: &serde_json::Value, cell_id: u64) -> bool {
+    export["hot_cells"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .chain(
+            export["pages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|page| page["cells"].as_array().into_iter().flatten()),
+        )
+        .any(|cell| cell["id"].as_u64() == Some(cell_id))
 }
 
 fn remember_with_status(engine: &mut MemoryEngine, status: MemoryStatus, content: &str) {
