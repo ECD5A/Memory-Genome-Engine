@@ -60,12 +60,12 @@ For normal users, install a published release with mandatory archive checksum ve
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/install-release.ps1
-powershell -ExecutionPolicy Bypass -File scripts/install-release.ps1 -Version v0.1.2
+powershell -ExecutionPolicy Bypass -File scripts/install-release.ps1 -Version v0.1.3
 ```
 
 ```bash
 ./scripts/install-release.sh
-./scripts/install-release.sh --version v0.1.2
+./scripts/install-release.sh --version v0.1.3
 ```
 
 The release installers:
@@ -412,7 +412,7 @@ Use `--help` on either benchmark binary for deeper development-only options. Cor
 
 `.github/workflows/release.yml` runs only for `v*` tags. It verifies format, workspace and eval tests, strict clippy, rustdoc, and Rust 1.95 compatibility with the locked dependency graph. It then builds checksummed product archives for Windows x86-64, Linux x86-64, macOS Apple Silicon, and macOS Intel, uploads them as workflow artifacts, and creates or updates a **draft** GitHub Release with one combined `SHA256SUMS`. The workflow includes only `mge` and `mge-mcp-server`; SDK packages and development benchmark binaries are not published. A maintainer must review checksums, notes, and every platform result before publishing the draft.
 
-Rust crates, the development eval harness, and both repository-local SDK manifests use version `0.1.2`. Integration schema version `5` is independent from package versioning and adds explicit memory supersession.
+Rust crates, the development eval harness, and both repository-local SDK manifests use version `0.1.3`. Integration schema version `5` is independent from package versioning and adds explicit memory supersession.
 
 ## Package Publishing Plan
 
@@ -428,9 +428,11 @@ Do not publish packages from this repository until release ownership, versioning
 
 Current recommendation: GitHub release assets are enough for the public preview. Package-manager publishing should wait until Windows, Linux, and macOS preview users have exercised the archives.
 
-## GitHub v0.1.2 Release
+## GitHub v0.1.3 Release
 
-Create the next public preview `v0.1.2` from a clean `main` commit after the checklist above passes. The existing `v0.1.0` tag remains immutable. Use `v0.1.2-rc.1` first to exercise the complete private tag workflow, cross-platform installer gates, and exact release archives.
+Create `v0.1.3` from a clean `main` commit after the checklist above passes. This additive release introduces explicit append-and-supersede versioning across the Rust core, CLI, MCP adapter, and thin SDKs. It preserves binary page formats, the hot-to-sealed lifecycle, default recall modes, and compatibility with existing manifests.
+
+The release does not infer semantic contradictions automatically. The caller chooses when a durable memory should be superseded; MGE records the typed old-to-new relation, excludes the old version from default recall, and retains both versions for audit recall. Pending supersession intents are reconciled after interruption.
 
 Recommended assets:
 
@@ -450,8 +452,8 @@ Keep the release product-focused:
 Tag command shape:
 
 ```bash
-git tag -a v0.1.2 -m "Memory Genome Engine v0.1.2"
-git push origin v0.1.2
+git tag -a v0.1.3 -m "Memory Genome Engine v0.1.3"
+git push origin v0.1.3
 ```
 
 The tag workflow creates the draft and uploads all platform archives. Do not publish it until the downloaded assets, checksums, release notes, and platform jobs are reviewed.
