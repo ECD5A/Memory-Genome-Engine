@@ -2203,6 +2203,47 @@ fn manifests_without_supersession_fields_remain_compatible() {
 }
 
 #[test]
+fn encrypted_store_supersession_survives_seal_and_reopen() {
+    let dir = tempdir().unwrap();
+    let options = InitOptions {
+        security_mode: SecurityMode::Encrypted,
+        ..InitOptions::default()
+    };
+    let mut engine =
+        MemoryEngine::init_with_options_and_passphrase(dir.path(), options, Some("test-secret"))
+            .unwrap();
+    let mut original = RememberRequest::new(
+        MemoryKind::Decision,
+        MemoryValue::Text("Encrypted decision version one".to_string()),
+    );
+    original.scope = "encrypted_project".to_string();
+    let original = engine.remember(original).unwrap();
+    engine.seal().unwrap();
+
+    let mut replacement = RememberRequest::new(
+        MemoryKind::Decision,
+        MemoryValue::Text("Encrypted decision version two".to_string()),
+    );
+    replacement.scope = "encrypted_project".to_string();
+    let report = engine.supersede(original.id, replacement).unwrap();
+    let replacement_id = report.replacement_cell.id;
+    drop(engine);
+
+    let reopened = MemoryEngine::open_at_with_passphrase(dir.path(), Some("test-secret")).unwrap();
+    assert_eq!(reopened.superseded_by(original.id), Some(replacement_id));
+    let mut current = RecallRequest::new("");
+    current.mode = RecallMode::FullScope;
+    current.scope = Some("encrypted_project".to_string());
+    let current = reopened.recall(current).unwrap();
+    assert_eq!(current.relevant_memory.len(), 1);
+    assert_eq!(
+        current.relevant_memory[0].content,
+        "Encrypted decision version two"
+    );
+    assert!(reopened.validate_deep().unwrap().ok);
+}
+
+#[test]
 fn recall_from_sealed_pages() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
