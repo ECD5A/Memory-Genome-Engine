@@ -186,6 +186,16 @@ impl AppService {
             .map_err(Into::into)
     }
 
+    pub fn compact(&self, apply: bool) -> Result<mge_core::CompactionReport> {
+        let mut engine = self.open_engine()?;
+        engine
+            .compact(mge_core::CompactionOptions {
+                apply,
+                ..Default::default()
+            })
+            .map_err(Into::into)
+    }
+
     pub fn export_markdown(&self) -> Result<PathBuf> {
         self.open_engine()?
             .export_markdown_to_default_path()

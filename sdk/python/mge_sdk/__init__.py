@@ -110,6 +110,22 @@ class ValidationReport(TypedDict, total=False):
     warnings: list[str]
 
 
+class CompactionReport(TypedDict, total=False):
+    applied: bool
+    cells_scanned: int
+    cells_pruned: int
+    superseded_pruned: int
+    deprecated_pruned: int
+    rejected_pruned: int
+    temporary_pruned: int
+    blocked_superseded: int
+    pages_before: int
+    pages_after: int
+    marker_entries_pruned: int
+    bytes_reclaimed: int
+    archive_path: str | None
+
+
 class McpError(TypedDict, total=False):
     code: int
     message: str
@@ -351,6 +367,25 @@ class MemoryGenomeClient:
 
     def rebuild_indexes(self) -> Mapping[str, Any]:
         return self._run_json(["rebuild-indexes", "--json", *self._security_args()])
+
+    def compact(
+        self,
+        *,
+        apply: bool = False,
+        archive_path: str | Path | None = None,
+        temporary_older_than_days: int | None = None,
+    ) -> CompactionReport:
+        args = ["compact", "--json"]
+        if apply:
+            args.append("--apply")
+        if archive_path is not None:
+            args.extend(["--archive", str(archive_path)])
+        if temporary_older_than_days is not None:
+            args.extend(
+                ["--temporary-older-than-days", str(temporary_older_than_days)]
+            )
+        args.extend(self._security_args())
+        return cast(CompactionReport, self._run_json(args))
 
     def export_markdown(self, output_path: str | Path | None = None) -> Path:
         self._run_text(["export", "--format", "markdown", *self._security_args()])

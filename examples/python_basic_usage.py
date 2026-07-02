@@ -64,6 +64,9 @@ def main() -> None:
     rebuild = client.rebuild_indexes()
     assert rebuild["pages_unchanged"] is True
 
+    compaction = client.compact()
+    assert compaction["applied"] is False
+
     markdown_path = client.export_markdown()
     assert markdown_path.is_file()
 

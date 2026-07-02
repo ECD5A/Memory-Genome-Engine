@@ -5,7 +5,7 @@
     "ok": true,
     "tool": "mge_supersede",
     "protocol_version": "mge-jsonrpc-1",
-    "integration_schema_version": 5,
+    "integration_schema_version": 6,
     "superseded_cell_id": 1,
     "replacement_cell_id": 2,
     "previous_status": "active",

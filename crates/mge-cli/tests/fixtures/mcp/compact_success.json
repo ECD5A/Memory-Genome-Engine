@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": "compact_success",
+  "result": {
+    "ok": true,
+    "tool": "mge_compact",
+    "protocol_version": "mge-jsonrpc-1",
+    "integration_schema_version": 6,
+    "compaction": {
+      "applied": false,
+      "cells_scanned": 2,
+      "cells_pruned": 1,
+      "superseded_pruned": 1,
+      "blocked_superseded": 0
+    },
+    "json_runtime_storage": false
+  }
+}

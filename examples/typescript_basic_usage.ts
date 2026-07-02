@@ -67,6 +67,11 @@ if (rebuild.pages_unchanged !== true) {
   throw new Error("expected pages to remain unchanged");
 }
 
+const compaction = client.compact();
+if (compaction.applied !== false) {
+  throw new Error("expected compaction dry run");
+}
+
 const markdownPath = client.exportMarkdown();
 
 console.log(

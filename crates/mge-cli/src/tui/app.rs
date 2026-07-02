@@ -79,6 +79,7 @@ pub struct TuiApp {
     pub recall_result: Option<ContextPacket>,
     pub remember_input: RememberInput,
     pub seal_confirm: bool,
+    pub compact_confirm: bool,
     pub seal_result: Option<SealReport>,
     pub export_path: Option<PathBuf>,
     pub import_path: String,
@@ -115,6 +116,7 @@ impl TuiApp {
             recall_result: None,
             remember_input: RememberInput::default(),
             seal_confirm: false,
+            compact_confirm: false,
             seal_result: None,
             export_path: None,
             import_path: String::new(),
@@ -154,6 +156,7 @@ impl TuiApp {
         self.screen = screen;
         self.form_selected = 0;
         self.seal_confirm = false;
+        self.compact_confirm = false;
     }
 
     fn go_back(&mut self) {
@@ -168,6 +171,7 @@ impl TuiApp {
         }
         self.form_selected = 0;
         self.seal_confirm = false;
+        self.compact_confirm = false;
     }
 }
 
@@ -519,7 +523,7 @@ fn run_seal(app: &mut TuiApp) {
 }
 
 fn handle_status_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
-    const ROWS: usize = 4;
+    const ROWS: usize = 6;
     match key.code {
         KeyCode::Up => input::move_up(&mut app.form_selected, ROWS),
         KeyCode::Down => input::move_down(&mut app.form_selected, ROWS),
@@ -531,6 +535,16 @@ fn handle_status_key(app: &mut TuiApp, key: KeyEvent) -> Result<bool> {
             1 => run_deep_doctor(app),
             2 => run_validate_deep(app),
             3 => run_rebuild_indexes(app),
+            4 => run_compaction(app, false),
+            5 => {
+                if app.compact_confirm {
+                    run_compaction(app, true);
+                    app.compact_confirm = false;
+                } else {
+                    app.compact_confirm = true;
+                    app.set_status(BadgeKind::Warn, tr(app.language, TKey::ConfirmCompact));
+                }
+            }
             _ => {}
         },
         _ => {}
@@ -576,6 +590,32 @@ fn run_rebuild_indexes(app: &mut TuiApp) {
                 report.pages_scanned
             ),
         ),
+        Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
+    }
+}
+
+fn run_compaction(app: &mut TuiApp, apply: bool) {
+    match app.service.compact(apply) {
+        Ok(report) => {
+            app.set_status(
+                if apply {
+                    BadgeKind::Ok
+                } else {
+                    BadgeKind::Warn
+                },
+                format!(
+                    "{}: {} cell(s), {} byte(s)",
+                    tr(app.language, TKey::CompactResult),
+                    report.cells_pruned,
+                    if apply {
+                        report.bytes_reclaimed
+                    } else {
+                        report.estimated_prunable_cell_bytes
+                    }
+                ),
+            );
+            app.refresh_dashboard();
+        }
         Err(err) => app.set_status(BadgeKind::Error, err.to_string()),
     }
 }

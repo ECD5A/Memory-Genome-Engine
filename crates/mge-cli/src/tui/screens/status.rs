@@ -11,7 +11,7 @@ use crate::tui::theme;
 pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(9), Constraint::Min(9)])
+        .constraints([Constraint::Length(11), Constraint::Min(9)])
         .split(area);
 
     let actions = vec![
@@ -22,6 +22,11 @@ pub fn render(frame: &mut Frame<'_>, app: &TuiApp, area: Rect) {
             app.form_selected == 3,
             tr(app.language, TKey::RebuildIndexes),
         ),
+        action_line(
+            app.form_selected == 4,
+            tr(app.language, TKey::CompactDryRun),
+        ),
+        action_line(app.form_selected == 5, tr(app.language, TKey::CompactApply)),
     ];
     frame.render_widget(
         screens::paragraph(actions, tr(app.language, TKey::StoreStatus)),

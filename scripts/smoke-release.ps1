@@ -84,6 +84,9 @@ try {
     Invoke-Required $Mge --store $PlainStore recall "imported memory" --scope release-import
     Invoke-Required $Mge --store $PlainStore checkpoint
     Invoke-Required $Mge --store $PlainStore seal
+    Invoke-Required $Mge --store $PlainStore supersede 1 "current release smoke memory" --kind project_fact --scope release --trust tool_observed
+    Invoke-Required $Mge --store $PlainStore compact --json
+    Invoke-Required $Mge --store $PlainStore compact --apply
     Invoke-Required $Mge doctor --store $PlainStore --deep
     Invoke-Required $Mge --store $PlainStore validate --deep
 
@@ -98,6 +101,8 @@ try {
     Invoke-Required $Mge --store $EncryptedStore remember "private release smoke" --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE
     Invoke-Required $Mge --store $EncryptedStore checkpoint --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE
     Invoke-Required $Mge --store $EncryptedStore seal --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE
+    Invoke-Required $Mge --store $EncryptedStore supersede 1 "current private release smoke" --kind temporary_note --scope global --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE
+    Invoke-Required $Mge --store $EncryptedStore compact --apply --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE
     Invoke-Required $Mge --store $EncryptedStore recall "private release smoke" --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE
     Invoke-Required $Mge doctor --store $EncryptedStore --deep --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE
     Invoke-Required $Mge --store $EncryptedStore validate --deep --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE
@@ -157,9 +162,18 @@ try {
             }
         }
     } | ConvertTo-Json -Compress -Depth 6
-    $Response = @($InitializeRequest, $InitializedNotification, $ToolsRequest, $StatsRequest, $RememberRequest, $RecallRequest) | & $Mcp --store $PlainStore
+    $CompactRequest = @{
+        jsonrpc = "2.0"
+        id = 6
+        method = "tools/call"
+        params = @{
+            name = "mge_compact"
+            arguments = @{}
+        }
+    } | ConvertTo-Json -Compress -Depth 6
+    $Response = @($InitializeRequest, $InitializedNotification, $ToolsRequest, $StatsRequest, $RememberRequest, $RecallRequest, $CompactRequest) | & $Mcp --store $PlainStore
     $ResponseText = $Response -join "`n"
-    if ($LASTEXITCODE -ne 0 -or ($Response.Count -ne 5) -or ($ResponseText -notmatch '"protocolVersion":"2025-06-18"') -or ($ResponseText -notmatch '"name":"mge_recall"') -or ($ResponseText -notmatch '"structuredContent"') -or ($ResponseText -notmatch '"tool":"mge_stats"') -or ($ResponseText -notmatch '"tool":"mge_remember"') -or ($ResponseText -notmatch '"tool":"mge_recall"') -or ($ResponseText -notmatch 'packaged MCP release memory')) {
+    if ($LASTEXITCODE -ne 0 -or ($Response.Count -ne 6) -or ($ResponseText -notmatch '"protocolVersion":"2025-06-18"') -or ($ResponseText -notmatch '"name":"mge_recall"') -or ($ResponseText -notmatch '"structuredContent"') -or ($ResponseText -notmatch '"tool":"mge_stats"') -or ($ResponseText -notmatch '"tool":"mge_remember"') -or ($ResponseText -notmatch '"tool":"mge_recall"') -or ($ResponseText -notmatch '"tool":"mge_compact"') -or ($ResponseText -notmatch 'packaged MCP release memory')) {
         throw "MCP smoke failed: $ResponseText"
     }
 

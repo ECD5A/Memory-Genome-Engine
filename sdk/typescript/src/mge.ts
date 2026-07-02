@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 export const PROTOCOL_VERSION = "mge-jsonrpc-1";
-export const INTEGRATION_SCHEMA_VERSION = 5;
+export const INTEGRATION_SCHEMA_VERSION = 6;
 
 export type RecallMode = "focused" | "broad" | "full_scope" | "full-scope";
 
@@ -150,6 +150,28 @@ export interface ValidationReport {
   checked_sealed_cells: number;
   errors: string[];
   warnings: string[];
+}
+
+export interface CompactionOptions {
+  apply?: boolean;
+  archivePath?: string;
+  temporaryOlderThanDays?: number;
+}
+
+export interface CompactionReport {
+  applied: boolean;
+  cells_scanned: number;
+  cells_pruned: number;
+  superseded_pruned: number;
+  deprecated_pruned: number;
+  rejected_pruned: number;
+  temporary_pruned: number;
+  blocked_superseded: number;
+  pages_before: number;
+  pages_after: number;
+  marker_entries_pruned: number;
+  bytes_reclaimed: number;
+  archive_path?: string | null;
 }
 
 export interface McpStructuredError {
@@ -382,6 +404,21 @@ export class MemoryGenomeClient {
 
   rebuildIndexes(): unknown {
     return this.runJson(["rebuild-indexes", "--json", ...this.securityArgs()]);
+  }
+
+  compact(options: CompactionOptions = {}): CompactionReport {
+    const args = ["compact", "--json"];
+    if (options.apply) {
+      args.push("--apply");
+    }
+    if (options.archivePath) {
+      args.push("--archive", options.archivePath);
+    }
+    if (options.temporaryOlderThanDays !== undefined) {
+      args.push("--temporary-older-than-days", String(options.temporaryOlderThanDays));
+    }
+    args.push(...this.securityArgs());
+    return this.runJson(args);
   }
 
   exportMarkdown(outputPath?: string): string {

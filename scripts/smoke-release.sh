@@ -76,6 +76,9 @@ printf '# Imported release note\n\nValidate the imported memory before publishin
 "$mge_bin" --store "$plain_store" recall "imported memory" --scope release-import >/dev/null
 "$mge_bin" --store "$plain_store" checkpoint >/dev/null
 "$mge_bin" --store "$plain_store" seal >/dev/null
+"$mge_bin" --store "$plain_store" supersede 1 "current release smoke memory" --kind project_fact --scope release --trust tool_observed >/dev/null
+"$mge_bin" --store "$plain_store" compact --json >/dev/null
+"$mge_bin" --store "$plain_store" compact --apply >/dev/null
 "$mge_bin" doctor --store "$plain_store" --deep >/dev/null
 "$mge_bin" --store "$plain_store" validate --deep >/dev/null
 
@@ -88,21 +91,24 @@ export MGE_RELEASE_SMOKE_PASSPHRASE="${MGE_RELEASE_SMOKE_PASSPHRASE:-local-relea
 "$mge_bin" --store "$encrypted_store" remember "private release smoke" --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE >/dev/null
 "$mge_bin" --store "$encrypted_store" checkpoint --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE >/dev/null
 "$mge_bin" --store "$encrypted_store" seal --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE >/dev/null
+"$mge_bin" --store "$encrypted_store" supersede 1 "current private release smoke" --kind temporary_note --scope global --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE >/dev/null
+"$mge_bin" --store "$encrypted_store" compact --apply --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE >/dev/null
 "$mge_bin" --store "$encrypted_store" recall "private release smoke" --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE >/dev/null
 "$mge_bin" doctor --store "$encrypted_store" --deep --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE >/dev/null
 "$mge_bin" --store "$encrypted_store" validate --deep --passphrase-env MGE_RELEASE_SMOKE_PASSPHRASE >/dev/null
 
 echo "MCP smoke..."
-printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mge-release-smoke","version":"0.1.3"}}}\n{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mge_stats","arguments":{}}}\n{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"mge_remember","arguments":{"content":"packaged MCP release memory","scope":"release-mcp"}}}\n{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"mge_recall","arguments":{"query":"packaged MCP release memory","scope":"release-mcp"}}}\n' \
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mge-release-smoke","version":"0.1.3"}}}\n{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mge_stats","arguments":{}}}\n{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"mge_remember","arguments":{"content":"packaged MCP release memory","scope":"release-mcp"}}}\n{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"mge_recall","arguments":{"query":"packaged MCP release memory","scope":"release-mcp"}}}\n{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"mge_compact","arguments":{}}}\n' \
   | "$mcp_bin" --store "$plain_store" \
   | tee "$tmp_root/mcp-response.jsonl" >/dev/null
-test "$(wc -l < "$tmp_root/mcp-response.jsonl" | tr -d ' ')" = "5"
+test "$(wc -l < "$tmp_root/mcp-response.jsonl" | tr -d ' ')" = "6"
 grep -q '"protocolVersion":"2025-06-18"' "$tmp_root/mcp-response.jsonl"
 grep -q '"name":"mge_recall"' "$tmp_root/mcp-response.jsonl"
 grep -q '"structuredContent"' "$tmp_root/mcp-response.jsonl"
 grep -q '"tool":"mge_stats"' "$tmp_root/mcp-response.jsonl"
 grep -q '"tool":"mge_remember"' "$tmp_root/mcp-response.jsonl"
 grep -q '"tool":"mge_recall"' "$tmp_root/mcp-response.jsonl"
+grep -q '"tool":"mge_compact"' "$tmp_root/mcp-response.jsonl"
 grep -q 'packaged MCP release memory' "$tmp_root/mcp-response.jsonl"
 
 if command -v python >/dev/null 2>&1; then

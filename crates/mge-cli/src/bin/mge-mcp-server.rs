@@ -21,8 +21,8 @@ use std::str::FromStr;
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use mge_core::{
-    CellId, ContextPacket, MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue,
-    RecallMode, RecallRequest, RememberRequest, SensitivityLevel, SessionChunkOptions,
+    CellId, CompactionOptions, ContextPacket, MemoryEngine, MemoryKind, MemorySource, MemoryStatus,
+    MemoryValue, RecallMode, RecallRequest, RememberRequest, SensitivityLevel, SessionChunkOptions,
     SessionRememberRequest, SessionTurn, StoreStats, TrustLevel,
 };
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,7 @@ use serde_json::{json, Map, Value};
 
 const JSONRPC_VERSION: &str = "2.0";
 const PROTOCOL_VERSION: &str = "mge-jsonrpc-1";
-const INTEGRATION_SCHEMA_VERSION: u32 = 5;
+const INTEGRATION_SCHEMA_VERSION: u32 = 6;
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 
 #[derive(Debug, Parser)]
@@ -229,6 +229,19 @@ struct ValidateParams {
 }
 
 #[derive(Debug, Deserialize)]
+struct CompactParams {
+    store_path: PathBuf,
+    #[serde(default)]
+    apply: bool,
+    #[serde(default)]
+    archive_path: Option<PathBuf>,
+    #[serde(default)]
+    temporary_older_than_days: Option<u64>,
+    #[serde(default)]
+    passphrase_env: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ExportMarkdownParams {
     store_path: PathBuf,
     #[serde(default)]
@@ -338,6 +351,7 @@ fn handle_request(
         | "mge_stats"
         | "mge_validate"
         | "mge_rebuild_indexes"
+        | "mge_compact"
         | "mge_export_markdown" => call_named_tool(tool, request.params, config),
         other => Err(ToolError {
             code: -32601,
@@ -427,6 +441,7 @@ fn call_named_tool(
             name,
             mge_rebuild_indexes(params_with_defaults(params, config)),
         ),
+        "mge_compact" => with_tool(name, mge_compact(params_with_defaults(params, config))),
         "mge_export_markdown" => with_tool(
             name,
             mge_export_markdown(params_with_defaults(params, config)),
@@ -704,6 +719,21 @@ fn mge_rebuild_indexes(params: Value) -> Result<Value> {
     ))
 }
 
+fn mge_compact(params: Value) -> Result<Value> {
+    let params: CompactParams = parse_params(params)?;
+    let mut engine = open_engine(&params.store_path, params.passphrase_env.as_deref())?;
+    let report = engine.compact(CompactionOptions {
+        apply: params.apply,
+        archive_path: params.archive_path,
+        temporary_older_than_days: params.temporary_older_than_days,
+    })?;
+    Ok(tool_result(
+        "mge_compact",
+        true,
+        json!({ "compaction": report, "json_runtime_storage": false }),
+    ))
+}
+
 fn mge_export_markdown(params: Value) -> Result<Value> {
     let params: ExportMarkdownParams = parse_params(params)?;
     let engine = open_engine(&params.store_path, params.passphrase_env.as_deref())?;
@@ -968,6 +998,19 @@ fn tool_schemas(config: &ServerConfig) -> Value {
             "output": ["ok", "tool", "protocol_version", "integration_schema_version", "validation"]
         },
         "mge_rebuild_indexes": store_tool_schema("rebuild", config),
+        "mge_compact": {
+            "input": {
+                "required": required_fields(config, &[]),
+                "properties": {
+                    "store_path": "string path to existing Memory Genome store",
+                    "apply": "boolean; false returns a dry-run report, true permanently prunes eligible memory",
+                    "archive_path": "optional path for a complete binary store snapshot before pruning",
+                    "temporary_older_than_days": "optional age threshold for temporary memory",
+                    "passphrase_env": "optional environment variable name used to unlock encrypted stores"
+                }
+            },
+            "output": ["ok", "tool", "protocol_version", "integration_schema_version", "compaction", "json_runtime_storage"]
+        },
         "mge_export_markdown": {
             "input": {
                 "required": required_fields(config, &[]),
@@ -1119,6 +1162,21 @@ fn mcp_tools(config: &ServerConfig) -> Vec<Value> {
             "mge_rebuild_indexes",
             "Rebuild catalog, candidate indexes, and lexical statistics from sealed pages.",
             config,
+        ),
+        mcp_tool(
+            "mge_compact",
+            "Analyze or permanently prune confirmed obsolete memory and completed hot archives.",
+            json!({
+                "type": "object",
+                "required": required_fields(config, &[]),
+                "properties": {
+                    "store_path": { "type": "string" },
+                    "apply": { "type": "boolean", "default": false },
+                    "archive_path": { "type": "string" },
+                    "temporary_older_than_days": { "type": "integer", "minimum": 0 },
+                    "passphrase_env": { "type": "string" }
+                }
+            }),
         ),
         mcp_tool(
             "mge_export_markdown",

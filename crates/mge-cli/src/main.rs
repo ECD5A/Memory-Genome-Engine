@@ -25,9 +25,9 @@ use app_service::{doctor_report, AppService, MarkdownImportInput};
 use clap::{Parser, Subcommand};
 use host_integration::{configure_host, AgentHost, HostSetupOptions};
 use mge_core::{
-    CellId, CompressionKind, DurabilityPolicy, IndexKind, InitOptions, MemoryEngine, MemoryKind,
-    MemorySource, MemoryStatus, MemoryValue, MgeError, PageClustererKind, PageCodecKind,
-    RecallMode, RecallRequest, RememberRequest, SecurityMode, SensitivityLevel,
+    CellId, CompactionOptions, CompressionKind, DurabilityPolicy, IndexKind, InitOptions,
+    MemoryEngine, MemoryKind, MemorySource, MemoryStatus, MemoryValue, MgeError, PageClustererKind,
+    PageCodecKind, RecallMode, RecallRequest, RememberRequest, SecurityMode, SensitivityLevel,
     SessionChunkOptions, SessionRememberRequest, SessionTurn, TrustLevel, DEFAULT_STORE_DIR,
 };
 
@@ -293,6 +293,25 @@ enum Commands {
         passphrase_env: Option<String>,
     },
     RebuildIndexes {
+        #[arg(long)]
+        json: bool,
+
+        #[arg(long)]
+        passphrase_env: Option<String>,
+    },
+    Compact {
+        /// Apply physical pruning. Without this flag, only a dry-run report is produced.
+        #[arg(long)]
+        apply: bool,
+
+        /// Optional full binary store snapshot created before pruning.
+        #[arg(long)]
+        archive: Option<PathBuf>,
+
+        /// Also prune temporary memories at least this many days old.
+        #[arg(long)]
+        temporary_older_than_days: Option<u64>,
+
         #[arg(long)]
         json: bool,
 
@@ -841,6 +860,28 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 print!("{}", report.to_human_text());
+            }
+        }
+        Commands::Compact {
+            apply,
+            archive,
+            temporary_older_than_days,
+            json,
+            passphrase_env,
+        } => {
+            let mut engine = open_engine(&cli.store, passphrase_env.as_deref())?;
+            let report = engine.compact(CompactionOptions {
+                apply,
+                archive_path: archive,
+                temporary_older_than_days,
+            })?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", report.to_human_text());
+                if !apply {
+                    println!("dry run only; pass --apply to prune eligible memory");
+                }
             }
         }
         Commands::Stats {

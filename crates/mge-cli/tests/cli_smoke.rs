@@ -368,6 +368,28 @@ fn cli_supersede_preserves_history_and_updates_default_recall() {
         .unwrap()
         .iter()
         .any(|item| item["status"] == "superseded"));
+    let dry_run = run_mge_json(&store, &["compact", "--json"]);
+    assert_eq!(dry_run["applied"], false);
+    assert_eq!(dry_run["cells_pruned"], 1);
+    let compacted = run_mge_json(&store, &["compact", "--apply", "--json"]);
+    assert_eq!(compacted["applied"], true);
+    assert_eq!(compacted["cells_pruned"], 1);
+    let pruned_history = run_mge_json(
+        &store,
+        &[
+            "recall",
+            "--mode",
+            "full-scope",
+            "--scope",
+            "project_alpha",
+            "--include-deprecated",
+            "--json",
+        ],
+    );
+    assert_eq!(
+        pruned_history["relevant_memory"].as_array().unwrap().len(),
+        1
+    );
     assert_eq!(
         run_mge_json(&store, &["validate", "--deep", "--json"])["ok"],
         true
@@ -1041,7 +1063,7 @@ fn mcp_server_json_rpc_adapter_supports_agent_workflow() {
 
     assert_eq!(responses.len(), 9);
     assert_eq!(responses[0]["result"]["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(responses[0]["result"]["integration_schema_version"], 5);
+    assert_eq!(responses[0]["result"]["integration_schema_version"], 6);
     assert_eq!(responses[0]["result"]["tool"], "mge_remember");
     assert_eq!(responses[0]["result"]["ok"], true);
     assert_eq!(responses[0]["result"]["cell_id"], 1);
@@ -1143,6 +1165,35 @@ fn mcp_supersede_updates_recall_without_erasing_history() {
                 "include_deprecated": true
             }
         }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "mge_seal",
+            "params": { "store_path": store.to_string_lossy() }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "mge_compact",
+            "params": { "store_path": store.to_string_lossy() }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "mge_compact",
+            "params": { "store_path": store.to_string_lossy(), "apply": true }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "mge_recall",
+            "params": {
+                "store_path": store.to_string_lossy(),
+                "mode": "full_scope",
+                "scope": "project_alpha",
+                "include_deprecated": true
+            }
+        }),
     ]);
 
     assert_eq!(responses[1]["result"]["tool"], "mge_supersede");
@@ -1161,6 +1212,17 @@ fn mcp_supersede_updates_recall_without_erasing_history() {
             .unwrap()
             .len(),
         2
+    );
+    assert_eq!(responses[5]["result"]["compaction"]["applied"], false);
+    assert_eq!(responses[5]["result"]["compaction"]["cells_pruned"], 1);
+    assert_eq!(responses[6]["result"]["compaction"]["applied"], true);
+    assert_eq!(responses[6]["result"]["compaction"]["cells_pruned"], 1);
+    assert_eq!(
+        responses[7]["result"]["context_packet"]["relevant_memory"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
 }
 
@@ -1189,7 +1251,7 @@ fn mcp_server_exposes_stable_schema_and_structured_errors() {
 
     let schema = &responses[0]["result"];
     assert_eq!(schema["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(schema["integration_schema_version"], 5);
+    assert_eq!(schema["integration_schema_version"], 6);
     for tool in [
         "mge_remember",
         "mge_supersede",
@@ -1200,6 +1262,7 @@ fn mcp_server_exposes_stable_schema_and_structured_errors() {
         "mge_stats",
         "mge_validate",
         "mge_rebuild_indexes",
+        "mge_compact",
         "mge_export_markdown",
     ] {
         assert!(schema["tools"][tool]["input"]["required"]
@@ -1464,7 +1527,7 @@ fn mcp_server_default_store_removes_repeated_path_arguments() {
         responses[4]["result"]["server_defaults"]["store_configured"],
         true
     );
-    assert_eq!(responses[4]["result"]["integration_schema_version"], 5);
+    assert_eq!(responses[4]["result"]["integration_schema_version"], 6);
 }
 
 #[test]
@@ -1882,7 +1945,7 @@ fn mcp_agent_session_fixture_runs_as_one_process() {
     assert_eq!(responses.len(), 10);
     assert_eq!(responses[0]["result"]["tool"], "mge_schema");
     assert_eq!(responses[0]["result"]["protocol_version"], "mge-jsonrpc-1");
-    assert_eq!(responses[0]["result"]["integration_schema_version"], 5);
+    assert_eq!(responses[0]["result"]["integration_schema_version"], 6);
     assert_eq!(responses[1]["result"]["tool"], "mge_remember");
     assert_eq!(responses[1]["result"]["cell_id"], 1);
     assert_eq!(
@@ -2298,6 +2361,12 @@ fn mcp_contract_golden_outputs_are_stable() {
                 "scope": "contract_scope"
             }
         }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "compact_success",
+            "method": "mge_compact",
+            "params": { "store_path": store_path.clone() }
+        }),
     ]));
 
     assert_golden(
@@ -2335,6 +2404,10 @@ fn mcp_contract_golden_outputs_are_stable() {
     assert_golden(
         "supersede_success",
         &normalize_mcp_response_for_golden(&responses[9]),
+    );
+    assert_golden(
+        "compact_success",
+        &normalize_mcp_response_for_golden(&responses[10]),
     );
 }
 
@@ -2870,6 +2943,7 @@ fn golden_fixture(name: &str) -> &'static str {
     match name {
         "remember_success" => include_str!("fixtures/mcp/remember_success.json"),
         "supersede_success" => include_str!("fixtures/mcp/supersede_success.json"),
+        "compact_success" => include_str!("fixtures/mcp/compact_success.json"),
         "recall_focused_success" => include_str!("fixtures/mcp/recall_focused_success.json"),
         "recall_broad_success" => include_str!("fixtures/mcp/recall_broad_success.json"),
         "recall_full_scope_success" => include_str!("fixtures/mcp/recall_full_scope_success.json"),
@@ -2993,6 +3067,19 @@ fn normalize_mcp_response_for_golden(response: &Value) -> Value {
                     "binary_fuse_index_written": result["rebuild"]["binary_fuse_index_written"],
                     "pages_unchanged": result["rebuild"]["pages_unchanged"]
                 }
+            }),
+        ),
+        "mge_compact" => json_with_result_fields(
+            base,
+            json!({
+                "compaction": {
+                    "applied": result["compaction"]["applied"],
+                    "cells_scanned": result["compaction"]["cells_scanned"],
+                    "cells_pruned": result["compaction"]["cells_pruned"],
+                    "superseded_pruned": result["compaction"]["superseded_pruned"],
+                    "blocked_superseded": result["compaction"]["blocked_superseded"]
+                },
+                "json_runtime_storage": result["json_runtime_storage"]
             }),
         ),
         other => panic!("unsupported golden normalization for tool {other}"),
