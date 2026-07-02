@@ -1997,6 +1997,206 @@ fn status_override_hides_hot_memory_immediately() {
 }
 
 #[test]
+fn explicit_supersession_versions_sealed_memory_without_rewriting_pages() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let mut original = RememberRequest::new(
+        MemoryKind::Decision,
+        MemoryValue::Text("Use protocol version one".to_string()),
+    );
+    original.subject = Some("agent protocol".to_string());
+    original.scope = "project_alpha".to_string();
+    original.trust = TrustLevel::UserConfirmed;
+    let original = engine.remember(original).unwrap();
+    engine.seal().unwrap();
+
+    let page_path = fs::read_dir(dir.path().join("pages"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.extension().and_then(|value| value.to_str()) == Some("mgp"))
+        .unwrap();
+    let sealed_before = fs::read(&page_path).unwrap();
+
+    let mut replacement = RememberRequest::new(
+        MemoryKind::Decision,
+        MemoryValue::Text("Use protocol version two".to_string()),
+    );
+    replacement.subject = Some("agent protocol".to_string());
+    replacement.scope = "project_alpha".to_string();
+    replacement.trust = TrustLevel::UserConfirmed;
+    let report = engine.supersede(original.id, replacement).unwrap();
+
+    assert_eq!(report.superseded_cell_id, original.id);
+    assert_eq!(report.previous_status, MemoryStatus::Active);
+    assert!(!report.pages_rewritten);
+    assert!(report.replacement_cell.links.contains(&original.id));
+    assert_eq!(
+        engine.superseded_by(original.id),
+        Some(report.replacement_cell.id)
+    );
+    assert_eq!(fs::read(&page_path).unwrap(), sealed_before);
+
+    let mut current = RecallRequest::new("");
+    current.mode = RecallMode::FullScope;
+    current.scope = Some("project_alpha".to_string());
+    let current = engine.recall(current).unwrap();
+    assert_eq!(current.relevant_memory.len(), 1);
+    assert_eq!(
+        current.relevant_memory[0].content,
+        "Use protocol version two"
+    );
+
+    let mut history = RecallRequest::new("");
+    history.mode = RecallMode::FullScope;
+    history.scope = Some("project_alpha".to_string());
+    history.include_deprecated = true;
+    let history = engine.recall(history).unwrap();
+    assert_eq!(history.relevant_memory.len(), 2);
+    assert!(history.relevant_memory.iter().any(|item| {
+        item.content == "Use protocol version one" && item.status == MemoryStatus::Superseded
+    }));
+    assert!(engine.validate_deep().unwrap().ok);
+
+    let replacement_id = report.replacement_cell.id;
+    drop(engine);
+    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    assert_eq!(reopened.superseded_by(original.id), Some(replacement_id));
+    assert!(reopened.validate_deep().unwrap().ok);
+}
+
+#[test]
+fn supersession_recovery_finalizes_or_rolls_back_pending_intent() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let original = remember_text_cell(
+        &mut engine,
+        "recovery",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "original recovery decision",
+        &[],
+    );
+    let mut replacement = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text("replacement recovery decision".to_string()),
+    );
+    replacement.scope = "recovery".to_string();
+    replacement.links.push(original.id);
+    let replacement = engine.remember(replacement).unwrap();
+    engine.checkpoint().unwrap();
+    drop(engine);
+
+    let manifest_path = dir.path().join("manifest.mgm");
+    let mut manifest: Manifest =
+        binary::read_messagepack_file(&manifest_path, FileKind::Manifest).unwrap();
+    manifest
+        .pending_supersessions
+        .insert(original.id, replacement.id);
+    binary::write_messagepack_file(&manifest_path, FileKind::Manifest, &manifest).unwrap();
+
+    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    assert_eq!(reopened.superseded_by(original.id), Some(replacement.id));
+    drop(reopened);
+
+    let mut manifest: Manifest =
+        binary::read_messagepack_file(&manifest_path, FileKind::Manifest).unwrap();
+    manifest.superseded_by.clear();
+    manifest.status_overrides.clear();
+    manifest
+        .pending_supersessions
+        .insert(replacement.id, 999_999);
+    binary::write_messagepack_file(&manifest_path, FileKind::Manifest, &manifest).unwrap();
+
+    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    assert_eq!(reopened.superseded_by(replacement.id), None);
+    assert!(reopened.validate_deep().unwrap().ok);
+}
+
+#[test]
+fn supersession_rejects_ambiguous_or_repeated_replacements() {
+    let dir = tempdir().unwrap();
+    let mut engine = MemoryEngine::init_at(dir.path()).unwrap();
+    let original = remember_text_cell(
+        &mut engine,
+        "scope_a",
+        MemoryStatus::Active,
+        TrustLevel::UserConfirmed,
+        "original policy",
+        &[],
+    );
+
+    let mut wrong_scope = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text("wrong scope policy".to_string()),
+    );
+    wrong_scope.scope = "scope_b".to_string();
+    assert!(engine.supersede(original.id, wrong_scope).is_err());
+
+    let mut replacement = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text("replacement policy".to_string()),
+    );
+    replacement.scope = "scope_a".to_string();
+    engine.supersede(original.id, replacement).unwrap();
+
+    let mut repeated = RememberRequest::new(
+        MemoryKind::ProjectFact,
+        MemoryValue::Text("another policy".to_string()),
+    );
+    repeated.scope = "scope_a".to_string();
+    assert!(engine.supersede(original.id, repeated).is_err());
+}
+
+#[test]
+fn manifests_without_supersession_fields_remain_compatible() {
+    #[derive(Serialize)]
+    struct LegacyManifest {
+        version: u32,
+        created_at: i64,
+        updated_at: i64,
+        next_cell_id: u64,
+        next_page_id: u64,
+        last_seal_time: Option<i64>,
+        page_codec: PageCodecKind,
+        compression: CompressionKind,
+        index_kind: IndexKind,
+        page_clusterer: PageClustererKind,
+        durability: DurabilityPolicy,
+        security_mode: SecurityMode,
+        security: mge_core::security::SecurityMetadata,
+        status_overrides: BTreeMap<u64, MemoryStatus>,
+    }
+
+    let dir = tempdir().unwrap();
+    let engine = MemoryEngine::init_at(dir.path()).unwrap();
+    drop(engine);
+    let manifest_path = dir.path().join("manifest.mgm");
+    let manifest: Manifest =
+        binary::read_messagepack_file(&manifest_path, FileKind::Manifest).unwrap();
+    let legacy = LegacyManifest {
+        version: manifest.version,
+        created_at: manifest.created_at,
+        updated_at: manifest.updated_at,
+        next_cell_id: manifest.next_cell_id,
+        next_page_id: manifest.next_page_id,
+        last_seal_time: manifest.last_seal_time,
+        page_codec: manifest.page_codec,
+        compression: manifest.compression,
+        index_kind: manifest.index_kind,
+        page_clusterer: manifest.page_clusterer,
+        durability: manifest.durability,
+        security_mode: manifest.security_mode,
+        security: manifest.security,
+        status_overrides: manifest.status_overrides,
+    };
+    binary::write_messagepack_file(&manifest_path, FileKind::Manifest, &legacy).unwrap();
+
+    let reopened = MemoryEngine::open_at(dir.path()).unwrap();
+    assert_eq!(reopened.superseded_by(1), None);
+    assert!(reopened.validate_deep().unwrap().ok);
+}
+
+#[test]
 fn recall_from_sealed_pages() {
     let dir = tempdir().unwrap();
     let mut engine = MemoryEngine::init_at(dir.path()).unwrap();

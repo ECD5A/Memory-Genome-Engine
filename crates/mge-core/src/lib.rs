@@ -62,6 +62,6 @@ pub use security::{
 pub use store::{
     DurabilityPolicy, HotCheckpointReport, InitOptions, InspectReport, MemoryEngine,
     RebuildIndexesReport, RememberRequest, SealReport, StatusOverrideReport, StorageConfig,
-    StorageConfigUpdate, StorageConfigUpdateReport, Store, StoreStats, ValidationReport,
-    DEFAULT_STORE_DIR, STORE_FORMAT_VERSION,
+    StorageConfigUpdate, StorageConfigUpdateReport, Store, StoreStats, SupersessionReport,
+    ValidationReport, DEFAULT_STORE_DIR, STORE_FORMAT_VERSION,
 };

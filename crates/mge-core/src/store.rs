@@ -194,6 +194,10 @@ pub struct Manifest {
     pub security: SecurityMetadata,
     #[serde(default)]
     pub status_overrides: BTreeMap<CellId, MemoryStatus>,
+    #[serde(default)]
+    pub superseded_by: BTreeMap<CellId, CellId>,
+    #[serde(default)]
+    pub pending_supersessions: BTreeMap<CellId, CellId>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -239,6 +243,14 @@ pub struct StatusOverrideReport {
     pub previous_override: Option<MemoryStatus>,
     pub effective_status: MemoryStatus,
     pub override_cleared: bool,
+    pub pages_rewritten: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SupersessionReport {
+    pub superseded_cell_id: CellId,
+    pub replacement_cell: MemoryCell,
+    pub previous_status: MemoryStatus,
     pub pages_rewritten: bool,
 }
 
@@ -730,6 +742,8 @@ impl MemoryEngine {
                 security_mode: options.security_mode,
                 security,
                 status_overrides: BTreeMap::new(),
+                superseded_by: BTreeMap::new(),
+                pending_supersessions: BTreeMap::new(),
             };
             binary::write_messagepack_file(&manifest_path, FileKind::Manifest, &manifest)?;
         }
@@ -856,7 +870,7 @@ impl MemoryEngine {
         }
         let hot = HotMemoryLayer::from_cells(hot_recovery.cells);
 
-        Ok(Self {
+        let mut engine = Self {
             _store_lock: store_lock,
             root,
             manifest,
@@ -872,7 +886,9 @@ impl MemoryEngine {
             candidate_index_cache: RefCell::new(None),
             lexical_stats_cache: RefCell::new(None),
             session_key,
-        })
+        };
+        engine.reconcile_pending_supersessions(truncate_bad_hot_tail)?;
+        Ok(engine)
     }
 
     fn locked_empty_engine(
@@ -1050,6 +1066,110 @@ impl MemoryEngine {
         self.flush_pending_after_remember()?;
 
         Ok(cell)
+    }
+
+    pub fn supersede(
+        &mut self,
+        superseded_cell_id: CellId,
+        mut replacement: RememberRequest,
+    ) -> Result<SupersessionReport> {
+        self.ensure_payload_unlocked()?;
+        let previous = self.find_cell(superseded_cell_id)?;
+        let previous_status = self.effective_status(&previous);
+
+        if self
+            .manifest
+            .superseded_by
+            .contains_key(&superseded_cell_id)
+            || previous_status == MemoryStatus::Superseded
+        {
+            return Err(MgeError::InvalidInput(format!(
+                "cell {superseded_cell_id} is already superseded"
+            )));
+        }
+        if matches!(
+            previous_status,
+            MemoryStatus::Deprecated | MemoryStatus::Rejected
+        ) {
+            return Err(MgeError::InvalidInput(format!(
+                "cell {superseded_cell_id} has status {previous_status} and cannot be superseded"
+            )));
+        }
+        if matches!(
+            replacement.status,
+            MemoryStatus::Deprecated | MemoryStatus::Rejected | MemoryStatus::Superseded
+        ) {
+            return Err(MgeError::InvalidInput(
+                "replacement memory must be active, temporary, unverified, or verified".to_string(),
+            ));
+        }
+        if replacement.scope != previous.scope {
+            return Err(MgeError::InvalidInput(format!(
+                "replacement scope '{}' does not match superseded cell scope '{}'",
+                replacement.scope, previous.scope
+            )));
+        }
+        if let (Some(previous_subject), Some(replacement_subject)) =
+            (&previous.subject, &replacement.subject)
+        {
+            if previous_subject != replacement_subject {
+                return Err(MgeError::InvalidInput(format!(
+                    "replacement subject '{replacement_subject}' does not match superseded cell subject '{previous_subject}'"
+                )));
+            }
+        } else if replacement.subject.is_none() {
+            replacement.subject = previous.subject.clone();
+        }
+
+        if !replacement.links.contains(&superseded_cell_id) {
+            replacement.links.push(superseded_cell_id);
+        }
+        if !replacement
+            .markers
+            .iter()
+            .any(|marker| marker == "relation:supersedes")
+        {
+            replacement.markers.push("relation:supersedes".to_string());
+        }
+
+        let replacement_cell_id = self.manifest.next_cell_id;
+        self.manifest
+            .pending_supersessions
+            .insert(superseded_cell_id, replacement_cell_id);
+        self.manifest.updated_at = current_timestamp();
+        self.save_manifest()?;
+
+        let replacement_cell = self.remember(replacement)?;
+        if replacement_cell.id != replacement_cell_id {
+            return Err(MgeError::InvalidInput(format!(
+                "supersession reserved cell {replacement_cell_id} but remember created {}",
+                replacement_cell.id
+            )));
+        }
+        self.flush_pending_hot(true)?;
+
+        self.manifest
+            .status_overrides
+            .insert(superseded_cell_id, MemoryStatus::Superseded);
+        self.manifest
+            .superseded_by
+            .insert(superseded_cell_id, replacement_cell.id);
+        self.manifest
+            .pending_supersessions
+            .remove(&superseded_cell_id);
+        self.manifest.updated_at = current_timestamp();
+        self.save_manifest()?;
+
+        Ok(SupersessionReport {
+            superseded_cell_id,
+            replacement_cell,
+            previous_status,
+            pages_rewritten: false,
+        })
+    }
+
+    pub fn superseded_by(&self, cell_id: CellId) -> Option<CellId> {
+        self.manifest.superseded_by.get(&cell_id).copied()
     }
 
     pub fn remember_session(
@@ -2292,22 +2412,63 @@ impl MemoryEngine {
         Ok(())
     }
 
-    fn find_cell_status(&self, cell_id: CellId) -> Result<MemoryStatus> {
+    fn find_cell(&self, cell_id: CellId) -> Result<MemoryCell> {
         if let Some(cell) = self.hot.cell(cell_id) {
-            return Ok(cell.status);
+            return Ok(cell.clone());
         }
 
         let catalog = self.load_page_catalog()?;
         for entry in &catalog.pages {
             let page = self.read_page(entry)?;
             if let Some(cell) = page.cells.iter().find(|cell| cell.id == cell_id) {
-                return Ok(cell.status);
+                return Ok(cell.clone());
             }
         }
 
         Err(MgeError::InvalidInput(format!(
             "cell {cell_id} does not exist in hot or sealed memory"
         )))
+    }
+
+    fn find_cell_status(&self, cell_id: CellId) -> Result<MemoryStatus> {
+        Ok(self.find_cell(cell_id)?.status)
+    }
+
+    fn reconcile_pending_supersessions(&mut self, persist: bool) -> Result<()> {
+        if self.manifest.pending_supersessions.is_empty() {
+            return Ok(());
+        }
+
+        let pending = self.manifest.pending_supersessions.clone();
+        for (superseded_cell_id, replacement_cell_id) in pending {
+            self.find_cell(superseded_cell_id)?;
+            match self.find_cell(replacement_cell_id) {
+                Ok(replacement) => {
+                    if !replacement.links.contains(&superseded_cell_id) {
+                        return Err(MgeError::InvalidInput(format!(
+                            "pending supersession {superseded_cell_id}->{replacement_cell_id} has no replacement link"
+                        )));
+                    }
+                    self.manifest
+                        .status_overrides
+                        .insert(superseded_cell_id, MemoryStatus::Superseded);
+                    self.manifest
+                        .superseded_by
+                        .insert(superseded_cell_id, replacement_cell_id);
+                }
+                Err(MgeError::InvalidInput(_)) => {}
+                Err(error) => return Err(error),
+            }
+            self.manifest
+                .pending_supersessions
+                .remove(&superseded_cell_id);
+        }
+
+        self.manifest.updated_at = current_timestamp();
+        if persist {
+            self.save_manifest()?;
+        }
+        Ok(())
     }
 
     fn effective_status(&self, cell: &MemoryCell) -> MemoryStatus {
@@ -2525,6 +2686,41 @@ impl MemoryEngine {
                     "manifest status override references unknown cell {cell_id}"
                 ));
             }
+        }
+        for (superseded_cell_id, replacement_cell_id) in &self.manifest.superseded_by {
+            if superseded_cell_id >= replacement_cell_id {
+                report.error(format!(
+                    "manifest supersession {superseded_cell_id}->{replacement_cell_id} is not forward-versioned"
+                ));
+            }
+            if !cell_ids.contains(superseded_cell_id) {
+                report.error(format!(
+                    "manifest supersession references unknown old cell {superseded_cell_id}"
+                ));
+            }
+            if !cell_ids.contains(replacement_cell_id) {
+                report.error(format!(
+                    "manifest supersession references unknown replacement cell {replacement_cell_id}"
+                ));
+            }
+            if self.manifest.status_overrides.get(superseded_cell_id)
+                != Some(&MemoryStatus::Superseded)
+            {
+                report.error(format!(
+                    "manifest supersession old cell {superseded_cell_id} is not effectively superseded"
+                ));
+            }
+            let replacement_links_old = cell_links.iter().any(|(_, cell_id, links)| {
+                cell_id == replacement_cell_id && links.contains(superseded_cell_id)
+            });
+            if !replacement_links_old {
+                report.error(format!(
+                    "replacement cell {replacement_cell_id} does not link to superseded cell {superseded_cell_id}"
+                ));
+            }
+        }
+        if !self.manifest.pending_supersessions.is_empty() {
+            report.error("manifest contains unreconciled pending supersessions");
         }
 
         if catalog.pages.is_empty() && hot_cells.is_empty() {
