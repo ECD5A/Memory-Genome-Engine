@@ -731,7 +731,7 @@ fn convert_longmemeval(
                     subject: Some(format!("{question_type} session {session_id}")),
                     text: session_lines.join("\n"),
                     markers: vec![
-                        format!("benchmark:longmemeval"),
+                        "benchmark:longmemeval".to_string(),
                         format!("question_type:{}", safe_marker_value(&question_type)),
                         "memory_granularity:session".to_string(),
                         format!("session:{}", safe_marker_value(&session_id)),
@@ -799,7 +799,7 @@ fn convert_longmemeval(
                             )),
                             text: fact,
                             markers: vec![
-                                format!("benchmark:longmemeval"),
+                                "benchmark:longmemeval".to_string(),
                                 format!("question_type:{}", safe_marker_value(&question_type)),
                                 "memory_granularity:key_fact".to_string(),
                                 format!("role:{}", safe_marker_value(&converted.role)),
@@ -828,7 +828,7 @@ fn convert_longmemeval(
                         subject: Some(format!("{question_type} {} {session_id}", converted.role)),
                         text: converted.content,
                         markers: vec![
-                            format!("benchmark:longmemeval"),
+                            "benchmark:longmemeval".to_string(),
                             format!("question_type:{}", safe_marker_value(&question_type)),
                             "memory_granularity:turn".to_string(),
                             format!("role:{}", safe_marker_value(&converted.role)),
