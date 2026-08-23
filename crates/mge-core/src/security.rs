@@ -19,8 +19,8 @@ use std::str::FromStr;
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
-use rand::rngs::OsRng;
-use rand::RngCore;
+use rand::rngs::SysRng;
+use rand::TryRng;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
@@ -39,6 +39,12 @@ const KDF_TIME_COST: u32 = 2;
 const KDF_PARALLELISM: u32 = 1;
 const KEY_CHECK_PLAINTEXT: &[u8] = b"MGE key check v1";
 const KEY_CHECK_AAD: &[u8] = b"mge:key_check:v1";
+
+fn fill_secure_random(bytes: &mut [u8]) -> Result<()> {
+    SysRng
+        .try_fill_bytes(bytes)
+        .map_err(|error| MgeError::Crypto(format!("operating system RNG failed: {error}")))
+}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -168,7 +174,7 @@ pub fn create_security_metadata(passphrase: &str) -> Result<(SecurityMetadata, S
     }
 
     let mut salt = vec![0u8; SALT_LEN];
-    OsRng.fill_bytes(&mut salt);
+    fill_secure_random(&mut salt)?;
     let kdf = KdfMetadata {
         algorithm: KDF_ALGORITHM.to_string(),
         version: KDF_VERSION,
@@ -237,7 +243,7 @@ pub fn unlock_security_metadata(
 
 pub fn encrypt_payload(key: &SessionKey, aad: &[u8], plaintext: &[u8]) -> Result<EncryptedPayload> {
     let mut nonce = vec![0u8; NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce);
+    fill_secure_random(&mut nonce)?;
     let cipher = XChaCha20Poly1305::new_from_slice(key.expose())
         .map_err(|_| MgeError::Crypto("failed to initialize AEAD".to_string()))?;
     let ciphertext = cipher
