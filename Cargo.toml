@@ -29,5 +29,5 @@ tempfile = "3.10"
 thiserror = "2.0"
 zeroize = "1.8"
 zstd = "0.13"
-xorf = { version = "0.12", features = ["serde"] }
+xorf = { version = "0.13", features = ["serde"] }
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
